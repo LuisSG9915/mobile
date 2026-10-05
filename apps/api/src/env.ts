@@ -1,0 +1,32 @@
+export type Bindings = {
+  DB: D1Database;
+  BUCKET: R2Bucket;
+  UPLOAD_LIMITER?: RateLimit;
+
+  R2_ACCOUNT_ID: string;
+  R2_ACCESS_KEY_ID: string;
+  R2_SECRET_ACCESS_KEY: string;
+  R2_BUCKET_NAME: string;
+  PRESIGN_TTL_SECONDS: string;
+  MAX_ORIGINAL_BYTES: string;
+
+  BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_URL: string;
+};
+
+export type SessionUser = {
+  id: string;
+  email: string;
+  name: string;
+  image?: string | null;
+};
+
+export type Variables = {
+  user: SessionUser;
+  sessionId: string;
+};
+
+export type AppEnv = {
+  Bindings: Bindings;
+  Variables: Variables;
+};

@@ -1,0 +1,44 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "photos-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "photos-db",
+      "database_id": "475daf1d-32bf-4b07-860f-3e0f544f00a9",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "photos-media",
+      "preview_bucket_name": "photos-media-dev"
+    }
+  ],
+  "vars": {
+    "R2_ACCOUNT_ID": "461d52ab67ae2435c8dde9a0887f27cb",
+    "R2_BUCKET_NAME": "photos-media",
+    "PRESIGN_TTL_SECONDS": "900",
+    "MAX_ORIGINAL_BYTES": "5368709120"
+  },
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "ratelimits": [
+    {
+      "name": "UPLOAD_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ]
+}

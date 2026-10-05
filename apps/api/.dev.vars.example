@@ -1,0 +1,13 @@
+# Copiar a .dev.vars y rellenar. NUNCA commitear .dev.vars.
+
+# ID de cuenta Cloudflare (dashboard -> overview)
+R2_ACCOUNT_ID=
+
+# Token de API de R2 con "Object Read & Write" sobre photos-media y photos-media-dev
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# Secreto de sesiones: `openssl rand -base64 32`
+BETTER_AUTH_SECRET=
+# URL base pública de la API (en dev: http://localhost:8787)
+BETTER_AUTH_URL=http://localhost:8787

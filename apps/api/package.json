@@ -1,0 +1,38 @@
+{
+  "name": "@photos/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types --include-env=false",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply photos-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply photos-db --remote",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
+    "@aws-sdk/s3-request-presigner": "^3.1146.0",
+    "@better-auth/expo": "^1.7.7",
+    "@hono/zod-openapi": "^1.6.3",
+    "@photos/shared": "workspace:*",
+    "@scalar/hono-api-reference": "^0.12.10",
+    "better-auth": "^1.7.7",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.13",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.3.6",
+    "@cloudflare/workers-types": "^5.20261005.1",
+    "@types/node": "^26.6.4",
+    "drizzle-kit": "^0.31.11",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.147.0"
+  }
+}

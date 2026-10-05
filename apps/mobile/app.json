@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Photos",
+    "slug": "photos",
+    "scheme": "photos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.photos.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Necesitamos acceso a tu biblioteca para respaldar tus fotos y videos en tu propio almacenamiento.",
+        "UIBackgroundModes": ["fetch", "processing"]
+      }
+    },
+    "android": {
+      "package": "com.photos.app",
+      "permissions": ["READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO", "ACCESS_MEDIA_LOCATION"],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image",
+      "expo-video",
+      "expo-sqlite",
+      "expo-background-task",
+      "expo-secure-store",
+      [
+        "expo-media-library",
+        {
+          "isAccessMediaLocationEnabled": true,
+          "photosPermission": "Permite el acceso para respaldar tus fotos y videos.",
+          "savePhotosPermission": "Permite guardar fotos en tu biblioteca."
+        }
+      ]
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+node_modules/
+dist/
+.turbo/
+.expo/
+.expo-shared/
+coverage/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+!.dev.vars.example
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# Android/iOS builds
+android/
+ios/
+*.apk
+*.aab
+*.ipa
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.log
