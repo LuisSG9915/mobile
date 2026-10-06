@@ -1,11 +1,13 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  checkHashesRequestSchema,
+  checkHashesResponseSchema,
   errorSchema,
   uploadCompleteResponseSchema,
   uploadInitResponseSchema,
   uploadInitSchema,
 } from "@photos/shared";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
@@ -64,7 +66,44 @@ const completeRoute = createRoute({
   },
 });
 
+const checkHashesRoute = createRoute({
+  method: "post",
+  path: "/uploads/check-hashes",
+  tags: ["uploads"],
+  summary: "Comprobar hashes ya respaldados",
+  description:
+    "Recibe un lote de SHA-256 y devuelve los que ya existen como media 'ready' del usuario (no eliminados). Permite a la cola marcar SYNCED sin generar miniatura ni emitir PUTs prefirmados.",
+  request: { body: jsonBody(checkHashesRequestSchema) },
+  responses: {
+    200: {
+      content: { "application/json": { schema: checkHashesResponseSchema } },
+      description: "Hashes existentes",
+    },
+    400: err("Petición inválida"),
+    401: err("Sin sesión"),
+  },
+});
+
 export const uploadsApp = new OpenAPIHono<AppEnv>()
+  .openapi(checkHashesRoute, async (c) => {
+    const user = c.get("user");
+    const { sha256 } = c.req.valid("json");
+
+    const db = getDb(c.env.DB);
+    const rows = await db
+      .select({ id: media.id, sha256: media.sha256 })
+      .from(media)
+      .where(
+        and(
+          eq(media.userId, user.id),
+          eq(media.status, "ready"),
+          isNull(media.deletedAt),
+          inArray(media.sha256, sha256),
+        ),
+      );
+
+    return c.json({ existing: rows }, 200);
+  })
   .openapi(initRoute, async (c) => {
     const user = c.get("user");
     const body = c.req.valid("json");

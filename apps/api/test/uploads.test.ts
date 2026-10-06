@@ -86,6 +86,86 @@ describe("uploads/init", () => {
   });
 });
 
+/** init + objetos en R2 + complete: deja el media en estado 'ready'. */
+async function makeReady(cookie: string, userId: string, body: Record<string, unknown>) {
+  const r = await init(cookie, body);
+  const created = await j(r);
+  const sha256 = body.sha256 as string;
+  await env.BUCKET.put(
+    `users/${userId}/thumbs/${sha256}.webp`,
+    "x".repeat(body.thumbSize as number),
+    { httpMetadata: { contentType: "image/webp" } },
+  );
+  await env.BUCKET.put(
+    `users/${userId}/originals/${sha256}.${body.ext}`,
+    "x".repeat(body.fileSize as number),
+    { httpMetadata: { contentType: body.mimeType as string } },
+  );
+  const c = await SELF.fetch(
+    `http://localhost/v1/uploads/${created.id}/complete`,
+    authed(cookie, { method: "POST" }),
+  );
+  expect(c.status).toBe(200);
+  return created.id as string;
+}
+
+describe("uploads/check-hashes", () => {
+  const check = (cookie: string, hashes: string[]) =>
+    SELF.fetch(
+      "http://localhost/v1/uploads/check-hashes",
+      authed(cookie, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sha256: hashes }),
+      }),
+    );
+
+  it("devuelve solo los hashes ya respaldados (ready)", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({ sha256: sha("ee11") });
+    const id = await makeReady(cookie, userId, body);
+
+    const res = await check(cookie, [body.sha256 as string, sha("dead"), sha("beef")]);
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.existing).toEqual([{ sha256: body.sha256, id }]);
+  });
+
+  it("ignora medias 'pending' (subida no confirmada)", async () => {
+    const { cookie } = await createUser();
+    const body = initBody({ sha256: sha("ff22") });
+    await init(cookie, body); // queda 'pending': nunca se llama a /complete
+
+    const res = await check(cookie, [body.sha256 as string]);
+    const json = await j(res);
+    expect(json.existing).toEqual([]);
+  });
+
+  it("no filtra hashes de otro usuario", async () => {
+    const a = await createUser();
+    const b = await createUser();
+    const body = initBody({ sha256: sha("aa33") });
+    await makeReady(a.cookie, a.userId, body);
+
+    const res = await check(b.cookie, [body.sha256 as string]);
+    const json = await j(res);
+    expect(json.existing).toEqual([]);
+  });
+
+  it("sin sesión → 401; hash inválido → 400", async () => {
+    const anon = await SELF.fetch("http://localhost/v1/uploads/check-hashes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sha256: [sha("x")] }),
+    });
+    expect(anon.status).toBe(401);
+
+    const { cookie } = await createUser();
+    const bad = await check(cookie, ["no-es-hex"]);
+    expect(bad.status).toBe(400);
+  });
+});
+
 async function userIdOf(cookie: string): Promise<string> {
   const res = await SELF.fetch("http://localhost/api/auth/get-session", {
     headers: { cookie },
