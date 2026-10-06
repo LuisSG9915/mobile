@@ -61,3 +61,5 @@ export const SYNC_STATUSES = [
 export const TIMELINE_MAX_LIMIT = 200;
 /** Días que un elemento permanece en la papelera */
 export const TRASH_RETENTION_DAYS = 30;
+/** Cuota de almacenamiento por usuario (10 GB) */
+export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;

@@ -119,6 +119,7 @@ export const statsSchema = z.object({
   count: z.number(),
   totalBytes: z.number(),
   lastUploadAt: z.number().nullable(),
+  quotaBytes: z.number(),
 });
 
 export const okSchema = z.object({ ok: z.literal(true) });
