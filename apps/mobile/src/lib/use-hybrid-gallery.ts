@@ -1,6 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
 import { getQueueItems } from "../queue/db";
 import { useLibraryEvents, useQueueEvents } from "./events";
 import {
@@ -11,6 +9,7 @@ import {
   mergeGallery,
 } from "./gallery";
 import { listLocalAssets } from "./local-assets";
+import { useTimeline } from "./timeline";
 
 /**
  * Hook unificado de la galería híbrida: combina los assets locales del
@@ -43,12 +42,7 @@ export function useHybridGallery() {
     void refreshLocal();
   }, [refreshLocal, libTick]);
 
-  const query = useInfiniteQuery({
-    queryKey: ["timeline"],
-    queryFn: ({ pageParam }) => api.timeline(pageParam, 60),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.nextCursor ?? undefined,
-  });
+  const query = useTimeline();
 
   const photos = useMemo<HybridPhoto[]>(() => {
     void tick; // la cola local se lee en vivo dentro del memo

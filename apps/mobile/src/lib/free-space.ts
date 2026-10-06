@@ -19,6 +19,34 @@ export function getSyncedLocal(): { assetIds: string[]; totalBytes: number } {
 }
 
 /**
+ * ¿Queda una copia local del elemento remoto? Cierto si la cola conserva la
+ * fila done/duplicate que enlaza el asset del dispositivo con su remote_id.
+ * (Si el asset ya se borró del sistema, deleteAssetsAsync devolverá false.)
+ */
+export function hasLocalCopy(remoteId: string): boolean {
+  return getQueueItems().some(
+    (i) => i.remote_id === remoteId && (i.state === "done" || i.state === "duplicate"),
+  );
+}
+
+/**
+ * Elimina solo la copia local de un elemento ya respaldado; la remota se
+ * conserva y la galería lo refleja como REMOTE_ONLY. Devuelve false si no
+ * había copia local o el usuario canceló el diálogo del sistema.
+ */
+export async function deleteLocalCopy(remoteId: string): Promise<boolean> {
+  const item = getQueueItems().find(
+    (i) => i.remote_id === remoteId && (i.state === "done" || i.state === "duplicate"),
+  );
+  if (!item) return false;
+  const ok = await MediaLibrary.deleteAssetsAsync([item.asset_id]);
+  if (!ok) return false;
+  useLibraryEvents.getState().emit();
+  useQueueEvents.getState().emit();
+  return true;
+}
+
+/**
  * Borra las copias locales de los elementos ya respaldados. Devuelve cuántos
  * assets eliminó MediaLibrary (0 si el usuario cancela el diálogo del
  * sistema o no hay nada que liberar).

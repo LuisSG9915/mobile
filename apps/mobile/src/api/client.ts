@@ -3,6 +3,7 @@ import type {
   MediaDetail,
   Stats,
   TimelineResponse,
+  TrashResponse,
   UploadInitInput,
   UploadInitResponse,
 } from "@photos/shared";
@@ -81,7 +82,7 @@ export const api = {
   restoreMedia: (id: string): Promise<{ ok: true }> =>
     apiFetch(`/v1/media/${id}/restore`, { method: "POST" }).then((r) => r.json()),
 
-  trash: (): Promise<TimelineResponse> => apiFetch("/v1/trash").then((r) => r.json()),
+  trash: (): Promise<TrashResponse> => apiFetch("/v1/trash").then((r) => r.json()),
 
   stats: (): Promise<Stats> => apiFetch("/v1/stats").then((r) => r.json()),
 };
