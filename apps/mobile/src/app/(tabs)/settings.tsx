@@ -1,3 +1,4 @@
+import { STORAGE_QUOTA_BYTES } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { ChevronRight, Trash2 } from "lucide-react-native";
@@ -59,7 +60,7 @@ export default function SettingsScreen() {
             <View
               className="h-full bg-accent rounded-full"
               style={{
-                width: `${Math.min(100, ((stats.data?.totalBytes ?? 0) / (10 * 1024 * 1024 * 1024)) * 100)}%`,
+                width: `${Math.min(100, ((stats.data?.totalBytes ?? 0) / (stats.data?.quotaBytes ?? STORAGE_QUOTA_BYTES)) * 100)}%`,
               }}
             />
           </View>
