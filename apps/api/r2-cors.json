@@ -2,7 +2,11 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["http://localhost:8081", "https://photos-web.luis-sg9915.workers.dev"],
+        "origins": [
+          "http://localhost:8081",
+          "http://localhost:8090",
+          "https://photos-web.luis-sg9915.workers.dev"
+        ],
         "methods": ["PUT", "GET", "HEAD"],
         "headers": ["*"]
       },
