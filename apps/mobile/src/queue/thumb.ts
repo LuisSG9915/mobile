@@ -48,6 +48,10 @@ export async function makeThumbAndHash(
       return "";
     }
   })();
+  // El API exige thumbhash min 1: si el cómputo falló (p. ej. frame de video
+  // sin decodificar) se usa un placeholder gris neutro en vez de rechazar.
+  const thumbhash =
+    hashB64 || fromByteArray(rgbaToThumbHash(1, 1, new Uint8Array([128, 128, 128, 255])));
 
   // Miniatura: WebP ≤ 50KB con degradación progresiva
   const attempts: [number, number][] = [
@@ -73,5 +77,5 @@ export async function makeThumbAndHash(
   const dest = new File(thumbsDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.webp`);
   new File(last.uri).move(dest);
 
-  return { uri: dest.uri, bytes: last.bytes, thumbhash: hashB64 };
+  return { uri: dest.uri, bytes: last.bytes, thumbhash };
 }

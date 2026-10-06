@@ -27,3 +27,7 @@ ios/
 .DS_Store
 Thumbs.db
 *.log
+
+# Resultados de pruebas
+test-results/
+apps/mobile/e2e/.artifacts/

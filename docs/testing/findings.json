@@ -1,0 +1,227 @@
+[
+  {
+    "id": "H-001",
+    "title": "pnpm test falla: mobile no tiene tests",
+    "area": "infra",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "vitest run en apps/mobile sale con 'No test files found' (exit 1).",
+    "proposal": "Batería de tests unitarios para la capa web (Fase 2 del plan de pruebas).",
+    "effort": "M",
+    "relatedTests": []
+  },
+  {
+    "id": "H-002",
+    "title": "/complete devuelve 409 en wrangler dev",
+    "area": "infra",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "El binding BUCKET de wrangler dev era local (Miniflare) mientras las URLs prefirmadas escriben en el R2 real; BUCKET.head() devolvía null → object_missing.",
+    "proposal": "remote: true en el binding R2 (usa preview_bucket_name=photos-media-dev) y remoteBindings: false en vitest para mantener los tests locales.",
+    "effort": "S",
+    "relatedTests": ["1 de 1 respaldados", "con objetos y tamaños correctos → 200 ready"]
+  },
+  {
+    "id": "H-003",
+    "title": "Shim .bin/wrangler roto en apps/api (linker hoisted en Windows)",
+    "area": "infra",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "pnpm --filter @photos/api dev falla: node_modules/.bin/wrangler apunta a apps/api/node_modules/wrangler/bin/wrangler.js que no existe; el paquete real está en node_modules/wrangler de la raíz. Corrección aplicada: los scripts de apps/api y apps/mobile invocan `node ../../node_modules/wrangler/bin/wrangler.js` directamente (mismo patrón que playwright.config.ts). Verificado: `pnpm dev --help` y `pnpm run deploy` ejecutan wrangler 4.147.0.",
+    "proposal": "Reinstalar con pnpm install tras actualizar pnpm, o usar un script dev que invoque node ../../node_modules/wrangler/bin/wrangler.js.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-004",
+    "title": "Posible redirección a /welcome al recargar con sesión válida",
+    "area": "mobile-web",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "Tras una recarga completa en el navegador la app apareció en /welcome pese a tener token en localStorage (observado durante la verificación manual, sin confirmar). El E2E auth.spec.ts 'recarga en / con sesión no queda en /welcome' pasa: con token en localStorage, / redirige a las tabs.",
+    "proposal": "Confirmar con el spec auth.spec.ts (paso de recarga); si se reproduce, revisar el orden de resolución de useSession en index.tsx.",
+    "effort": "S",
+    "relatedTests": ["recarga no va a /welcome", "recarga en / con sesión no queda en /welcome"]
+  },
+  {
+    "id": "H-005",
+    "title": "La cola web no sobrevive a una recarga",
+    "area": "mobile-web",
+    "severity": "baja",
+    "status": "resuelto",
+    "evidence": "Resuelto con IndexedDB photos.queue (items + bytes como ArrayBuffer por usuario): e2e/queue-persistence.spec.ts verifica recarga con init retenido, recarga con complete retenido (re-subida o duplicate reconcilian), cerrar pestaña y continuar en otra del mismo contexto, exclusión multi-pestaña con Web Locks, logout que borra pendientes y cancelar logout que conserva la cola.",
+    "proposal": "Migrar la cola web a IndexedDB (P2+P3 implementado).",
+    "effort": "M",
+    "relatedTests": [
+      "reanuda la subida tras recargar",
+      "cerrar la pestaña y abrir otra",
+      "logout confirmado borra los pendientes",
+      "cancelar el diálogo de logout conserva la cola"
+    ]
+  },
+  {
+    "id": "H-006",
+    "title": "Safari no puede generar miniaturas WebP en canvas",
+    "area": "mobile-web",
+    "severity": "media",
+    "status": "abierto",
+    "evidence": "canvas.toBlob('image/webp') devuelve PNG en Safari; thumb.ts rechaza con 'Este navegador no puede generar miniaturas WebP.' y la subida queda fallida. Sin verificar en Safari real.",
+    "proposal": "Verificar en Safari (WebKit). Si falla: generar WebP por WASM (p. ej. sharp-wasm) o aceptar PNG→transcodificar en el Worker.",
+    "effort": "M",
+    "relatedTests": []
+  },
+  {
+    "id": "H-007",
+    "title": "CORS de R2 y WEB_ORIGINS solo cubren localhost:8081",
+    "area": "deploy",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "Smoke real desde origen prod (node e2e/prod-smoke.mjs, Playwright headless): login en photos-web.luis-sg9915.workers.dev + subida real → POST /v1/uploads/init 201, PUT thumb 200 y PUT original 200 a photos-media.….r2.cloudflarestorage.com (CORS prod funciona), POST complete 200, timeline refrescado. Usuario/objetos de prueba borrados tras la verificación.",
+    "proposal": "Cerrado: CORS R2 prod y WEB_ORIGINS prod verificados end-to-end.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-008",
+    "title": "EXPO_PUBLIC_API_URL sin definir para el build web de producción",
+    "area": "deploy",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "deploy:web hace expo export -p web; EXPO_PUBLIC_API_URL se inyecta en build; sin variable queda el fallback a localhost:8787 en producción. Corrección aplicada: scripts/check-web-env.mjs aborta build:web/deploy:web si la URL no está definida o no es https no-localhost (con tests node:test). Verificado: photos-web.luis-sg9915.workers.dev desplegado y el bundle servido contiene https://photos-api.luis-sg9915.workers.dev embebido.",
+    "proposal": "Definir EXPO_PUBLIC_API_URL=https://photos-api.luis-sg9915.workers.dev en el entorno del build/deploy.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-009",
+    "title": "uploadBlob rechaza con 'Upload failed: N' en inglés",
+    "area": "mobile-web",
+    "severity": "baja",
+    "status": "resuelto",
+    "evidence": "src/web/upload.ts rechazaba con `Upload failed: ${xhr.status}`; el mensaje acaba en last_error y se muestra al usuario en Respaldo. Corrección aplicada: ahora rechaza con `La subida falló (HTTP ${xhr.status}).` en español.",
+    "proposal": "Cambiar a mensaje en español, p. ej. `La subida falló (HTTP ${status}).`.",
+    "effort": "S",
+    "relatedTests": ["uploadBlob status 403"]
+  },
+  {
+    "id": "H-010",
+    "title": "Archivo 'nul' sin trackear en la raíz del repo",
+    "area": "infra",
+    "severity": "baja",
+    "status": "resuelto",
+    "evidence": "Artefacto de Windows por redirección a >nul mal formada; aparece como ?? en git status. Verificado 0 bytes y eliminado con autorización del usuario (`rm ./nul` desde git-bash; el nombre reservado no se puede borrar por APIs Win32 normales).",
+    "proposal": "Confirmar que no contiene nada útil y borrarlo; añadir 'nul' a .gitignore si se regenera.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-011",
+    "title": "La galería no muestra la foto recién subida hasta refrescar manualmente",
+    "area": "mobile-web",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "E2E upload.spec.ts: tras '1 de 1 respaldados' y stats.count=1, la pestaña Fotos seguía mostrando 'Aún no hay fotos respaldadas' (trace en e2e/.artifacts: solo había 1 petición GET /v1/timeline en toda la sesión). Nada invalidaba la query 'timeline'; refetchOnWindowFocus solo escucha 'visibilitychange' en @tanstack/query-core 5.104 (el <input type=file> no cambia visibilityState) y la pestaña sigue montada al volver → ni refetch ni remount. Corrección aplicada: el QueryClient se extrajo a src/lib/query-client.ts y processor.web.ts llama refreshRemoteData() tras completeUpload (done) y tras duplicate, invalidando las queries 'timeline' y 'stats' dentro de try/catch para que un fallo de refetch nunca convierta un done en retry.",
+    "proposal": "Invalidar la query 'timeline' al completar una subida (queryClient.invalidateQueries({queryKey:['timeline']}) tras el complete en processor.web.ts) o refetchear al enfocar la pestaña Fotos.",
+    "effort": "S",
+    "relatedTests": ["primera subida termina en '1 de 1 respaldados'"]
+  },
+  {
+    "id": "H-012",
+    "title": "scanLibrary nunca escanea en Android: getPermissionsAsync() sin granulares exige READ_MEDIA_AUDIO",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "Detectado en N-03/N-04 del checklist Android (emulador API 37): cola vacía y sin last_scan_ts pese a permisos IMAGES+VIDEO concedidos. MediaLibrary.getPermissionsAsync() sin argumentos usa allowedPermissionsList = TODAS las granulares del manifiesto (incluye READ_MEDIA_AUDIO, denied por defecto) → granted=false → retorno silencioso. Corregido: getPermissionsAsync(false,[\"photo\",\"video\"]) en scanner.ts.",
+    "proposal": "Pedir los mismos granulares en scanLibrary que en onboarding.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-013",
+    "title": "File.open() sin modo sobre content:// exige WRITE y rechaza la lectura del asset",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "N-04 Android: sha256File fallaba con \"Missing WRITE permission\" — expo-file-system resuelve open() sin modo a READ_WRITE para URIs no-SAF (content://media). Corregido: file.open(FileMode.ReadOnly) en hash.ts.",
+    "proposal": "Abrir FileSystemFile en FileMode.ReadOnly para lecturas de assets ajenos.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-014",
+    "title": "takenAt=0 en assets sin EXIF → el API rechaza el init (zod positive)",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "N-04 Android: archivo empujado por adb (sin EXIF DATE_TAKEN) llega con creationTime=0 → takenAt=0 → zod rechaza con body sin message → UI muestra \"Algo salió mal.\" Reproducible con cualquier foto sin fecha EXIF. Corregido: fallback a Date.now() en scanner.ts (creationTime) y processor.ts (takenAt).",
+    "proposal": "Fallback de fecha cuando creationTime/EXIF es 0.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-015",
+    "title": "La galería nativa tampoco refresca tras subir (mismo bug H-011 en Android)",
+    "area": "mobile-native",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "N-04 Android: tras state=done la pestaña Fotos seguía mostrando \"Aún no hay fotos respaldadas\" — el fix de invalidación de P1 solo se aplicó a processor.web.ts. Corregido: refreshRemoteData() también en processor.ts tras done y duplicate.",
+    "proposal": "Invalidar timeline/stats en el procesador nativo igual que en web.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-016",
+    "title": "creationTime llega ya en milisegundos en algunos assets → takenAt absurdo (1.79e15)",
+    "area": "mobile-native",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "N-05 Android: el MP4 generado por screenrecord llegó con creationTime ya en ms; el scanner lo multiplicó ×1000 → created_at=1.79e15. Pasó zod (positive) pero con fecha absurda. Corregido: scanner.ts normaliza la unidad (<=0 → Date.now(); <1e12 → ×1000; resto → ms ya) y la comparación incremental usa el valor normalizado.",
+    "proposal": "Normalizar unidad de creationTime a ms en scanner.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-017",
+    "title": "thumbhash vacío en frames de video → el API rechaza el init (zod min 1)",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "N-05 Android: makeThumbAndHash devolvió thumbhash=\"\" para el frame del MP4 (jpeg-js no lo decodificó) → init 400 too_small thumbhash → UI \"Algo salió mal.\" Replay directo confirmó. Corregido: thumb.ts usa un ThumbHash placeholder gris 1×1 cuando el cómputo falla o devuelve vacío. Verificado en prod: media bbae5d4b ready, thumbhash IAhCBwAI9wiI.",
+    "proposal": "Fallback no-vacío de thumbhash.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-018",
+    "title": "Scan incremental cortaba al primer asset viejo → assets indexados tarde o con fecha antigua jamás se respaldan",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "N-06 Android: n06-foto.jpg sembrado antes del scan anterior tenía creationTime < last_scan_ts → reachedKnown → break → nunca encolado pese a ser nuevo para la app. Corregido: scanner.ts pagina toda la biblioteca; la dedup la hace enqueueAsset (INSERT OR IGNORE por asset_id).",
+    "proposal": "Eliminar el break por fecha; dedup por asset_id.",
+    "effort": "S",
+    "relatedTests": []
+  },
+  {
+    "id": "H-019",
+    "title": "stats de Ajustes no se invalida al borrar/restaurar (timeline y trash sí)",
+    "area": "mobile-native",
+    "severity": "baja",
+    "status": "resuelto",
+    "evidence": "N-10 Android: tras restaurar un item, Ajustes seguía mostrando 4 elementos/43.5MB con D1 ya en 5 activos. Corregido: trash.tsx, media/[id].tsx y el undo del snackbar ahora invalidan stats además de timeline/trash.",
+    "proposal": "Invalidar [\"stats\"] en mutaciones de delete/restore.",
+    "effort": "XS",
+    "relatedTests": []
+  },
+  {
+    "id": "H-020",
+    "title": "Botón \"Restaurar\" en Papelera se corta en dos líneas (\"Restaura/r\")",
+    "area": "mobile-native",
+    "severity": "baja",
+    "status": "abierto",
+    "evidence": "N-10 Android: en la fila de la Papelera el botón Restaurar se renderiza cortado (ancho insuficiente). Cosmético; la acción funciona.",
+    "proposal": "Dar minWidth/flex al botón o reducir padding del label.",
+    "effort": "XS",
+    "relatedTests": []
+  }
+]

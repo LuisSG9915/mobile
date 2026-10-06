@@ -32,6 +32,9 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
+      // Los tests deben seguir 100% locales: el binding BUCKET es `remote: true`
+      // en wrangler.jsonc solo para `wrangler dev`.
+      remoteBindings: false,
       miniflare: {
         bindings: {
           TEST_MIGRATIONS: migrations,
@@ -40,6 +43,7 @@ export default defineConfig({
           R2_SECRET_ACCESS_KEY: "test-secret",
           BETTER_AUTH_SECRET: "test-secret-key-for-tests-only-32chars",
           BETTER_AUTH_URL: "http://localhost:8787",
+          WEB_ORIGINS: "http://localhost:8081,https://web.test.dev",
           ...devVars,
         },
       },

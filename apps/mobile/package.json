@@ -4,7 +4,9 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@better-auth/expo": "^1.7.7",
+    "@expo/metro-runtime": "~57.0.16",
     "@gorhom/bottom-sheet": "^5.2.14",
+    "@noble/hashes": "^2.4.0",
     "@photos/shared": "workspace:*",
     "@shopify/flash-list": "^2.0.2",
     "@tanstack/react-query": "^5.104.1",
@@ -12,6 +14,7 @@
     "expo": "~57.0.26",
     "expo-background-task": "~57.0.21",
     "expo-constants": "~57.0.20",
+    "expo-dev-client": "~57.0.19",
     "expo-file-system": "~57.0.7",
     "expo-haptics": "~57.0.3",
     "expo-image": "~57.0.5",
@@ -31,6 +34,7 @@
     "lucide-react-native": "^1.52.0",
     "nativewind": "^4.2.7",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-nitro-modules": "^0.37.1",
@@ -40,6 +44,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.2",
     "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.3",
     "react-native-worklets": "0.10.1",
     "sonner-native": "^0.27.0",
     "tailwindcss": "^3.4.19",
@@ -47,15 +52,22 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/jpeg-js": "^0.3.7",
     "@types/react": "~19.2.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.2",
-    "typescript": "~5.9.3"
+    "fake-indexeddb": "6.2.5",
+    "happy-dom": "20.14.5",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.147.0"
   },
   "expo": {
     "install": {
-      "exclude": ["typescript"]
+      "exclude": [
+        "typescript"
+      ]
     }
   },
   "scripts": {
@@ -63,8 +75,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build:web": "node scripts/check-web-env.mjs && expo export -p web",
+    "deploy:web": "node scripts/check-web-env.mjs && expo export -p web && node ../../node_modules/wrangler/bin/wrangler.js deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "lint": "expo lint"
   },
   "private": true

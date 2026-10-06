@@ -1,29 +1,36 @@
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { ChevronRight, Trash2 } from "lucide-react-native";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../api/client";
-import { signOut, useSession } from "../../auth/client";
+import { useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
 import { formatBytes, formatRelative } from "../../lib/format";
+import { performLogout } from "../../queue/logout";
 import { Button, Card } from "../../ui";
 
 export default function SettingsScreen() {
   const { data: session } = useSession();
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
 
+  const doLogout = async () => {
+    // Capturar antes de que la sesión desaparezca: performLogout lo usa para
+    // borrar los pendientes locales del usuario en web (wipeUserQueue).
+    const userId = session?.user?.id ?? "";
+    await performLogout(userId);
+    router.replace("/welcome");
+  };
+
   const logout = () => {
+    // Alert.alert no existe en react-native-web
+    if (Platform.OS === "web") {
+      if (window.confirm(t.auth.logoutConfirmWeb)) void doLogout();
+      return;
+    }
     Alert.alert(t.auth.logout, t.auth.logoutConfirm, [
       { text: "Cancelar", style: "cancel" },
-      {
-        text: t.auth.logout,
-        style: "destructive",
-        onPress: async () => {
-          await signOut();
-          router.replace("/welcome");
-        },
-      },
+      { text: t.auth.logout, style: "destructive", onPress: () => void doLogout() },
     ]);
   };
 

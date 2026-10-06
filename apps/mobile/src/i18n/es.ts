@@ -15,6 +15,8 @@ export const t = {
     haveAccount: "¿Ya tienes cuenta? Inicia sesión",
     logout: "Cerrar sesión",
     logoutConfirm: "¿Cerrar sesión en este dispositivo?",
+    logoutConfirmWeb:
+      "¿Cerrar sesión en este dispositivo? Se eliminarán los archivos pendientes de respaldar guardados en este navegador. Las fotos ya respaldadas no se borran.",
     invalidCredentials: "Correo o contraseña incorrectos.",
     genericError: "Algo salió mal. Inténtalo de nuevo.",
   },
@@ -36,6 +38,10 @@ export const t = {
     backup: "Respaldo",
     settings: "Ajustes",
   },
+  queue: {
+    preparing: "Preparando tus respaldos…",
+    unsupported: "Este navegador no admite el respaldo persistente.",
+  },
   backup: {
     title: "Respaldo",
     synced: (done: number, total: number) => `${done} de ${total} respaldados`,
@@ -51,6 +57,11 @@ export const t = {
     includeVideosHelp: "Los videos ocupan más espacio y tardan más en subir.",
     lastBackup: (when: string) => `Último respaldo: ${when}`,
     pendingHere: "Pendientes en este dispositivo",
+    scanning: "Escaneando…",
+    scanForNew: "Buscar fotos nuevas",
+    pickFiles: "Subir fotos y videos",
+    pickFailed: (n: number) =>
+      `${n} archivo(s) no se pudieron guardar. Libera espacio e inténtalo de nuevo.`,
     noteIos:
       "En iOS el respaldo en segundo plano lo decide el sistema; abre la app para acelerarlo.",
   },

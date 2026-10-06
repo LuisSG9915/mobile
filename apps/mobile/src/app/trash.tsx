@@ -18,6 +18,7 @@ export default function TrashScreen() {
       toast.success(t.trash.restored);
       void qc.invalidateQueries({ queryKey: ["trash"] });
       void qc.invalidateQueries({ queryKey: ["timeline"] });
+      void qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 

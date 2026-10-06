@@ -12,7 +12,17 @@ export type Bindings = {
 
   BETTER_AUTH_SECRET: string;
   BETTER_AUTH_URL: string;
+
+  /** Orígenes web permitidos por CORS, separados por coma (ej. "http://localhost:8081,https://photos-web.workers.dev"). */
+  WEB_ORIGINS?: string;
 };
+
+export function webOrigins(env: Bindings): string[] {
+  return (env.WEB_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+}
 
 export type SessionUser = {
   id: string;

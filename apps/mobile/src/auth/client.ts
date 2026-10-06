@@ -26,3 +26,9 @@ export const authClient = createAuthClient({
 });
 
 export const { useSession, signIn, signUp, signOut } = authClient;
+
+/** Headers de autenticación para fetch directo al API (cookie en móvil). */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const cookie = await authClient.getCookie();
+  return cookie ? { cookie } : {};
+}

@@ -3,7 +3,7 @@ import { apiReference } from "@scalar/hono-api-reference";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { runCleanup } from "./cron/cleanup";
-import type { AppEnv, Bindings } from "./env";
+import { type AppEnv, type Bindings, webOrigins } from "./env";
 import { requireUser } from "./middleware/session";
 import { mediaApp } from "./routes/media";
 import { timelineApp } from "./routes/timeline";
@@ -20,7 +20,19 @@ app.onError((err, c) => {
 });
 app.notFound((c) => c.json({ error: "not_found", message: "Ruta no encontrada." }, 404));
 
-app.use("/v1/*", cors());
+// CORS con allowlist: la app web usa Authorization: Bearer (sin cookies de
+// terceros), así que credentials no hace falta. Requests sin Origin (móvil,
+// CLI) pasan sin cabeceras CORS.
+const webCors = (env: Bindings) =>
+  cors({
+    origin: webOrigins(env),
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["set-auth-token"],
+    maxAge: 600,
+  });
+
+app.use("/api/auth/*", async (c, next) => webCors(c.env)(c, next));
+app.use("/v1/*", async (c, next) => webCors(c.env)(c, next));
 app.use("/v1/*", requireUser);
 
 app.get("/health", (c) => c.json({ ok: true }));

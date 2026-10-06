@@ -1,4 +1,4 @@
-import { File } from "expo-file-system";
+import { File, FileMode } from "expo-file-system";
 import QuickCrypto from "react-native-quick-crypto";
 
 const CHUNK = 4 * 1024 * 1024; // 4 MB
@@ -11,7 +11,8 @@ export async function sha256File(uri: string): Promise<string> {
   const file = new File(uri);
   const size = file.size ?? 0;
   const hash = QuickCrypto.createHash("sha256");
-  const handle = file.open();
+  // El default implícito es ReadWrite → exige WRITE sobre content:// ajeno.
+  const handle = file.open(FileMode.ReadOnly);
   try {
     while ((handle.offset ?? 0) < size) {
       const bytes = handle.readBytes(CHUNK);

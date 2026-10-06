@@ -1,9 +1,10 @@
 import { expo } from "@better-auth/expo";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { bearer } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./db/schema";
-import type { Bindings } from "./env";
+import { type Bindings, webOrigins } from "./env";
 
 /**
  * Instancia por petición: el binding D1 solo existe dentro del scope de la request.
@@ -19,8 +20,8 @@ export function createAuth(env: Bindings) {
       enabled: true,
       minPasswordLength: 8,
     },
-    plugins: [expo()],
-    trustedOrigins: ["photos://", env.BETTER_AUTH_URL].filter(Boolean),
+    plugins: [expo(), bearer()],
+    trustedOrigins: ["photos://", env.BETTER_AUTH_URL, ...webOrigins(env)].filter(Boolean),
   });
 }
 

@@ -13,7 +13,6 @@ import { useQueueEvents } from "../../lib/events";
 import { formatDuration, monthLabel } from "../../lib/format";
 import { useSettings } from "../../lib/store";
 import { getPendingItems, type QueueItem } from "../../queue/db";
-import { useBackupRunner } from "../../queue/runner";
 import { EmptyState } from "../../ui";
 
 type FeedRow =
@@ -26,7 +25,8 @@ export default function GalleryScreen() {
   const columns = useSettings((s) => s.gridColumns);
   const cell = width / columns;
   const tick = useQueueEvents((s) => s.tick);
-  useBackupRunner(true);
+  // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
+  // via useQueueSession + useBackupRunner.
 
   const query = useInfiniteQuery({
     queryKey: ["timeline"],

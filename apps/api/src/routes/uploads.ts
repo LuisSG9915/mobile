@@ -195,15 +195,15 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
     const storedThumbMime = tHead.httpMetadata?.contentType;
     if (storedMime && storedMime !== row.mimeType) {
       return c.json(
-        { error: "mime_mismatch", message: "El tipo de archivo subido no coincide con el declarado." },
+        {
+          error: "mime_mismatch",
+          message: "El tipo de archivo subido no coincide con el declarado.",
+        },
         409,
       );
     }
     if (storedThumbMime && storedThumbMime !== "image/webp") {
-      return c.json(
-        { error: "mime_mismatch", message: "La miniatura subida no es WebP." },
-        409,
-      );
+      return c.json({ error: "mime_mismatch", message: "La miniatura subida no es WebP." }, 409);
     }
 
     await db

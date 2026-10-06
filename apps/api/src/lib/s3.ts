@@ -19,9 +19,6 @@ function getClient(env: Bindings): S3Client {
     // en PUT prefirmados. Se limitan a cuando el servicio los exige.
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
-    // content-type debe quedar firmado: sin esto un cliente podría subir con
-    // un MIME distinto al declarado en uploads/init.
-    unhoistableHeaders: new Set(["content-type"]),
   });
   cached = { key: cacheKey, client };
   return client;
@@ -42,7 +39,13 @@ export async function presignPut(
     ContentLength: contentLength,
   });
   const expiresIn = Number(env.PRESIGN_TTL_SECONDS) || 900;
-  const url = await getSignedUrl(getClient(env), command, { expiresIn });
+  const url = await getSignedUrl(getClient(env), command, {
+    expiresIn,
+    // content-type debe quedar firmado: sin esto un cliente podría subir con
+    // un MIME distinto al declarado en uploads/init. Esta opción va en el
+    // presign (no en el S3Client).
+    unhoistableHeaders: new Set(["content-type"]),
+  });
   return {
     url,
     headers: {

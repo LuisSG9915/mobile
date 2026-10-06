@@ -1,32 +1,7 @@
 import * as SQLite from "expo-sqlite";
+import type { QueueItem, QueueState, QueueStats } from "./types";
 
-export type QueueState =
-  | "queued"
-  | "hashing"
-  | "thumbnailing"
-  | "init"
-  | "uploading_thumb"
-  | "uploading_original"
-  | "completing"
-  | "done"
-  | "duplicate"
-  | "failed";
-
-export type QueueItem = {
-  asset_id: string;
-  uri: string;
-  filename: string | null;
-  media_type: "photo" | "video";
-  created_at: number; // ms, fecha de captura del asset
-  state: QueueState;
-  sha256: string | null;
-  remote_id: string | null;
-  attempts: number;
-  last_error: string | null;
-  bytes_total: number;
-  bytes_sent: number;
-  updated_at: number;
-};
+export type { QueueItem, QueueState, QueueStats } from "./types";
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS queue (
@@ -63,6 +38,14 @@ export function getQueueDb(): SQLite.SQLiteDatabase {
   return dbInstance;
 }
 
+/**
+ * En nativo SQLite no cambia de lifecycle por usuario: no-ops async para
+ * mantener la misma API que db.web.ts (que sí abre/cierra IndexedDB).
+ */
+export async function initializeQueue(_userId: string): Promise<void> {}
+
+export async function closeQueue(): Promise<void> {}
+
 export function kvGet(key: string): string | null {
   const row = getQueueDb().getFirstSync<{ v: string }>("SELECT v FROM kv WHERE k = ?", [key]);
   return row?.v ?? null;
@@ -72,13 +55,17 @@ export function kvSet(key: string, value: string): void {
   getQueueDb().runSync("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", [key, value]);
 }
 
-export function enqueueAsset(asset: {
-  id: string;
-  uri: string;
-  filename?: string | null;
-  mediaType: "photo" | "video";
-  creationTime: number;
-}): void {
+export async function enqueueAsset(
+  asset: {
+    id: string;
+    uri: string;
+    filename?: string | null;
+    mediaType: "photo" | "video";
+    creationTime: number;
+  },
+  // Solo web lo usa (persistir el File en IndexedDB); firma unificada.
+  _file?: File,
+): Promise<void> {
   getQueueDb().runSync(
     `INSERT OR IGNORE INTO queue (asset_id, uri, filename, media_type, created_at, state, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', ?)`,
@@ -86,13 +73,13 @@ export function enqueueAsset(asset: {
   );
 }
 
-export function setState(
+export async function setState(
   assetId: string,
   state: QueueState,
   extra: Partial<
     Pick<QueueItem, "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent">
   > = {},
-): void {
+): Promise<void> {
   const db = getQueueDb();
   db.runSync(
     `UPDATE queue SET state = ?, sha256 = coalesce(?, sha256), remote_id = coalesce(?, remote_id),
@@ -111,8 +98,26 @@ export function setState(
   );
 }
 
-export function bumpAttempt(assetId: string): void {
+/**
+ * Estado terminal en una sola operación. En web además borra el blob del
+ * asset en la misma transacción; en nativo equivale a setState.
+ */
+export async function finishItem(
+  assetId: string,
+  state: "done" | "duplicate",
+  extra: Partial<
+    Pick<QueueItem, "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent">
+  > = {},
+): Promise<void> {
+  await setState(assetId, state, extra);
+}
+
+export async function bumpAttempt(assetId: string): Promise<void> {
   getQueueDb().runSync("UPDATE queue SET attempts = attempts + 1 WHERE asset_id = ?", [assetId]);
+}
+
+export async function setNextRetryAt(assetId: string, at: number): Promise<void> {
+  getQueueDb().runSync("UPDATE queue SET next_retry_at = ? WHERE asset_id = ?", [at, assetId]);
 }
 
 export function getNextPending(): QueueItem | null {
@@ -141,13 +146,28 @@ export function getFailed(limit = 50): QueueItem[] {
   );
 }
 
-export function retryFailed(): void {
+export async function retryFailed(): Promise<void> {
   getQueueDb().runSync(
-    "UPDATE queue SET state = 'queued', attempts = 0, last_error = NULL, bytes_sent = 0 WHERE state = 'failed'",
+    "UPDATE queue SET state = 'queued', attempts = 0, last_error = NULL, bytes_sent = 0, next_retry_at = 0 WHERE state = 'failed'",
   );
 }
 
-export type QueueStats = { total: number; done: number; pending: number; failed: number };
+/**
+ * Misma API que db.web.ts: tras un cierre a mitad de item, los estados
+ * transitorios vuelven a 'queued' (conservando attempts/next_retry_at/
+ * sha256/remote_id). En web lo exige la recarga de pestaña; en nativo cubre
+ * un posible kill de la app a mitad de subida.
+ */
+export async function recoverInterrupted(): Promise<void> {
+  getQueueDb().runSync(
+    `UPDATE queue SET state = 'queued', bytes_sent = 0, updated_at = ?
+     WHERE state IN ('hashing','thumbnailing','init','uploading_thumb','uploading_original','completing')`,
+    [Date.now()],
+  );
+}
+
+/** En nativo los getters leen SQLite en vivo: refrescar no hace falta. */
+export async function refreshProjection(): Promise<void> {}
 
 export function getQueueStats(): QueueStats {
   const row = getQueueDb().getFirstSync<QueueStats>(

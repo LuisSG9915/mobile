@@ -5,7 +5,7 @@ import type {
   UploadInitInput,
   UploadInitResponse,
 } from "@photos/shared";
-import { API_URL, authClient } from "../auth/client";
+import { API_URL, getAuthHeaders } from "../auth/client";
 
 export class ApiError extends Error {
   constructor(
@@ -18,9 +18,10 @@ export class ApiError extends Error {
 }
 
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const cookie = await authClient.getCookie();
   const headers = new Headers(init.headers);
-  if (cookie) headers.set("cookie", cookie);
+  for (const [key, value] of Object.entries(await getAuthHeaders())) {
+    headers.set(key, value);
+  }
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
@@ -39,13 +40,23 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
 }
 
 export const api = {
-  initUpload: (body: UploadInitInput): Promise<UploadInitResponse> =>
-    apiFetch("/v1/uploads/init", { method: "POST", body: JSON.stringify(body) }).then((r) =>
+  initUpload: (
+    body: UploadInitInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<UploadInitResponse> =>
+    apiFetch("/v1/uploads/init", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: opts?.signal,
+    }).then((r) => r.json()),
+
+  completeUpload: (
+    id: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ id: string; status: "ready" }> =>
+    apiFetch(`/v1/uploads/${id}/complete`, { method: "POST", signal: opts?.signal }).then((r) =>
       r.json(),
     ),
-
-  completeUpload: (id: string): Promise<{ id: string; status: "ready" }> =>
-    apiFetch(`/v1/uploads/${id}/complete`, { method: "POST" }).then((r) => r.json()),
 
   timeline: (cursor?: string, limit = 60): Promise<TimelineResponse> => {
     const q = new URLSearchParams({ limit: String(limit) });

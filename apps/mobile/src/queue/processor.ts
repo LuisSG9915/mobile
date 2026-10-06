@@ -1,20 +1,33 @@
-import { type AllowedExtension, MIME_BY_EXT, VIDEO_EXTENSIONS } from "@photos/shared";
+import { MIME_BY_EXT } from "@photos/shared";
 import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library/legacy";
 import * as Network from "expo-network";
 import { ApiError, api } from "../api/client";
 import { useQueueEvents } from "../lib/events";
+import { queryClient } from "../lib/query-client";
 import { useSettings } from "../lib/store";
-import { bumpAttempt, getNextPending, getQueueDb, type QueueItem, setState } from "./db";
+import {
+  bumpAttempt,
+  getNextPending,
+  getQueueDb,
+  type QueueItem,
+  setNextRetryAt,
+  setState,
+} from "./db";
 import { sha256File } from "./hash";
+import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
 import { makeThumbAndHash } from "./thumb";
-
-const MAX_ATTEMPTS = 6;
-const BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000, 7_200_000, 7_200_000];
 
 let running = false;
 let cancelled = false;
+
+function refreshRemoteData() {
+  try {
+    void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
+    void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
+  } catch {}
+}
 
 export function cancelQueue() {
   cancelled = true;
@@ -34,13 +47,6 @@ async function canUploadNow(): Promise<{ ok: boolean; reason?: "wifi" }> {
   return { ok: false, reason: "wifi" };
 }
 
-function extFromFilename(filename: string | null, mediaType: string): AllowedExtension {
-  const raw = (filename?.split(".").pop() ?? "").toLowerCase();
-  const fallback = mediaType === "video" ? "mp4" : "jpg";
-  const ext = (raw || fallback) as AllowedExtension;
-  return (MIME_BY_EXT as Record<string, string>)[ext] ? ext : (fallback as AllowedExtension);
-}
-
 function parseExifDate(exif: Record<string, unknown> | null | undefined): number | null {
   if (!exif) return null;
   const raw =
@@ -53,10 +59,6 @@ function parseExifDate(exif: Record<string, unknown> | null | undefined): number
   if (!m) return null;
   const [, y, mo, d, h, mi, s] = m;
   return new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime();
-}
-
-function extToMediaType(ext: string): "photo" | "video" {
-  return VIDEO_EXTENSIONS.includes(ext) ? "video" : "photo";
 }
 
 async function uploadFile(
@@ -96,20 +98,24 @@ async function processItem(item: QueueItem): Promise<void> {
   const ext = extFromFilename(item.filename, item.media_type);
   const mimeType = MIME_BY_EXT[ext];
   const mediaType = extToMediaType(ext);
-  const takenAt = parseExifDate(info.exif as Record<string, unknown> | null) ?? item.created_at;
+  // Filas encoladas con created_at=0 (assets sin EXIF) también necesitan
+  // un takenAt válido: el API exige entero positivo.
+  const takenAt =
+    parseExifDate(info.exif as Record<string, unknown> | null) ??
+    (item.created_at > 0 ? item.created_at : Date.now());
   const lat = info.location?.latitude ?? null;
   const lon = info.location?.longitude ?? null;
   const width = info.width || 1;
   const height = info.height || 1;
   const durationMs = item.media_type === "video" ? Math.round((info.duration ?? 0) * 1000) : null;
 
-  setState(item.asset_id, "hashing", { bytes_total: fileSize });
+  await setState(item.asset_id, "hashing", { bytes_total: fileSize });
   const sha256 = await sha256File(localUri);
 
-  setState(item.asset_id, "thumbnailing");
+  await setState(item.asset_id, "thumbnailing");
   const thumb = await makeThumbAndHash(mediaType, localUri);
 
-  setState(item.asset_id, "init", { sha256 });
+  await setState(item.asset_id, "init", { sha256 });
   const init = await api.initUpload({
     sha256,
     mediaType,
@@ -127,16 +133,17 @@ async function processItem(item: QueueItem): Promise<void> {
   });
 
   if (init.status === "duplicate") {
-    setState(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: fileSize });
+    await setState(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: fileSize });
     safeDelete(thumb.uri);
+    refreshRemoteData();
     return;
   }
 
-  setState(item.asset_id, "uploading_thumb", { remote_id: init.id });
+  await setState(item.asset_id, "uploading_thumb", { remote_id: init.id });
   await uploadFile(init.thumb, thumb.uri);
   safeDelete(thumb.uri);
 
-  setState(item.asset_id, "uploading_original");
+  await setState(item.asset_id, "uploading_original");
   const fileUri = file.uri;
   let lastProgress = 0;
   await uploadFile(init.original, fileUri, (sent) => {
@@ -148,9 +155,10 @@ async function processItem(item: QueueItem): Promise<void> {
     }
   });
 
-  setState(item.asset_id, "completing", { bytes_sent: fileSize });
+  await setState(item.asset_id, "completing", { bytes_sent: fileSize });
   await api.completeUpload(init.id);
-  setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
+  await setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
+  refreshRemoteData();
   useQueueEvents.getState().emit();
 }
 
@@ -189,18 +197,15 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
           [item.asset_id],
         );
         const attempts = (row?.attempts ?? item.attempts) + 1;
-        bumpAttempt(item.asset_id);
+        await bumpAttempt(item.asset_id);
         const message =
           e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
         if (attempts >= MAX_ATTEMPTS) {
-          setState(item.asset_id, "failed", { last_error: message });
+          await setState(item.asset_id, "failed", { last_error: message });
         } else {
           const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
-          db.runSync("UPDATE queue SET next_retry_at = ? WHERE asset_id = ?", [
-            Date.now() + wait,
-            item.asset_id,
-          ]);
-          setState(item.asset_id, "queued", { last_error: message });
+          await setNextRetryAt(item.asset_id, Date.now() + wait);
+          await setState(item.asset_id, "queued", { last_error: message });
         }
         useQueueEvents.getState().emit();
       }

@@ -1,0 +1,142 @@
+[
+  {
+    "id": "N-01",
+    "area": "auth",
+    "pasos": [
+      "Abrir la app en el dev-client",
+      "Crear una cuenta nueva con email y contraseña",
+      "Cerrar sesión y volver a entrar con las mismas credenciales"
+    ],
+    "esperado": "El registro lleva al onboarding; el login entra directo a las pestañas.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-02",
+    "area": "permisos",
+    "pasos": [
+      "Tras el registro, en la pantalla de permisos pulsar Continuar",
+      "Denegar el acceso a fotos en el diálogo del sistema",
+      "Aceptar en un segundo intento"
+    ],
+    "esperado": "Aparece el diálogo nativo; al denegar se muestra la tarjeta de permiso denegado; al aceptar se entra a las pestañas.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-03",
+    "area": "cola",
+    "pasos": ["Con permisos concedidos, ir a la pestaña Respaldo", "Pulsar Buscar fotos nuevas"],
+    "esperado": "El anillo de progreso refleja un total mayor que 0 y los elementos empiezan a procesarse.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-04",
+    "area": "subida",
+    "pasos": ["Dejar que termine la subida de al menos una foto", "Ir a la pestaña Fotos"],
+    "esperado": "Respaldo muestra X de X respaldados y la foto aparece en Fotos con su miniatura.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-05",
+    "area": "subida",
+    "pasos": [
+      "Tener un video en la biblioteca con Incluir videos activado",
+      "Ejecutar el respaldo y abrir el video en Fotos"
+    ],
+    "esperado": "El video sube con miniatura generada y es reproducible en el detalle.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-06",
+    "area": "red",
+    "pasos": [
+      "Activar Solo con Wi-Fi en Respaldo",
+      "Desactivar el Wi-Fi y quedarse con datos móviles",
+      "Ejecutar el respaldo"
+    ],
+    "esperado": "Los elementos quedan pendientes y la app indica que espera Wi-Fi; no se consume el plan de datos.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-07",
+    "area": "red",
+    "pasos": [
+      "Iniciar una subida y activar el modo avión a mitad del proceso",
+      "Desactivar el modo avión y esperar el reintento"
+    ],
+    "esperado": "La subida se reintenta sola y termina sin intervención; el elemento no queda en fallo permanente.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-08",
+    "area": "deduplicacion",
+    "pasos": [
+      "Subir fotos, desinstalar la app y reinstalarla (o borrar datos)",
+      "Volver a entrar y ejecutar el respaldo con las mismas fotos"
+    ],
+    "esperado": "Las fotos ya subidas se marcan como duplicadas sin volver a subir bytes.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-09",
+    "area": "auth",
+    "pasos": ["En Ajustes pulsar Cerrar sesión y confirmar", "Cerrar y reabrir la app"],
+    "esperado": "La app pide iniciar sesión de nuevo; el token se eliminó del almacenamiento seguro.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-10",
+    "area": "papelera",
+    "pasos": [
+      "Borrar una foto desde el detalle",
+      "Abrir Papelera desde Ajustes",
+      "Restaurar la foto"
+    ],
+    "esperado": "La foto desaparece de Fotos, aparece en Papelera y al restaurarla vuelve a la galería.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-11",
+    "area": "background",
+    "pasos": [
+      "Dejar elementos pendientes en la cola",
+      "Pasar la app a segundo plano unos 15 minutos",
+      "Volver a abrir y revisar la cola"
+    ],
+    "esperado": "La tarea en segundo plano hizo avanzar la cola (Android) o al menos no perdió elementos (iOS según el SO).",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  },
+  {
+    "id": "N-12",
+    "area": "galeria",
+    "pasos": [
+      "Abrir una foto ya respaldada desde Fotos",
+      "Comprobar que carga el original completo"
+    ],
+    "esperado": "El detalle muestra la foto original (no solo la miniatura) descargada con URL prefirmada.",
+    "status": "pendiente",
+    "dispositivo": "",
+    "notas": ""
+  }
+]

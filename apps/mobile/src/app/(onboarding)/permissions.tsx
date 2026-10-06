@@ -1,10 +1,10 @@
-import * as MediaLibrary from "expo-media-library/legacy";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Linking, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { t } from "../../i18n/es";
 import { useSettings } from "../../lib/store";
+import { requestMediaPermissions } from "../../queue/permissions";
 import { runBackupPass } from "../../queue/runner";
 import { Button, Card } from "../../ui";
 
@@ -29,7 +29,7 @@ export default function Permissions() {
 
   const ask = async () => {
     setLoading(true);
-    const res = await MediaLibrary.requestPermissionsAsync(false, ["photo", "video"]);
+    const res = await requestMediaPermissions();
     setLoading(false);
     if (!res.granted) {
       setDenied(true);

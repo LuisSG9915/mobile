@@ -19,14 +19,21 @@
     {
       "binding": "BUCKET",
       "bucket_name": "photos-media",
-      "preview_bucket_name": "photos-media-dev"
+      "preview_bucket_name": "photos-media-dev",
+      // En `wrangler dev` el binding va contra el bucket real (photos-media-dev):
+      // las URLs prefirmadas ya suben al R2 real, así /complete puede verificar.
+      "remote": true
     }
   ],
+  // Estos vars son los valores de PRODUCCIÓN del worker desplegado.
+  // En `wrangler dev` los sobrescribe apps/api/.dev.vars (localhost).
   "vars": {
     "R2_ACCOUNT_ID": "461d52ab67ae2435c8dde9a0887f27cb",
     "R2_BUCKET_NAME": "photos-media",
     "PRESIGN_TTL_SECONDS": "900",
-    "MAX_ORIGINAL_BYTES": "5368709120"
+    "MAX_ORIGINAL_BYTES": "5368709120",
+    "BETTER_AUTH_URL": "https://photos-api.luis-sg9915.workers.dev",
+    "WEB_ORIGINS": "https://photos-web.luis-sg9915.workers.dev"
   },
   "triggers": {
     "crons": ["0 3 * * *"]

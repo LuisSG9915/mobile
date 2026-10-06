@@ -1,4 +1,3 @@
-import * as MediaLibrary from "expo-media-library";
 import { CloudOff, RotateCcw } from "lucide-react-native";
 import { useState } from "react";
 import { Platform, ScrollView, Switch, Text, View } from "react-native";
@@ -8,14 +7,19 @@ import { useQueueEvents } from "../../lib/events";
 import { formatRelative } from "../../lib/format";
 import { useSettings } from "../../lib/store";
 import { getFailed, getQueueStats, kvGet, retryFailed } from "../../queue/db";
+import { requestMediaPermissions } from "../../queue/permissions";
 import { isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
 import { Button, Card, ProgressRing } from "../../ui";
+import { pickAndEnqueue } from "../../web/files";
+
+const isWeb = Platform.OS === "web";
 
 export default function BackupScreen() {
   useQueueEvents((s) => s.tick); // re-render ante cambios de la cola
   const { wifiOnly, includeVideos, setWifiOnly, setIncludeVideos } = useSettings();
   const [scanning, setScanning] = useState(false);
+  const [pickWarning, setPickWarning] = useState<string | null>(null);
 
   const stats = getQueueStats();
   const failed = getFailed();
@@ -54,19 +58,21 @@ export default function BackupScreen() {
         </Card>
 
         <Card className="gap-4">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-3">
-              <Text className="text-base font-semibold text-neutral-900 dark:text-white">
-                {t.backup.wifiOnly}
-              </Text>
-              <Text className="text-sm text-neutral-500 mt-0.5">{t.backup.wifiOnlyHelp}</Text>
+          {!isWeb ? (
+            <View className="flex-row items-center justify-between">
+              <View className="flex-1 pr-3">
+                <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                  {t.backup.wifiOnly}
+                </Text>
+                <Text className="text-sm text-neutral-500 mt-0.5">{t.backup.wifiOnlyHelp}</Text>
+              </View>
+              <Switch
+                value={wifiOnly}
+                onValueChange={setWifiOnly}
+                accessibilityLabel={t.backup.wifiOnly}
+              />
             </View>
-            <Switch
-              value={wifiOnly}
-              onValueChange={setWifiOnly}
-              accessibilityLabel={t.backup.wifiOnly}
-            />
-          </View>
+          ) : null}
           <View className="flex-row items-center justify-between">
             <View className="flex-1 pr-3">
               <Text className="text-base font-semibold text-neutral-900 dark:text-white">
@@ -107,8 +113,8 @@ export default function BackupScreen() {
             <Button
               label={t.backup.retryAll}
               variant="ghost"
-              onPress={() => {
-                retryFailed();
+              onPress={async () => {
+                await retryFailed();
                 void runBackupPass();
               }}
             />
@@ -116,16 +122,31 @@ export default function BackupScreen() {
         ) : null}
 
         <Button
-          label={scanning ? "Escaneando…" : "Buscar fotos nuevas"}
+          label={scanning ? t.backup.scanning : isWeb ? t.backup.pickFiles : t.backup.scanForNew}
           variant="ghost"
           loading={scanning}
           onPress={async () => {
             setScanning(true);
-            await MediaLibrary.requestPermissionsAsync();
-            await runBackupPass();
-            setScanning(false);
+            setPickWarning(null);
+            try {
+              if (isWeb) {
+                const result = await pickAndEnqueue();
+                if (result.failed > 0) setPickWarning(t.backup.pickFailed(result.failed));
+              } else {
+                await requestMediaPermissions();
+              }
+              await runBackupPass();
+            } catch (e) {
+              setPickWarning(e instanceof Error ? e.message : String(e));
+            } finally {
+              setScanning(false);
+            }
           }}
         />
+
+        {pickWarning ? (
+          <Text className="text-xs text-red-600 dark:text-red-400 text-center">{pickWarning}</Text>
+        ) : null}
 
         {Platform.OS === "ios" ? (
           <Text className="text-xs text-neutral-400 text-center">{t.backup.noteIos}</Text>

@@ -1,5 +1,5 @@
 import { Redirect } from "expo-router";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { useSession } from "../auth/client";
 import { useSettings } from "../lib/store";
 
@@ -15,6 +15,7 @@ export default function Index() {
     );
   }
   if (!session) return <Redirect href="/welcome" />;
-  if (!onboarded) return <Redirect href="/permissions" />;
+  // En web no hay permisos de biblioteca: la subida es manual desde Respaldo.
+  if (Platform.OS !== "web" && !onboarded) return <Redirect href="/permissions" />;
   return <Redirect href="/(tabs)" />;
 }

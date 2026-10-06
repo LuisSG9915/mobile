@@ -9,5 +9,10 @@ R2_SECRET_ACCESS_KEY=
 
 # Secreto de sesiones: `openssl rand -base64 32`
 BETTER_AUTH_SECRET=
-# URL base pública de la API (en dev: http://localhost:8787)
+# URL base pública de la API. En `wrangler dev` sobrescribe al var de
+# wrangler.jsonc (que lleva la URL de producción).
 BETTER_AUTH_URL=http://localhost:8787
+
+# Orígenes web permitidos por CORS, separados por coma. En `wrangler dev`
+# sobrescribe al var de wrangler.jsonc (que lleva el origen de producción).
+WEB_ORIGINS=http://localhost:8081

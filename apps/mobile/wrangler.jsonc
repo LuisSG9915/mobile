@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "photos-web",
+  "compatibility_date": "2025-01-15",
+  "assets": {
+    "directory": "./dist",
+    // SPA: expo-router maneja las rutas; cualquier path desconocido sirve index.html
+    "not_found_handling": "single-page-application"
+  }
+}

@@ -104,8 +104,17 @@ export default function MediaViewer() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["timeline"] });
       void qc.invalidateQueries({ queryKey: ["trash"] });
+      void qc.invalidateQueries({ queryKey: ["stats"] });
       toast(t.viewer.movedToTrash, {
-        action: { label: t.viewer.undo, onClick: () => void api.restoreMedia(id) },
+        action: {
+          label: t.viewer.undo,
+          onClick: () =>
+            void api.restoreMedia(id).then(() => {
+              void qc.invalidateQueries({ queryKey: ["timeline"] });
+              void qc.invalidateQueries({ queryKey: ["trash"] });
+              void qc.invalidateQueries({ queryKey: ["stats"] });
+            }),
+        },
       });
       router.back();
     },
