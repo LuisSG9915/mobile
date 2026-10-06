@@ -1,8 +1,8 @@
 import { FlashList } from "@shopify/flash-list";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { AlertCircle, Cloud, CloudCheck, CloudOff, CloudUpload, Play } from "lucide-react-native";
-import { useMemo } from "react";
+import { Play } from "lucide-react-native";
+import { memo, useMemo } from "react";
 import { Pressable, RefreshControl, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { t } from "../../i18n/es";
@@ -10,75 +10,56 @@ import { formatDuration } from "../../lib/format";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { useSettings } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
-import { EmptyState } from "../../ui";
+import { EmptyState, SyncBadge } from "../../ui";
 
-/** Indicador mínimo de estado (el SyncBadge completo es Fase 2). */
-function StatusGlyph({ photo }: { photo: HybridPhoto }) {
-  const icon = { size: 14, color: "#fff" } as const;
-  let glyph: React.ReactNode;
-  let label: string | null = null;
-  switch (photo.syncStatus) {
-    case "SYNCED":
-      glyph = <CloudCheck {...icon} />;
-      break;
-    case "REMOTE_ONLY":
-      glyph = <Cloud {...icon} />;
-      break;
-    case "SYNCING":
-      glyph = <CloudUpload {...icon} />;
-      label = photo.progress != null ? `${Math.round(photo.progress * 100)}%` : null;
-      break;
-    case "PENDING":
-      glyph = <CloudUpload {...icon} />;
-      break;
-    case "FAILED":
-      glyph = <AlertCircle {...icon} />;
-      break;
-    case "LOCAL_ONLY":
-      glyph = <CloudOff {...icon} />;
-      break;
-  }
-  return (
-    <View className="absolute bottom-1 left-1 flex-row items-center bg-black/60 rounded-md px-1.5 py-0.5 gap-1">
-      {glyph}
-      {label ? <Text className="text-white text-[10px] font-medium">{label}</Text> : null}
-    </View>
-  );
-}
-
-function PhotoCell({ photo, size }: { photo: HybridPhoto; size: number }) {
-  const uri = photo.localUri ?? photo.thumbUrl;
-  return (
-    <Pressable
-      accessibilityLabel={photo.mediaType === "video" ? "video" : "foto"}
-      onPress={() => {
-        if (photo.remoteId) router.push(`/media/${photo.remoteId}`);
-      }}
-      style={{ width: size, height: size }}
-      className="bg-neutral-200 dark:bg-neutral-800"
-    >
-      {uri ? (
-        <Image
-          source={{ uri }}
-          placeholder={photo.thumbhash ? { thumbhash: photo.thumbhash } : undefined}
-          contentFit="cover"
-          transition={200}
-          recyclingKey={photo.key}
-          style={{ width: "100%", height: "100%" }}
-        />
-      ) : null}
-      {photo.mediaType === "video" ? (
-        <View className="absolute bottom-1 right-1 flex-row items-center bg-black/60 rounded-md px-1.5 py-0.5 gap-1">
-          <Play size={10} color="#fff" />
-          <Text className="text-white text-[10px] font-medium">
-            {formatDuration(photo.durationMs) ?? ""}
-          </Text>
-        </View>
-      ) : null}
-      <StatusGlyph photo={photo} />
-    </Pressable>
-  );
-}
+/**
+ * Celda memoizada: los ticks de la cola regeneran los HybridPhoto, así que se
+ * comparan solo los campos visibles — un badge que cambia re-renderiza su
+ * celda sin tocar el resto de la cuadrícula.
+ */
+const PhotoCell = memo(
+  function PhotoCell({ photo, size }: { photo: HybridPhoto; size: number }) {
+    const uri = photo.localUri ?? photo.thumbUrl;
+    return (
+      <Pressable
+        accessibilityLabel={photo.mediaType === "video" ? "video" : "foto"}
+        onPress={() => {
+          if (photo.remoteId) router.push(`/media/${photo.remoteId}`);
+        }}
+        style={{ width: size, height: size }}
+        className="bg-neutral-200 dark:bg-neutral-800"
+      >
+        {uri ? (
+          <Image
+            source={{ uri }}
+            placeholder={photo.thumbhash ? { thumbhash: photo.thumbhash } : undefined}
+            contentFit="cover"
+            transition={200}
+            recyclingKey={photo.key}
+            style={{ width: "100%", height: "100%" }}
+          />
+        ) : null}
+        {photo.mediaType === "video" ? (
+          <View className="absolute bottom-1 right-1 flex-row items-center bg-black/60 rounded-md px-1.5 py-0.5 gap-1">
+            <Play size={10} color="#fff" />
+            <Text className="text-white text-[10px] font-medium">
+              {formatDuration(photo.durationMs) ?? ""}
+            </Text>
+          </View>
+        ) : null}
+        <SyncBadge status={photo.syncStatus} progress={photo.progress} />
+      </Pressable>
+    );
+  },
+  (prev, next) =>
+    prev.size === next.size &&
+    prev.photo.key === next.photo.key &&
+    prev.photo.syncStatus === next.photo.syncStatus &&
+    prev.photo.progress === next.photo.progress &&
+    prev.photo.localUri === next.photo.localUri &&
+    prev.photo.thumbUrl === next.photo.thumbUrl &&
+    prev.photo.remoteId === next.photo.remoteId,
+);
 
 export default function GalleryScreen() {
   const { width } = useWindowDimensions();
