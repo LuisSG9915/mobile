@@ -1,4 +1,4 @@
-import { TRASH_RETENTION_DAYS } from "@photos/shared";
+import { TRASH_RETENTION_DAYS, type TrashItem } from "@photos/shared";
 import { FlashList } from "@shopify/flash-list";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
@@ -23,6 +23,13 @@ export default function TrashScreen() {
   });
 
   const items = query.data?.items ?? [];
+
+  /** Días que le quedan al elemento antes de la purga definitiva (mín. 1). */
+  const daysLeft = (item: TrashItem) =>
+    Math.max(
+      1,
+      Math.ceil((item.deletedAt + TRASH_RETENTION_DAYS * 86_400_000 - Date.now()) / 86_400_000),
+    );
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top", "bottom"]}>
@@ -49,9 +56,7 @@ export default function TrashScreen() {
                 <Text className="text-sm font-medium text-neutral-900 dark:text-white">
                   {item.mediaType === "video" ? "Video" : "Foto"}
                 </Text>
-                <Text className="text-xs text-neutral-500">
-                  {t.trash.daysLeft(TRASH_RETENTION_DAYS)}
-                </Text>
+                <Text className="text-xs text-neutral-500">{t.trash.daysLeft(daysLeft(item))}</Text>
               </View>
               <View className="w-28">
                 <Button
