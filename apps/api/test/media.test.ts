@@ -94,5 +94,6 @@ describe("media", () => {
     expect(json.count).toBe(2);
     expect(json.totalBytes).toBe(4_000_000);
     expect(json.lastUploadAt).toBeTruthy();
+    expect(json.quotaBytes).toBeGreaterThan(0);
   });
 });

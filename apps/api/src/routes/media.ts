@@ -3,6 +3,7 @@ import {
   errorSchema,
   mediaDetailSchema,
   okSchema,
+  STORAGE_QUOTA_BYTES,
   statsSchema,
   trashResponseSchema,
 } from "@photos/shared";
@@ -196,6 +197,7 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         count: row?.count ?? 0,
         totalBytes: row?.totalBytes ?? 0,
         lastUploadAt: row?.lastUploadAt ?? null,
+        quotaBytes: STORAGE_QUOTA_BYTES,
       },
       200,
     );
