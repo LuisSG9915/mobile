@@ -77,9 +77,9 @@ try {
 
   console.log("RESULT: subida completada — '1 de 1 respaldados' visible");
   console.log("RED:");
-  for (const h of hits) console.log("  " + h);
+  for (const h of hits) console.log(`  ${h}`);
   const token = await page.evaluate(() => localStorage.getItem("photos.session_token"));
-  console.log("TOKEN:", token ? token.slice(0, 12) + "…" : "(no hay)");
+  console.log("TOKEN:", token ? `${token.slice(0, 12)}…` : "(no hay)");
 } finally {
   await browser.close();
 }
