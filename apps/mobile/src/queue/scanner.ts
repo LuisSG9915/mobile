@@ -1,4 +1,5 @@
 import * as MediaLibrary from "expo-media-library/legacy";
+import { useLibraryEvents } from "../lib/events";
 import { useSettings } from "../lib/store";
 import { enqueueAsset, kvSet } from "./db";
 
@@ -50,5 +51,7 @@ export async function scanLibrary(): Promise<number> {
   } while (after);
 
   kvSet("last_scan_ts", String(Date.now()));
+  // La biblioteca se re-listó: la galería híbrida refresca sus assets locales.
+  useLibraryEvents.getState().emit();
   return added;
 }

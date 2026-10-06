@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { getQueueItems } from "../queue/db";
-import { useQueueEvents } from "./events";
+import { useLibraryEvents, useQueueEvents } from "./events";
 import {
   buildGalleryRows,
   type GalleryRow,
@@ -24,6 +24,10 @@ import { listLocalAssets } from "./local-assets";
  */
 export function useHybridGallery() {
   const tick = useQueueEvents((s) => s.tick);
+  // Solo se re-lista MediaLibrary al montar, al refrescar a mano y cuando la
+  // biblioteca cambia de verdad (escaneo o "Liberar espacio"), no ante cada
+  // tick de la cola — el listado completo es demasiado caro para cada badge.
+  const libTick = useLibraryEvents((s) => s.tick);
   const [localAssets, setLocalAssets] = useState<LocalAsset[]>([]);
 
   const refreshLocal = useCallback(async () => {
@@ -34,9 +38,10 @@ export function useHybridGallery() {
     }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: libTick re-dispara el re-listado cuando cambia la biblioteca (escaneo / Liberar espacio).
   useEffect(() => {
     void refreshLocal();
-  }, [refreshLocal]);
+  }, [refreshLocal, libTick]);
 
   const query = useInfiniteQuery({
     queryKey: ["timeline"],

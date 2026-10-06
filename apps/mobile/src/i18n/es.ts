@@ -64,6 +64,12 @@ export const t = {
       `${n} archivo(s) no se pudieron guardar. Libera espacio e inténtalo de nuevo.`,
     noteIos:
       "En iOS el respaldo en segundo plano lo decide el sistema; abre la app para acelerarlo.",
+    freeSpace: "Liberar espacio",
+    freeSpaceBody: (n: number, size: string) =>
+      `${n} elementos ya respaldados ocupan ${size} en este dispositivo.`,
+    freeSpaceConfirm: (n: number, size: string) =>
+      `¿Borrar la copia local de ${n} elementos ya respaldados (${size})? Seguirán disponibles en tu nube.`,
+    freed: (n: number, size: string) => `${n} elementos liberados (${size})`,
   },
   gallery: {
     emptyTitle: "Aún no hay fotos respaldadas",

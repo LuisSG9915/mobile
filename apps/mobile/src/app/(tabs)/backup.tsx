@@ -1,10 +1,12 @@
-import { CloudOff, RotateCcw } from "lucide-react-native";
+import { CloudOff, HardDrive, RotateCcw } from "lucide-react-native";
 import { useState } from "react";
-import { Platform, ScrollView, Switch, Text, View } from "react-native";
+import { Alert, Platform, ScrollView, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toast } from "sonner-native";
 import { t } from "../../i18n/es";
 import { useQueueEvents } from "../../lib/events";
-import { formatRelative } from "../../lib/format";
+import { formatBytes, formatRelative } from "../../lib/format";
+import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { useSettings } from "../../lib/store";
 import { getFailed, getQueueStats, kvGet, retryFailed } from "../../queue/db";
 import { requestMediaPermissions } from "../../queue/permissions";
@@ -23,9 +25,29 @@ export default function BackupScreen() {
 
   const stats = getQueueStats();
   const failed = getFailed();
+  // En web no hay copia local que liberar (el blob se borra al terminar).
+  const syncedLocal = isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal();
   const lastBackup = Number(kvGet("last_scan_ts") ?? "0");
   const progress = stats.total ? stats.done / stats.total : 0;
   const running = isRunning();
+
+  const freeSpace = () => {
+    const { assetIds, totalBytes } = getSyncedLocal();
+    if (!assetIds.length) return;
+    const size = formatBytes(totalBytes);
+    Alert.alert(t.backup.freeSpace, t.backup.freeSpaceConfirm(assetIds.length, size), [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: t.backup.freeSpace,
+        style: "destructive",
+        onPress: () => {
+          void freeSyncedSpace().then((n) => {
+            if (n > 0) toast.success(t.backup.freed(n, size));
+          });
+        },
+      },
+    ]);
+  };
 
   const statusText = !running
     ? stats.pending > 0
@@ -87,6 +109,24 @@ export default function BackupScreen() {
             />
           </View>
         </Card>
+
+        {syncedLocal.assetIds.length > 0 ? (
+          <Card className="gap-3">
+            <View className="flex-row items-center gap-2">
+              <HardDrive size={16} color="#4f46e5" />
+              <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                {t.backup.freeSpace}
+              </Text>
+            </View>
+            <Text className="text-sm text-neutral-500">
+              {t.backup.freeSpaceBody(
+                syncedLocal.assetIds.length,
+                formatBytes(syncedLocal.totalBytes),
+              )}
+            </Text>
+            <Button label={t.backup.freeSpace} variant="ghost" onPress={freeSpace} />
+          </Card>
+        ) : null}
 
         {failed.length ? (
           <Card className="gap-3">
