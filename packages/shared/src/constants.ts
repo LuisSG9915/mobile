@@ -38,6 +38,25 @@ export const PRESIGN_PUT_TTL_SECONDS = 900;
 export const PRESIGN_GET_WINDOW_SECONDS = 6 * 3600;
 /** TTL efectivo de las URLs prefirmadas de lectura (12 h) */
 export const PRESIGN_GET_TTL_SECONDS = 12 * 3600;
+/**
+ * Estados de sincronización de una foto en la galería híbrida (contrato
+ * LOCAL/REMOTE del roadmap):
+ * - LOCAL_ONLY: existe solo en el dispositivo, sin entrada en la cola.
+ * - PENDING: encolada, aún sin empezar a procesar.
+ * - SYNCING: en proceso de subida (hash, miniatura o PUT a R2).
+ * - SYNCED: respaldo confirmado en R2 y presente localmente.
+ * - REMOTE_ONLY: existe en R2 pero no en el almacenamiento local.
+ * - FAILED: la subida agotó los reintentos.
+ */
+export const SYNC_STATUSES = [
+  "LOCAL_ONLY",
+  "PENDING",
+  "SYNCING",
+  "SYNCED",
+  "REMOTE_ONLY",
+  "FAILED",
+] as const;
+
 /** Máximo de items por página del timeline */
 export const TIMELINE_MAX_LIMIT = 200;
 /** Días que un elemento permanece en la papelera */

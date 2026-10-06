@@ -1,11 +1,13 @@
 import { z } from "zod";
-import { ALLOWED_EXTENSIONS, MAX_THUMB_BYTES } from "./constants";
+import { ALLOWED_EXTENSIONS, MAX_THUMB_BYTES, SYNC_STATUSES } from "./constants";
 
 export const sha256Hex = z
   .string()
   .regex(/^[a-f0-9]{64}$/, "SHA-256 inválido (se espera hex en minúsculas)");
 
 export const mediaTypeSchema = z.enum(["photo", "video"]);
+
+export const syncStatusSchema = z.enum(SYNC_STATUSES);
 
 export const extSchema = z
   .string()
@@ -104,6 +106,7 @@ export const okSchema = z.object({ ok: z.literal(true) });
 
 // ---------- tipos ----------
 
+export type SyncStatus = z.infer<typeof syncStatusSchema>;
 export type UploadInitInput = z.infer<typeof uploadInitSchema>;
 export type UploadInitResponse = z.infer<typeof uploadInitResponseSchema>;
 export type TimelineItem = z.infer<typeof timelineItemSchema>;
