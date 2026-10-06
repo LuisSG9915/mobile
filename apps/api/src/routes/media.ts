@@ -4,7 +4,7 @@ import {
   mediaDetailSchema,
   okSchema,
   statsSchema,
-  timelineResponseSchema,
+  trashResponseSchema,
 } from "@photos/shared";
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
@@ -70,7 +70,7 @@ const trashRoute = createRoute({
     "Elementos con borrado suave, ordenados por fecha de borrado. Se purgan definitivamente a los 30 días.",
   responses: {
     200: {
-      content: { "application/json": { schema: timelineResponseSchema } },
+      content: { "application/json": { schema: trashResponseSchema } },
       description: "Elementos en papelera",
     },
     401: err("Sin sesión"),
@@ -174,6 +174,7 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         durationMs: m.durationMs,
         thumbhash: m.thumbhash,
         thumbUrl: await presignGet(c.env, m.r2KeyThumb),
+        deletedAt: m.deletedAt ?? 0,
       })),
     );
     return c.json({ items, nextCursor: null }, 200);

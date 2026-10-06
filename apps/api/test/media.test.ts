@@ -59,6 +59,8 @@ describe("media", () => {
     const trashJson = await j(trash);
     expect(trashJson.items.length).toBe(1);
     expect(trashJson.items[0].id).toBe(id);
+    // La papelera expone deletedAt para que la UI calcule los días restantes.
+    expect(trashJson.items[0].deletedAt).toBeGreaterThan(0);
 
     const restore = await SELF.fetch(`http://localhost/v1/media/${id}/restore`, {
       method: "POST",
