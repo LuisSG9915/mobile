@@ -1,6 +1,6 @@
 import type { SyncStatus, TimelineItem } from "@photos/shared";
 import type { QueueItem, QueueState } from "../queue/types";
-import { monthLabel } from "./format";
+import { sectionLabel } from "./format";
 
 /**
  * Núcleo de la galería híbrida: fusión pura (sin I/O) de tres fuentes —
@@ -185,15 +185,15 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
   return photos;
 }
 
-/** Intercala encabezados de mes sobre la lista ya ordenada desc. */
-export function buildGalleryRows(photos: HybridPhoto[]): GalleryRow[] {
+/** Intercala encabezados de día (Hoy / Ayer / mes) sobre la lista ordenada desc. */
+export function buildGalleryRows(photos: HybridPhoto[], now = Date.now()): GalleryRow[] {
   const rows: GalleryRow[] = [];
-  let lastMonth = "";
+  let lastSection = "";
   for (const photo of photos) {
-    const m = monthLabel(photo.takenAt);
-    if (m !== lastMonth) {
-      lastMonth = m;
-      rows.push({ type: "header", key: `h-${m}`, label: m });
+    const s = sectionLabel(photo.takenAt, now);
+    if (s !== lastSection) {
+      lastSection = s;
+      rows.push({ type: "header", key: `h-${s}`, label: s });
     }
     rows.push({ type: "photo", key: photo.key, photo });
   }

@@ -71,6 +71,14 @@ export const t = {
     emptyAction: "Ir al respaldo",
     pendingBadge: "Pendiente",
   },
+  sync: {
+    localOnly: "Solo en este dispositivo",
+    pending: "Pendiente de respaldo",
+    syncing: "Respaldando",
+    synced: "Respaldada",
+    remoteOnly: "Solo en la nube",
+    failed: "Error al respaldar",
+  },
   viewer: {
     info: "Información",
     date: "Fecha",
@@ -105,6 +113,8 @@ export const t = {
     uploadFailed: "No se pudo subir. Reintentaremos automáticamente.",
   },
   time: {
+    today: "Hoy",
+    yesterday: "Ayer",
     justNow: "ahora mismo",
     minutesAgo: (n: number) => `hace ${n} min`,
     hoursAgo: (n: number) => `hace ${n} h`,

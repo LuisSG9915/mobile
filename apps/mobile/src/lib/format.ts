@@ -27,6 +27,25 @@ export function monthLabel(ts: number): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function sameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** Sección de la galería: Hoy / Ayer / mes (estilo Google Fotos). */
+export function sectionLabel(ts: number, now = Date.now()): string {
+  const d = new Date(ts);
+  const n = new Date(now);
+  if (sameDay(d, n)) return t.time.today;
+  const y = new Date(n);
+  y.setDate(y.getDate() - 1);
+  if (sameDay(d, y)) return t.time.yesterday;
+  return monthLabel(ts);
+}
+
 export function formatDateTime(ts: number): string {
   return new Intl.DateTimeFormat("es", {
     day: "numeric",

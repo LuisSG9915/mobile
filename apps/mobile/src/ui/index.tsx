@@ -1,6 +1,9 @@
+import type { SyncStatus } from "@photos/shared";
+import { AlertCircle, CloudCheck, CloudDownload, CloudOff, CloudUpload } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import { t } from "../i18n/es";
 
 export function Button({
   label,
@@ -92,6 +95,60 @@ export function EmptyState({
           <Button label={actionLabel} onPress={action} />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+const BADGE_A11Y: Record<SyncStatus, string> = {
+  LOCAL_ONLY: t.sync.localOnly,
+  PENDING: t.sync.pending,
+  SYNCING: t.sync.syncing,
+  SYNCED: t.sync.synced,
+  REMOTE_ONLY: t.sync.remoteOnly,
+  FAILED: t.sync.failed,
+};
+
+/**
+ * Chip de estado de sincronización sobre la miniatura (estilo Google Fotos).
+ * FAILED destaca en rojo; SYNCING muestra el porcentaje si hay progreso.
+ */
+export function SyncBadge({ status, progress }: { status: SyncStatus; progress?: number | null }) {
+  const icon = { size: 14, color: "#fff" } as const;
+  let glyph: ReactNode;
+  let label: string | null = null;
+  let bg = "bg-black/60";
+  switch (status) {
+    case "SYNCED":
+      glyph = <CloudCheck {...icon} />;
+      bg = "bg-black/40";
+      break;
+    case "REMOTE_ONLY":
+      glyph = <CloudDownload {...icon} />;
+      break;
+    case "SYNCING":
+      glyph = <CloudUpload {...icon} />;
+      label = progress != null ? `${Math.round(progress * 100)}%` : null;
+      bg = "bg-accent/80";
+      break;
+    case "PENDING":
+      glyph = <CloudUpload {...icon} />;
+      break;
+    case "FAILED":
+      glyph = <AlertCircle {...icon} />;
+      label = t.sync.failed;
+      bg = "bg-red-600/90";
+      break;
+    case "LOCAL_ONLY":
+      glyph = <CloudOff {...icon} />;
+      break;
+  }
+  return (
+    <View
+      accessibilityLabel={BADGE_A11Y[status]}
+      className={`absolute bottom-1 left-1 flex-row items-center rounded-md px-1.5 py-0.5 gap-1 ${bg}`}
+    >
+      {glyph}
+      {label ? <Text className="text-white text-[10px] font-medium">{label}</Text> : null}
     </View>
   );
 }

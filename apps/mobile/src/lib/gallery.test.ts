@@ -232,23 +232,43 @@ describe("mergeGallery", () => {
 });
 
 describe("buildGalleryRows", () => {
-  it("intercala un encabezado por cada mes", () => {
-    const ene = new Date(2025, 0, 15).getTime();
-    const feb = new Date(2025, 1, 15).getTime();
+  it("agrupa en Hoy / Ayer / mes con encabezados adhesivos", () => {
+    // now fijo: miércoles 15 de octubre de 2025, mediodía.
+    const now = new Date(2025, 9, 15, 12).getTime();
+    const hoy = new Date(2025, 9, 15, 9).getTime();
+    const ayer = new Date(2025, 9, 14, 22).getTime();
+    const septiembre = new Date(2025, 8, 1).getTime();
     const rows = buildGalleryRows(
       mergeGallery({
         localAssets: [
-          makeLocal({ id: "a", uri: "u", creationTime: feb }),
-          makeLocal({ id: "b", uri: "u2", creationTime: feb + 1 }),
-          makeLocal({ id: "c", uri: "u3", creationTime: ene }),
+          makeLocal({ id: "hoy", uri: "u1", creationTime: hoy }),
+          makeLocal({ id: "ayer", uri: "u2", creationTime: ayer }),
+          makeLocal({ id: "sep", uri: "u3", creationTime: septiembre }),
         ],
         queueItems: [],
         remoteItems: [],
       }),
+      now,
     );
-    const headers = rows.filter((r) => r.type === "header");
-    expect(headers).toHaveLength(2);
+    const labels = rows.filter((r) => r.type === "header").map((r) => r.label);
+    expect(labels).toEqual(["Hoy", "Ayer", "Septiembre de 2025"]);
     expect(rows[0].type).toBe("header");
     expect(rows.filter((r) => r.type === "photo")).toHaveLength(3);
+  });
+
+  it("no repite el encabezado dentro del mismo día", () => {
+    const now = new Date(2025, 9, 15, 12).getTime();
+    const rows = buildGalleryRows(
+      mergeGallery({
+        localAssets: [
+          makeLocal({ id: "a", uri: "u1", creationTime: now - 60_000 }),
+          makeLocal({ id: "b", uri: "u2", creationTime: now - 120_000 }),
+        ],
+        queueItems: [],
+        remoteItems: [],
+      }),
+      now,
+    );
+    expect(rows.filter((r) => r.type === "header")).toHaveLength(1);
   });
 });
