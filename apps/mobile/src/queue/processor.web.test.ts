@@ -11,7 +11,7 @@ vi.mock("../api/client", () => ({
       super(m);
     }
   },
-  api: { initUpload: vi.fn(), completeUpload: vi.fn() },
+  api: { initUpload: vi.fn(), completeUpload: vi.fn(), checkHashes: vi.fn() },
 }));
 vi.mock("../web/hash", () => ({ sha256File: vi.fn(async () => "a".repeat(64)) }));
 vi.mock("../web/thumb", () => ({
@@ -46,7 +46,7 @@ type FilesModuleMock = {
   getFile: Mock;
 };
 type ApiClientMock = {
-  api: { initUpload: Mock; completeUpload: Mock };
+  api: { initUpload: Mock; completeUpload: Mock; checkHashes: Mock };
   ApiError: new (status: number, code: string, message: string) => Error;
 };
 
@@ -91,6 +91,8 @@ beforeEach(async () => {
   // y el Map persisten entre tests → hay que limpiarlos a mano.
   apiMock.api.initUpload.mockReset();
   apiMock.api.completeUpload.mockReset();
+  apiMock.api.checkHashes.mockReset();
+  apiMock.api.checkHashes.mockResolvedValue({ existing: [] });
   uploadBlobMock.mockReset();
   queryClientMock.invalidateQueries.mockReset();
   queryClientMock.invalidateQueries.mockResolvedValue(undefined);
@@ -180,6 +182,46 @@ describe("processQueue", () => {
     expect(await store.loadFile("u1", "web-1")).toBeUndefined();
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["timeline"] });
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["stats"] });
+  });
+
+  it("checkHashes hit → duplicate sin miniatura ni PUTs (dedup temprana)", async () => {
+    const file = new File(["x"], "foto.png", { type: "image/png" });
+    const row = await encolar("web-1", "foto.png", 1, file);
+    filesMock.__files.set("web-1", file);
+    apiMock.api.checkHashes.mockResolvedValue({
+      existing: [{ sha256: "a".repeat(64), id: "r9" }],
+    });
+    // El mock persiste entre tests (las factorías no se re-ejecutan): limpiar.
+    const makeThumb = ((await import("../web/thumb")) as { makeThumb: Mock }).makeThumb;
+    makeThumb.mockClear();
+
+    await processor.processQueue();
+
+    expect(row.state).toBe("duplicate");
+    expect(row.sha256).toBe("a".repeat(64));
+    expect(row.remote_id).toBe("r9");
+    expect(row.bytes_sent).toBe(file.size);
+    // No se generó miniatura, no hubo init ni PUTs y el blob se borró de IDB.
+    expect(makeThumb).not.toHaveBeenCalled();
+    expect(apiMock.api.initUpload).not.toHaveBeenCalled();
+    expect(uploadBlobMock).not.toHaveBeenCalled();
+    expect(apiMock.api.completeUpload).not.toHaveBeenCalled();
+    expect(await store.loadFile("u1", "web-1")).toBeUndefined();
+    expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["timeline"] });
+  });
+
+  it("si checkHashes falla (sin red) sigue el flujo normal: /init deduplica", async () => {
+    const file = new File(["x"], "foto.png", { type: "image/png" });
+    const row = await encolar("web-1", "foto.png", 1, file);
+    filesMock.__files.set("web-1", file);
+    apiMock.api.checkHashes.mockRejectedValue(new Error("offline"));
+    apiMock.api.initUpload.mockResolvedValue(initRespuestaUpload("r2"));
+    apiMock.api.completeUpload.mockResolvedValue({ id: "r2", status: "ready" });
+
+    await processor.processQueue();
+
+    expect(apiMock.api.initUpload).toHaveBeenCalledTimes(1);
+    expect(row.state).toBe("done");
   });
 
   it("marca failed si el File ya no está disponible", async () => {

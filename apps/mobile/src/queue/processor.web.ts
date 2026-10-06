@@ -66,6 +66,27 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   const sha256 = await sha256File(file);
   throwIfAborted(signal);
 
+  // Dedup criptográfica temprana: si el API ya tiene este sha256 'ready', la
+  // foto queda SYNCED sin generar miniatura ni emitir PUTs. Si la llamada
+  // falla (abort → propagar; red → seguir), /init deduplica igual.
+  try {
+    const { existing } = await api.checkHashes([sha256], { signal });
+    const hit = existing.find((e) => e.sha256 === sha256);
+    if (hit) {
+      // Estado terminal + borrado del blob en una sola transacción.
+      await finishItem(item.asset_id, "duplicate", {
+        sha256,
+        remote_id: hit.id,
+        bytes_sent: file.size,
+      });
+      refreshRemoteData();
+      return;
+    }
+  } catch {
+    // Abort durante la llamada → propagar; error de red → seguir.
+    throwIfAborted(signal);
+  }
+
   await setState(item.asset_id, "thumbnailing");
   const thumb = await makeThumb(mediaType, file);
   throwIfAborted(signal);

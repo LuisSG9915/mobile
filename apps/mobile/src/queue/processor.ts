@@ -9,6 +9,7 @@ import { queryClient } from "../lib/query-client";
 import { useSettings } from "../lib/store";
 import {
   bumpAttempt,
+  finishItem,
   getNextPending,
   getQueueDb,
   type QueueItem,
@@ -111,6 +112,26 @@ async function processItem(item: QueueItem): Promise<void> {
 
   await setState(item.asset_id, "hashing", { bytes_total: fileSize });
   const sha256 = await sha256File(localUri);
+
+  // Dedup criptográfica temprana: si el API ya tiene este sha256 'ready', la
+  // foto queda SYNCED sin generar miniatura ni emitir PUTs prefirmados. Si la
+  // llamada falla (sin red), se sigue el flujo normal: /init deduplica igual.
+  try {
+    const { existing } = await api.checkHashes([sha256]);
+    const hit = existing.find((e) => e.sha256 === sha256);
+    if (hit) {
+      await finishItem(item.asset_id, "duplicate", {
+        sha256,
+        remote_id: hit.id,
+        bytes_sent: fileSize,
+      });
+      refreshRemoteData();
+      useQueueEvents.getState().emit();
+      return;
+    }
+  } catch {
+    // Error de red/servidor: el init de abajo sigue haciendo la dedup.
+  }
 
   await setState(item.asset_id, "thumbnailing");
   const thumb = await makeThumbAndHash(mediaType, localUri);

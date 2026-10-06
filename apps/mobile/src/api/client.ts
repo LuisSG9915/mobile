@@ -1,4 +1,5 @@
 import type {
+  CheckHashesResponse,
   MediaDetail,
   Stats,
   TimelineResponse,
@@ -47,6 +48,13 @@ export const api = {
     apiFetch("/v1/uploads/init", {
       method: "POST",
       body: JSON.stringify(body),
+      signal: opts?.signal,
+    }).then((r) => r.json()),
+
+  checkHashes: (sha256: string[], opts?: { signal?: AbortSignal }): Promise<CheckHashesResponse> =>
+    apiFetch("/v1/uploads/check-hashes", {
+      method: "POST",
+      body: JSON.stringify({ sha256 }),
       signal: opts?.signal,
     }).then((r) => r.json()),
 
