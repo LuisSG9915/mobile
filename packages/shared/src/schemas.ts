@@ -64,6 +64,15 @@ export const uploadCompleteResponseSchema = z.object({
   status: z.literal("ready"),
 });
 
+export const checkHashesRequestSchema = z.object({
+  sha256: z.array(sha256Hex).min(1).max(500),
+});
+
+export const checkHashesResponseSchema = z.object({
+  /** Solo los hashes que ya existen como media 'ready' del usuario. */
+  existing: z.array(z.object({ sha256: sha256Hex, id: z.string() })),
+});
+
 // ---------- timeline ----------
 
 export const timelineItemSchema = z.object({
@@ -109,6 +118,8 @@ export const okSchema = z.object({ ok: z.literal(true) });
 export type SyncStatus = z.infer<typeof syncStatusSchema>;
 export type UploadInitInput = z.infer<typeof uploadInitSchema>;
 export type UploadInitResponse = z.infer<typeof uploadInitResponseSchema>;
+export type CheckHashesRequest = z.infer<typeof checkHashesRequestSchema>;
+export type CheckHashesResponse = z.infer<typeof checkHashesResponseSchema>;
 export type TimelineItem = z.infer<typeof timelineItemSchema>;
 export type TimelineResponse = z.infer<typeof timelineResponseSchema>;
 export type MediaDetail = z.infer<typeof mediaDetailSchema>;
