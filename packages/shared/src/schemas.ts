@@ -92,6 +92,16 @@ export const timelineResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export const trashItemSchema = timelineItemSchema.extend({
+  /** Ms epoch del borrado suave; la UI calcula los días que quedan para la purga. */
+  deletedAt: z.number(),
+});
+
+export const trashResponseSchema = z.object({
+  items: z.array(trashItemSchema),
+  nextCursor: z.null(),
+});
+
 // ---------- media ----------
 
 export const mediaDetailSchema = timelineItemSchema.extend({
@@ -122,6 +132,8 @@ export type CheckHashesRequest = z.infer<typeof checkHashesRequestSchema>;
 export type CheckHashesResponse = z.infer<typeof checkHashesResponseSchema>;
 export type TimelineItem = z.infer<typeof timelineItemSchema>;
 export type TimelineResponse = z.infer<typeof timelineResponseSchema>;
+export type TrashItem = z.infer<typeof trashItemSchema>;
+export type TrashResponse = z.infer<typeof trashResponseSchema>;
 export type MediaDetail = z.infer<typeof mediaDetailSchema>;
 export type Stats = z.infer<typeof statsSchema>;
 export type ApiError = z.infer<typeof errorSchema>;
