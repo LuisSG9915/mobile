@@ -139,6 +139,14 @@ export function getPendingItems(limit = 100): QueueItem[] {
   );
 }
 
+/** Todos los items de la cola (incluye done/duplicate) para la galería híbrida. */
+export function getQueueItems(limit = 2000): QueueItem[] {
+  return getQueueDb().getAllSync<QueueItem>(
+    "SELECT * FROM queue ORDER BY created_at DESC LIMIT ?",
+    [limit],
+  );
+}
+
 export function getFailed(limit = 50): QueueItem[] {
   return getQueueDb().getAllSync<QueueItem>(
     "SELECT * FROM queue WHERE state = 'failed' ORDER BY updated_at DESC LIMIT ?",

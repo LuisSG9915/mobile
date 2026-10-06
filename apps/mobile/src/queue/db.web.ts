@@ -336,6 +336,10 @@ export function getPendingItems(limit = 100): QueueItem[] {
     .slice(0, limit);
 }
 
+export function getQueueItems(limit = 2000): QueueItem[] {
+  return [...queue.values()].sort((a, b) => b.created_at - a.created_at).slice(0, limit);
+}
+
 export function getFailed(limit = 50): QueueItem[] {
   return [...queue.values()]
     .filter((r) => r.state === "failed")
