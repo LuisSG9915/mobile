@@ -55,6 +55,20 @@ export function kvSet(key: string, value: string): void {
   getQueueDb().runSync("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", [key, value]);
 }
 
+const PAUSE_KEY = "backup.paused";
+
+/**
+ * Pausa persistente del respaldo: vive en `kv`, así que sobrevive a reinicios
+ * de la app. Nunca se limpia sola — solo "Reanudar" la quita (no auto-resume).
+ */
+export function isBackupPaused(): boolean {
+  return kvGet(PAUSE_KEY) === "1";
+}
+
+export function setBackupPaused(paused: boolean): void {
+  kvSet(PAUSE_KEY, paused ? "1" : "0");
+}
+
 export async function enqueueAsset(
   asset: {
     id: string;

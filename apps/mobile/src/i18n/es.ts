@@ -70,6 +70,9 @@ export const t = {
     freeSpaceConfirm: (n: number, size: string) =>
       `¿Borrar la copia local de ${n} elementos ya respaldados (${size})? Seguirán disponibles en tu nube.`,
     freed: (n: number, size: string) => `${n} elementos liberados (${size})`,
+    pause: "Pausar respaldo",
+    resume: "Reanudar respaldo",
+    paused: "Respaldo en pausa",
   },
   gallery: {
     emptyTitle: "Aún no hay fotos respaldadas",
@@ -101,6 +104,8 @@ export const t = {
     failed: (n: number) => `${n} con errores`,
     completed: "Copia de seguridad completa",
     paused: "Respaldo en pausa",
+    pause: "Pausar respaldo",
+    resume: "Reanudar respaldo",
     idle: "Sin respaldos pendientes",
     error: "Respaldo con errores",
     syncing: "Respaldando…",

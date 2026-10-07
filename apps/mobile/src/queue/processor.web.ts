@@ -11,6 +11,7 @@ import {
   bumpAttempt,
   finishItem,
   getNextPending,
+  isBackupPaused,
   type QueueItem,
   recoverInterrupted,
   refreshProjection,
@@ -187,6 +188,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         await recoverInterrupted().catch(() => {});
         while (true) {
           if (cancelled || signal.aborted) break;
+          // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.
+          if (isBackupPaused()) break;
           if (opts.maxItems !== undefined && processed >= opts.maxItems) break;
           if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) break;
           // Logout/otro contexto a mitad de pasada: no seguir procesando.

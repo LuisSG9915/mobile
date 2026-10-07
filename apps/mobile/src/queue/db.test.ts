@@ -145,3 +145,25 @@ describe("getters síncronos", () => {
     ]);
   });
 });
+
+describe("pausa persistente", () => {
+  it("isBackupPaused lee backup.paused de kv y setBackupPaused lo persiste", async () => {
+    sqliteDb.getFirstSync.mockReturnValueOnce(null);
+    const db = await importNativeDb();
+    expect(db.isBackupPaused()).toBe(false);
+
+    sqliteDb.getFirstSync.mockReturnValueOnce({ v: "1" });
+    expect(db.isBackupPaused()).toBe(true);
+
+    db.setBackupPaused(true);
+    expect(sqliteDb.runSync).toHaveBeenLastCalledWith(
+      "INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)",
+      ["backup.paused", "1"],
+    );
+    db.setBackupPaused(false);
+    expect(sqliteDb.runSync).toHaveBeenLastCalledWith(
+      "INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)",
+      ["backup.paused", "0"],
+    );
+  });
+});

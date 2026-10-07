@@ -8,7 +8,14 @@ import { useQueueEvents } from "../../lib/events";
 import { formatBytes, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { useSettings, useSyncProgress } from "../../lib/store";
-import { getFailed, getQueueStats, kvGet, retryFailed } from "../../queue/db";
+import {
+  getFailed,
+  getQueueStats,
+  isBackupPaused,
+  kvGet,
+  retryFailed,
+  setBackupPaused,
+} from "../../queue/db";
 import { requestMediaPermissions } from "../../queue/permissions";
 import { isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
@@ -31,6 +38,19 @@ export default function BackupScreen() {
   const lastBackup = Number(kvGet("last_scan_ts") ?? "0");
   const progress = stats.total ? stats.done / stats.total : 0;
   const running = isRunning();
+  const paused = isBackupPaused();
+
+  const togglePause = () => {
+    if (paused) {
+      setBackupPaused(false);
+      useQueueEvents.getState().emit();
+      void runBackupPass();
+    } else {
+      // El item en vuelo termina; el procesador frena en el siguiente.
+      setBackupPaused(true);
+      useQueueEvents.getState().emit();
+    }
+  };
 
   const freeSpace = () => {
     const { assetIds, totalBytes } = getSyncedLocal();
@@ -50,15 +70,17 @@ export default function BackupScreen() {
     ]);
   };
 
-  const statusText = !running
-    ? stats.pending > 0
-      ? wifiOnly
-        ? t.backup.waitingWifi
+  const statusText = paused
+    ? t.backup.paused
+    : !running
+      ? stats.pending > 0
+        ? wifiOnly
+          ? t.backup.waitingWifi
+          : t.backup.allDone
         : t.backup.allDone
-      : t.backup.allDone
-    : stats.pending > 0
-      ? t.backup.uploading(`${stats.pending} pendientes`)
-      : t.backup.allDone;
+      : stats.pending > 0
+        ? t.backup.uploading(`${stats.pending} pendientes`)
+        : t.backup.allDone;
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top"]}>
@@ -93,6 +115,15 @@ export default function BackupScreen() {
             <Text className="text-xs text-neutral-400">
               {t.backup.lastBackup(formatRelative(lastBackup))}
             </Text>
+          ) : null}
+          {paused || running || stats.pending > 0 ? (
+            <View className="w-full">
+              <Button
+                label={paused ? t.backup.resume : t.backup.pause}
+                variant="ghost"
+                onPress={togglePause}
+              />
+            </View>
           ) : null}
         </Card>
 

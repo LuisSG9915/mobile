@@ -361,6 +361,49 @@ describe("processQueue", () => {
     expect(processor.isRunning()).toBe(false);
   });
 
+  it("con la pausa persistente activada no toma ningún item (sin auto-resume)", async () => {
+    const file = new File(["x"], "foto.png", { type: "image/png" });
+    await encolar("web-1", "foto.png", 1, file);
+    filesMock.__files.set("web-1", file);
+    db.setBackupPaused(true);
+    try {
+      await processor.processQueue();
+
+      expect(apiMock.api.initUpload).not.toHaveBeenCalled();
+      expect(db.getNextPending()?.asset_id).toBe("web-1");
+      expect(processor.isRunning()).toBe(false);
+    } finally {
+      db.setBackupPaused(false);
+    }
+  });
+
+  it("pausar a mitad de pasada deja terminar el item en vuelo y frena el siguiente", async () => {
+    const f1 = new File(["a"], "a.png", { type: "image/png" });
+    const f2 = new File(["b"], "b.png", { type: "image/png" });
+    // OJO: encolar devuelve siempre el primer pendiente (web-1); para web-2
+    // hay que buscar su fila en la proyección tras la pasada.
+    await encolar("web-1", "a.png", 1, f1);
+    await encolar("web-2", "b.png", 2, f2);
+    filesMock.__files.set("web-1", f1);
+    filesMock.__files.set("web-2", f2);
+    apiMock.api.completeUpload.mockResolvedValue({ id: "r1", status: "ready" });
+    // La pausa se activa durante el init del primer item: debe terminar y cortar.
+    apiMock.api.initUpload.mockImplementation(async () => {
+      db.setBackupPaused(true);
+      return initRespuestaUpload("r1");
+    });
+    try {
+      await processor.processQueue();
+
+      const stateOf = (id: string) => db.getQueueItems().find((i) => i.asset_id === id)?.state;
+      expect(stateOf("web-1")).toBe("done");
+      expect(stateOf("web-2")).toBe("queued");
+      expect(apiMock.api.initUpload).toHaveBeenCalledTimes(1);
+    } finally {
+      db.setBackupPaused(false);
+    }
+  });
+
   it("si otra pestaña tiene el lock (ifAvailable → null) no procesa", async () => {
     const file = new File(["x"], "foto.png", { type: "image/png" });
     await encolar("web-1", "foto.png", 1, file);

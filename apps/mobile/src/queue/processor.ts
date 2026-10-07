@@ -12,6 +12,7 @@ import {
   finishItem,
   getNextPending,
   getQueueDb,
+  isBackupPaused,
   type QueueItem,
   setNextRetryAt,
   setState,
@@ -204,6 +205,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   try {
     while (true) {
       if (cancelled) break;
+      // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.
+      if (isBackupPaused()) break;
       if (opts.maxItems !== undefined && processed >= opts.maxItems) break;
       if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) break;
 

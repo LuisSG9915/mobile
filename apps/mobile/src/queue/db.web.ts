@@ -221,6 +221,21 @@ export function kvSet(key: string, value: string): void {
   } catch {}
 }
 
+const PAUSE_KEY = "backup.paused";
+
+/**
+ * Pausa persistente del respaldo: vive en `kv` (localStorage), así que
+ * sobrevive a recargas y cierres de pestaña y la comparten todas las pestañas
+ * del navegador. Nunca se limpia sola — solo "Reanudar" la quita.
+ */
+export function isBackupPaused(): boolean {
+  return kvGet(PAUSE_KEY) === "1";
+}
+
+export function setBackupPaused(paused: boolean): void {
+  kvSet(PAUSE_KEY, paused ? "1" : "0");
+}
+
 export function enqueueAsset(
   asset: {
     id: string;

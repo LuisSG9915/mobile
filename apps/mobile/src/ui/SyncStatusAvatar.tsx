@@ -4,10 +4,12 @@ import { Modal, Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { useSession } from "../auth/client";
 import { t } from "../i18n/es";
+import { useQueueEvents } from "../lib/events";
 import { formatBytes } from "../lib/format";
 import { useSyncProgress } from "../lib/store";
-import { getQueueStats } from "../queue/db";
+import { getQueueStats, isBackupPaused, setBackupPaused } from "../queue/db";
 import { useSyncProgressAuto } from "../queue/progress";
+import { runBackupPass } from "../queue/runner";
 import type { SyncProgressStatus } from "../queue/types";
 
 const SIZE = 36;
@@ -51,6 +53,15 @@ export function SyncStatusAvatar() {
   const c = 2 * Math.PI * r;
   const initial = session?.user?.name?.trim()?.charAt(0)?.toUpperCase() ?? null;
   const stats = open ? getQueueStats() : null;
+  const paused = isBackupPaused();
+
+  const togglePause = () => {
+    // El item en vuelo termina; el procesador frena en el siguiente. La pausa
+    // persiste en kv y nunca se auto-reanuda: solo este botón la quita.
+    setBackupPaused(!paused);
+    useQueueEvents.getState().emit();
+    if (paused) void runBackupPass();
+  };
 
   return (
     <>
@@ -144,6 +155,16 @@ export function SyncStatusAvatar() {
             <Text className="text-2xl font-bold text-neutral-900 dark:text-white self-center">
               {Math.round(pct * 100)}%
             </Text>
+            {paused || p.filesRemaining > 0 ? (
+              <Pressable
+                onPress={togglePause}
+                className="border border-neutral-300 dark:border-neutral-700 rounded-xl px-4 py-2.5 items-center"
+              >
+                <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
+                  {paused ? t.syncP.resume : t.syncP.pause}
+                </Text>
+              </Pressable>
+            ) : null}
           </Pressable>
         </Pressable>
       </Modal>

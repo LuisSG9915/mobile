@@ -48,6 +48,28 @@ describe("kvSet/kvGet", () => {
   });
 });
 
+describe("pausa persistente", () => {
+  it("por defecto no está pausada", () => {
+    expect(db.isBackupPaused()).toBe(false);
+  });
+
+  it("setBackupPaused persiste en photos.kv.backup.paused y se puede quitar", () => {
+    db.setBackupPaused(true);
+    expect(localStorage.getItem("photos.kv.backup.paused")).toBe("1");
+    expect(db.isBackupPaused()).toBe(true);
+    db.setBackupPaused(false);
+    expect(db.isBackupPaused()).toBe(false);
+  });
+
+  it("sobrevive al cierre y reapertura de la cola (no auto-resume)", async () => {
+    db.setBackupPaused(true);
+    await db.closeQueue();
+    await db.initializeQueue("u1");
+    expect(db.isBackupPaused()).toBe(true);
+    db.setBackupPaused(false);
+  });
+});
+
 describe("enqueueAsset", () => {
   it("ignora ids repetidos", async () => {
     await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
