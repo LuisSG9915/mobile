@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { kvGet, kvSet } from "../queue/db";
+import type { SyncProgressState } from "../queue/types";
 
 type Settings = {
   wifiOnly: boolean;
@@ -33,4 +34,21 @@ export const useSettings = create<Settings>((set) => ({
     kvSet("onboarded", v ? "1" : "0");
     set({ onboarded: v });
   },
+}));
+
+/**
+ * Estado reactivo del respaldo (anillo del avatar, barra de Respaldo). Lo
+ * alimentan los procesadores vía publishSyncProgress y useSyncProgressAuto
+ * refresca ante cualquier tick de la cola.
+ */
+export const useSyncProgress = create<
+  SyncProgressState & { update: (s: SyncProgressState) => void }
+>((set) => ({
+  bytesUploaded: 0,
+  totalBytes: 0,
+  filesTotal: 0,
+  filesRemaining: 0,
+  currentFileName: "",
+  status: "idle",
+  update: (s) => set(s),
 }));

@@ -17,6 +17,7 @@ import {
   setState,
 } from "./db";
 import { sha256File } from "./hash";
+import { publishSyncProgress } from "./progress";
 import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
 import { makeThumbAndHash } from "./thumb";
 
@@ -127,6 +128,7 @@ async function processItem(item: QueueItem): Promise<void> {
       });
       refreshRemoteData();
       useQueueEvents.getState().emit();
+      publishSyncProgress(true);
       return;
     }
   } catch {
@@ -157,6 +159,7 @@ async function processItem(item: QueueItem): Promise<void> {
     await setState(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: fileSize });
     safeDelete(thumb.uri);
     refreshRemoteData();
+    publishSyncProgress(true);
     return;
   }
 
@@ -173,6 +176,7 @@ async function processItem(item: QueueItem): Promise<void> {
       lastProgress = now;
       db.runSync("UPDATE queue SET bytes_sent = ? WHERE asset_id = ?", [sent, item.asset_id]);
       useQueueEvents.getState().emit();
+      publishSyncProgress(true);
     }
   });
 
@@ -181,6 +185,7 @@ async function processItem(item: QueueItem): Promise<void> {
   await setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
   refreshRemoteData();
   useQueueEvents.getState().emit();
+  publishSyncProgress(true);
 }
 
 function safeDelete(uri: string) {
@@ -229,9 +234,11 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
           await setState(item.asset_id, "queued", { last_error: message });
         }
         useQueueEvents.getState().emit();
+        publishSyncProgress(true);
       }
     }
   } finally {
     running = false;
+    publishSyncProgress(false);
   }
 }

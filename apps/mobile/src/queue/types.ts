@@ -31,3 +31,18 @@ export type QueueItem = {
 };
 
 export type QueueStats = { total: number; done: number; pending: number; failed: number };
+
+export type SyncProgressStatus = "idle" | "syncing" | "completed" | "paused" | "error";
+
+/**
+ * Proyección agregada de la cola para el anillo de sincronización del avatar
+ * y la barra de progreso de Respaldo. Se recalcula con cada tick de la cola.
+ */
+export type SyncProgressState = {
+  bytesUploaded: number;
+  totalBytes: number;
+  filesTotal: number;
+  filesRemaining: number;
+  currentFileName: string;
+  status: SyncProgressStatus;
+};

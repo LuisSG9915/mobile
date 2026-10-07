@@ -2,6 +2,7 @@ import { Tabs } from "expo-router";
 import { CloudUpload, Images, Settings } from "lucide-react-native";
 import { ActivityIndicator, Platform, Text, View } from "react-native";
 import { t } from "../../i18n/es";
+import { useSyncProgressAuto } from "../../queue/progress";
 import { useBackupRunner } from "../../queue/runner";
 import { useQueueSession } from "../../queue/session";
 
@@ -10,6 +11,8 @@ export default function TabsLayout() {
   // en nativo devuelve { ready: true } y es un no-op.
   const { ready, error } = useQueueSession();
   useBackupRunner(ready);
+  // Proyección reactiva de la cola para el anillo del avatar y la barra de Respaldo.
+  useSyncProgressAuto();
 
   if (Platform.OS === "web" && error) {
     return (

@@ -11,6 +11,7 @@ import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { useSettings } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { EmptyState, SyncBadge } from "../../ui";
+import { SyncStatusAvatar } from "../../ui/SyncStatusAvatar";
 
 /**
  * Celda memoizada: los ticks de la cola regeneran los HybridPhoto, así que se
@@ -78,6 +79,10 @@ export default function GalleryScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top"]}>
+      <View className="flex-row items-center justify-between px-4 pt-2 pb-3">
+        <Text className="text-2xl font-bold text-neutral-900 dark:text-white">{t.tabs.photos}</Text>
+        <SyncStatusAvatar />
+      </View>
       {isEmpty ? (
         <EmptyState
           title={t.gallery.emptyTitle}

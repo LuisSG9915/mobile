@@ -7,7 +7,7 @@ import { t } from "../../i18n/es";
 import { useQueueEvents } from "../../lib/events";
 import { formatBytes, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
-import { useSettings } from "../../lib/store";
+import { useSettings, useSyncProgress } from "../../lib/store";
 import { getFailed, getQueueStats, kvGet, retryFailed } from "../../queue/db";
 import { requestMediaPermissions } from "../../queue/permissions";
 import { isRunning } from "../../queue/processor";
@@ -25,6 +25,7 @@ export default function BackupScreen() {
 
   const stats = getQueueStats();
   const failed = getFailed();
+  const sync = useSyncProgress();
   // En web no hay copia local que liberar (el blob se borra al terminar).
   const syncedLocal = isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal();
   const lastBackup = Number(kvGet("last_scan_ts") ?? "0");
@@ -72,6 +73,22 @@ export default function BackupScreen() {
             {stats.total === 0 ? t.backup.allDone : t.backup.synced(stats.done, stats.total)}
           </Text>
           <Text className="text-sm text-neutral-500 text-center">{statusText}</Text>
+          {sync.status === "syncing" && sync.totalBytes > 0 ? (
+            <View className="w-full gap-1.5">
+              <View className="h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                <View
+                  className="h-full bg-accent rounded-full"
+                  style={{
+                    width: `${Math.min(100, (sync.bytesUploaded / sync.totalBytes) * 100)}%`,
+                  }}
+                />
+              </View>
+              <Text className="text-xs text-neutral-500 text-center" numberOfLines={1}>
+                {t.syncP.bytes(formatBytes(sync.bytesUploaded), formatBytes(sync.totalBytes))}
+                {sync.currentFileName ? ` · ${sync.currentFileName}` : ""}
+              </Text>
+            </View>
+          ) : null}
           {lastBackup ? (
             <Text className="text-xs text-neutral-400">
               {t.backup.lastBackup(formatRelative(lastBackup))}

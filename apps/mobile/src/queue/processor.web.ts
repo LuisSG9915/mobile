@@ -17,6 +17,7 @@ import {
   setNextRetryAt,
   setState,
 } from "./db";
+import { publishSyncProgress } from "./progress";
 import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
 
 const CANCELLED_MSG = "Subida cancelada.";
@@ -80,6 +81,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
         bytes_sent: file.size,
       });
       refreshRemoteData();
+      publishSyncProgress(true);
       return;
     }
   } catch {
@@ -115,6 +117,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
     // Estado terminal + borrado del blob en una sola transacción.
     await finishItem(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: file.size });
     refreshRemoteData();
+    publishSyncProgress(true);
     return;
   }
 
@@ -133,6 +136,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
         lastProgress = now;
         void setState(item.asset_id, "uploading_original", { bytes_sent: sent }).catch(() => {});
         useQueueEvents.getState().emit();
+        publishSyncProgress(true);
       }
     },
     signal,
@@ -144,6 +148,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   await finishItem(item.asset_id, "done", { remote_id: init.id, bytes_sent: file.size });
   refreshRemoteData();
   useQueueEvents.getState().emit();
+  publishSyncProgress(true);
 }
 
 export type ProcessOptions = { maxItems?: number; deadlineMs?: number };
@@ -221,11 +226,13 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
               // La cola se cerró a mitad de la pasada (logout/cierre): nada que anotar.
             }
             useQueueEvents.getState().emit();
+            publishSyncProgress(true);
           }
         }
       } finally {
         running = false;
         if (controller === ctrl) controller = null;
+        publishSyncProgress(false);
       }
     },
   );
