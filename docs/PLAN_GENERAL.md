@@ -10,7 +10,7 @@
 | Fase | Archivo | Estado | Commit |
 | :--- | :--- | :---: | :---: |
 | **Fase 1** | `docs/fases/01_d1_dedup_cuotas.md` | [x] Completado (2026-10-06) | dcdec0f |
-| **Fase 2** | `docs/fases/02_r2_descargas_cache.md` | [ ] Pendiente | - |
+| **Fase 2** | `docs/fases/02_r2_descargas_cache.md` | [x] Completado (2026-10-06) | 9befaf6 |
 | **Fase 3** | `docs/fases/03_progreso_sync.md` | [ ] Pendiente | - |
 | **Fase 4** | `docs/fases/04_liberar_espacio.md` | [ ] Pendiente | - |
 | **Fase 5** | `docs/fases/05_ux_google_photos.md` | [ ] Pendiente | - |
