@@ -14,4 +14,4 @@
 | **Fase 3** | `docs/fases/03_progreso_sync.md` | [x] Completado (2026-10-06) | 386a6a7 |
 | **Fase 4** | `docs/fases/04_liberar_espacio.md` | [x] Completado (2026-10-06) | bd67afa |
 | **Fase 5** | `docs/fases/05_ux_google_photos.md` | [x] Completado (2026-10-06) | 56a18bc |
-| **Fase 6** | `docs/fases/06_pipeline_pruebas.md` | [ ] Pendiente | - |
+| **Fase 6** | `docs/fases/06_pipeline_pruebas.md` | [x] Completado (2026-10-06) | HEAD |

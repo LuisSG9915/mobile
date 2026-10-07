@@ -27,3 +27,23 @@ App → PUT directo a R2 (thumb .webp, original)
 App → POST /v1/uploads/:id/complete  (verifica head() en R2)
     ← item listo; aparece en GET /v1/timeline
 ```
+
+## Funcionalidades
+
+- **Deduplicación SHA-256**: `check-hashes` + índice único `(user_id, sha256)` en D1; los duplicados no re-suben bytes. Cuota de 10 GB por usuario en `user_storage_stats` (`GET /v1/user/storage`).
+- **Descargas**: `GET /v1/media/:id/download` devuelve URL prefirmada con `Content-Disposition: attachment`; las lecturas prefirmadas llevan `Cache-Control: immutable`. En nativo se guarda al carrete; en web, `<a download>` o ZIP en lote (`fotos-exportadas.zip`, concurrencia 3).
+- **Progreso de sync reactivo**: proyección byte-a-byte de la cola en store Zustand (`SyncProgressState`), anillo de progreso SVG en el avatar del header y barra en la pestaña Respaldo.
+- **Liberar espacio**: borra del dispositivo solo lo confirmado en la nube (`done`/`duplicate` + `remote_id` + `sha256`); la galería sigue mostrando esos items como `REMOTE_ONLY` vía miniaturas remotas.
+- **Gestos Google Photos**: fast-scrubber lateral con burbuja mes/año, pinch-to-zoom con densidades 1/3/5 columnas, drag-to-select con barra contextual (descargar / mover a papelera) y selección por día.
+
+## Pruebas
+
+Todo el pipeline corre **100% offline** (`remoteBindings: false` en `apps/api/vitest.config.ts`): D1 vía migraciones en Miniflare y R2 efímero en memoria.
+
+```bash
+pnpm lint         # Biome
+pnpm typecheck    # tsc --noEmit en todos los paquetes
+pnpm test         # API (Miniflare) + mobile (happy-dom) vía turbo
+```
+
+Estado actual: 46 tests API + 116 tests mobile, todos verdes sin llamadas externas a Cloudflare. El plan de fases y sus commits viven en `docs/PLAN_GENERAL.md`.
