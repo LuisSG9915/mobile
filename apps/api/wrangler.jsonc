@@ -35,6 +35,11 @@
     "BETTER_AUTH_URL": "https://photos-api.luis-sg9915.workers.dev",
     "WEB_ORIGINS": "https://photos-web.luis-sg9915.workers.dev",
     "ADMIN_EMAIL": "luis.sg9915@gmail.com"
+    // Recuperación de contraseña (Resend):
+    // - RESEND_API_KEY va como SECRET: `npx wrangler secret put RESEND_API_KEY`.
+    // - EMAIL_FROM cuando haya dominio verificado en Resend, ej.:
+    //   "EMAIL_FROM": "Photos <no-reply@tudominio.com>"
+    // Sin RESEND_API_KEY el enlace de reset solo se escribe en los logs.
   },
   "triggers": {
     "crons": ["0 3 * * *"]
@@ -45,6 +50,15 @@
       "namespace_id": "1001",
       "simple": {
         "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      // Freno de fuerza bruta sobre login/registro, por IP (middleware en index.ts).
+      "name": "AUTH_LIMITER",
+      "namespace_id": "1002",
+      "simple": {
+        "limit": 30,
         "period": 60
       }
     }

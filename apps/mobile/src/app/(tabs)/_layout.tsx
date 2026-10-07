@@ -8,7 +8,7 @@ import { useQueueSession } from "../../queue/session";
 
 export default function TabsLayout() {
   // En web abre IndexedDB por usuario y suspende la cola si la sesión cae;
-  // en nativo devuelve { ready: true } y es un no-op.
+  // en nativo fija el dueño (user_id) de la cola SQLite.
   const { ready, error } = useQueueSession();
   useBackupRunner(ready);
   // Proyección reactiva de la cola para el anillo del avatar y la barra de Respaldo.

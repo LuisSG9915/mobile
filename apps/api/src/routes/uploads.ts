@@ -13,7 +13,7 @@ import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { originalKey, thumbKey } from "../lib/keys";
 import { presignPut } from "../lib/s3";
-import { addStorageUsage } from "../lib/storage-stats";
+import { addStorageUsage, getUsageBytes } from "../lib/storage-stats";
 
 /** Grupo de fecha YYYY-MM-DD en UTC derivado del epoch ms de captura. */
 const dateGroupOf = (takenAt: number) => new Date(takenAt).toISOString().slice(0, 10);
@@ -137,8 +137,34 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
       .where(and(eq(media.userId, user.id), eq(media.sha256, body.sha256)))
       .get();
 
-    if (existing?.status === "ready" && !existing.deletedAt) {
+    if (existing?.status === "ready") {
+      if (!existing.deletedAt) {
+        return c.json({ status: "duplicate", id: existing.id } as const, 200);
+      }
+      // Re-subir algo que está en la papelera lo restaura sin re-subir bytes:
+      // los objetos R2 ya existen bajo la misma clave (sha256), así que solo
+      // se quita el borrado suave. Además evita un segundo init→complete que
+      // volvería a contar los bytes en la cuota.
+      await db
+        .update(media)
+        .set({ deletedAt: null, updatedAt: Date.now() })
+        .where(eq(media.id, existing.id));
       return c.json({ status: "duplicate", id: existing.id } as const, 200);
+    }
+
+    // Cuota real: si esta subida superaría max_bytes se rechaza antes de
+    // presignar. Las subidas ya en vuelo pueden completar aunque crucen el
+    // límite — rechazarlas aquí dejaría objetos huérfanos pagados en R2.
+    const usage = await getUsageBytes(db, user.id);
+    if (usage.usedBytes + body.fileSize + body.thumbSize > usage.maxBytes) {
+      return c.json(
+        {
+          error: "quota_exceeded",
+          message:
+            "Has alcanzado tu cuota de almacenamiento. Elimina elementos de la papelera para liberar espacio.",
+        },
+        413,
+      );
     }
 
     const tKey = thumbKey(user.id, body.sha256);
@@ -250,10 +276,15 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
       return c.json({ error: "mime_mismatch", message: "La miniatura subida no es WebP." }, 409);
     }
 
-    await db
+    // Flip atómico pending→ready: si otro /complete ganó la carrera,
+    // changes=0 y NO se vuelve a sumar la cuota (respuesta idempotente).
+    const res = await db
       .update(media)
       .set({ status: "ready", updatedAt: Date.now() })
-      .where(eq(media.id, row.id));
+      .where(and(eq(media.id, row.id), eq(media.status, "pending")));
+    if ((res.meta.changes ?? 0) === 0) {
+      return c.json({ id: row.id, status: "ready" } as const, 200);
+    }
     // Los bytes cuentan para la cuota solo cuando la subida queda confirmada.
     // Se descuentan al purgar la papelera (cron), no al mover a papelera.
     await addStorageUsage(db, user.id, row.fileSize + row.thumbSize);

@@ -1,5 +1,8 @@
 import { env, SELF } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { getDb } from "../src/db/client";
+import { media, userStorageStats } from "../src/db/schema";
 import { authed, createUser, initBody, j, sha } from "./helpers";
 
 async function init(cookie: string, body: Record<string, unknown>) {
@@ -83,6 +86,74 @@ describe("uploads/init", () => {
     expect(jb.status).toBe("upload");
     expect(ja.id).not.toBe(jb.id);
     expect(ja.original.url).not.toBe(jb.original.url);
+  });
+
+  it("rechaza con 413 quota_exceeded cuando la subida supera la cuota", async () => {
+    const { cookie, userId } = await createUser();
+    // Usuario al límite de su cuota: quedan 5 000 B, la subida pide más.
+    const db = getDb(env.DB);
+    await db.insert(userStorageStats).values({
+      userId,
+      usedBytes: 10 * 1024 * 1024 * 1024 - 5_000,
+      mediaCount: 1,
+      updatedAt: Date.now(),
+    });
+
+    const res = await init(cookie, initBody({ fileSize: 1_000_000, thumbSize: 8_000 }));
+    expect(res.status).toBe(413);
+    const json = await j(res);
+    expect(json.error).toBe("quota_exceeded");
+    // No se emitieron URLs ni se materializó fila pending extra.
+    expect(json.thumb).toBeUndefined();
+    const rows = await db.select().from(media).where(eq(media.userId, userId)).all();
+    expect(rows.filter((r) => r.status === "pending")).toHaveLength(0);
+  });
+
+  it("re-iniciar una subida de algo en la papelera lo restaura sin re-subir", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({ sha256: sha("77ab") });
+    const id = await makeReady(cookie, userId, body);
+
+    // A la papelera.
+    const del = await SELF.fetch(
+      `http://localhost/v1/media/${id}`,
+      authed(cookie, { method: "DELETE" }),
+    );
+    expect(del.status).toBe(200);
+
+    // Re-init con el mismo sha: restaura la fila (deletedAt → null) y
+    // responde duplicate — sin PUTs ni doble conteo de cuota.
+    const res = await init(cookie, body);
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.status).toBe("duplicate");
+    expect(json.id).toBe(id);
+
+    const db = getDb(env.DB);
+    const row = await db.select().from(media).where(eq(media.id, id)).get();
+    expect(row?.deletedAt).toBeNull();
+  });
+
+  it("un segundo /complete del mismo id no duplica la cuota", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({ sha256: sha("dc88"), fileSize: 100_000, thumbSize: 1_000 });
+    const id = await makeReady(cookie, userId, body);
+
+    // Llamada idempotente repetida (retry del cliente tras timeout, p. ej.).
+    const again = await SELF.fetch(
+      `http://localhost/v1/uploads/${id}/complete`,
+      authed(cookie, { method: "POST" }),
+    );
+    expect(again.status).toBe(200);
+
+    const db = getDb(env.DB);
+    const stats = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(stats?.usedBytes).toBe(101_000);
+    expect(stats?.mediaCount).toBe(1);
   });
 });
 

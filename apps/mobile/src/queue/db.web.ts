@@ -128,6 +128,9 @@ function openChannel(): void {
  * el mismo userId; al cambiar de usuario se vacía la proyección antes de
  * hidratar la nueva.
  */
+/** Misma convención que db.ts: último usuario con sesión, en kv. */
+const OWNER_KEY = "queue.owner";
+
 export function initializeQueue(userId: string): Promise<void> {
   if (store.getActiveContext()?.userId === userId) return Promise.resolve();
   if (initFor?.userId === userId) return initFor.promise;
@@ -139,6 +142,7 @@ export function initializeQueue(userId: string): Promise<void> {
     queue.clear();
     for (const row of rows) applyRow(row);
     store.setActiveContext({ userId, epoch });
+    kvSet(OWNER_KEY, userId);
     openChannel();
     useQueueEvents.getState().emit();
   });
@@ -150,6 +154,11 @@ export function initializeQueue(userId: string): Promise<void> {
   return promise;
 }
 
+/** Usuario al que pertenece la cola (paridad con db.ts; en web no hay headless). */
+export function getQueueOwner(): string | null {
+  return kvGet(OWNER_KEY);
+}
+
 /** Drena las escrituras pendientes, suelta el contexto y cierra IndexedDB. */
 export async function closeQueue(): Promise<void> {
   initFor = null;
@@ -159,6 +168,9 @@ export async function closeQueue(): Promise<void> {
   bc?.close();
   bc = null;
   store.closeQueueDb();
+  try {
+    localStorage.removeItem(KV_PREFIX + OWNER_KEY);
+  } catch {}
 }
 
 /**
@@ -236,16 +248,26 @@ export function setBackupPaused(paused: boolean): void {
   kvSet(PAUSE_KEY, paused ? "1" : "0");
 }
 
-export function enqueueAsset(
-  asset: {
-    id: string;
-    uri: string;
-    filename?: string | null;
-    mediaType: "photo" | "video";
-    creationTime: number;
-  },
-  file?: File,
-): Promise<void> {
+/** Último escaneo por usuario, como en db.ts (en web el scanner es no-op). */
+export function getLastScanTs(): number {
+  const uid = store.getActiveContext()?.userId ?? "anon";
+  return Number(kvGet(`last_scan_ts:${uid}`) ?? "0");
+}
+
+export function setLastScanTs(ts: number): void {
+  const uid = store.getActiveContext()?.userId ?? "anon";
+  kvSet(`last_scan_ts:${uid}`, String(ts));
+}
+
+export type EnqueueInput = {
+  id: string;
+  uri: string;
+  filename?: string | null;
+  mediaType: "photo" | "video";
+  creationTime: number;
+};
+
+export function enqueueAsset(asset: EnqueueInput, file?: File): Promise<void> {
   return mutation(async (ctx) => {
     if (queue.has(asset.id)) return;
     const row: store.QueueRow = {
@@ -279,6 +301,15 @@ export function enqueueAsset(
     await store.saveItemWithFile(row, payload);
     applyRow(row);
   });
+}
+
+/**
+ * Paridad con db.ts (batch en una transacción SQLite). El scanner web es
+ * no-op, así que aquí basta un bucle secuencial — nadie lo llama con miles
+ * de items.
+ */
+export async function enqueueAssetsBatch(assets: EnqueueInput[]): Promise<void> {
+  for (const asset of assets) await enqueueAsset(asset);
 }
 
 export function setState(

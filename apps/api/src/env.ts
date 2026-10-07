@@ -2,6 +2,8 @@ export type Bindings = {
   DB: D1Database;
   BUCKET: R2Bucket;
   UPLOAD_LIMITER?: RateLimit;
+  /** Rate limit de Cloudflare para /api/auth/* (login/registro); ausente en dev/tests. */
+  AUTH_LIMITER?: RateLimit;
 
   R2_ACCOUNT_ID: string;
   R2_ACCESS_KEY_ID: string;
@@ -18,6 +20,12 @@ export type Bindings = {
 
   /** Email que habilita las rutas /v1/admin/*; ausente → 403 para todos. */
   ADMIN_EMAIL?: string;
+
+  /** API key de Resend para correos transaccionales; ausente → el envío se loguea (dev). */
+  RESEND_API_KEY?: string;
+
+  /** Remitente de correos transaccionales (ej. "Photos <no-reply@dominio.com>"). */
+  EMAIL_FROM?: string;
 };
 
 export function webOrigins(env: Bindings): string[] {

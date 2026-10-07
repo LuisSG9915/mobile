@@ -34,7 +34,7 @@ pnpm --filter @photos/mobile test        # vitest + happy-dom (módulos *.web.ts
 pnpm --filter @photos/mobile test:e2e    # Playwright (levanta wrangler + expo web solos)
 ```
 
-Guía completa y checklist nativo: `docs/testing/PLAN_PRUEBAS.md`. Hallazgos curados: `docs/testing/findings.json`.
+Guía completa y checklist nativo: `docs/testing/PLAN_PRUEBAS.md`. Hallazgos curados: `docs/testing/findings.json`. Decisiones de diseño del hardening de procesos (cuota, cola por usuario, cron, rate limit): `docs/decisions.md`.
 
 ## Soporte web
 

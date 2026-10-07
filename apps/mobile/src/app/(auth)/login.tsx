@@ -67,6 +67,9 @@ export default function Login() {
             loading={loading}
             disabled={!email || !password}
           />
+          <Pressable onPress={() => router.push("/forgot-password")} className="items-center">
+            <Text className="text-neutral-500 text-sm">{t.auth.forgotPassword}</Text>
+          </Pressable>
           <Pressable onPress={() => router.push("/register")} className="items-center py-2">
             <Text className="text-accent font-medium">{t.auth.noAccount}</Text>
           </Pressable>

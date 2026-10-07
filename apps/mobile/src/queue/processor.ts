@@ -14,6 +14,8 @@ import {
   getQueueDb,
   isBackupPaused,
   type QueueItem,
+  recoverInterrupted,
+  setBackupPaused,
   setNextRetryAt,
   setState,
 } from "./db";
@@ -24,16 +26,23 @@ import { makeThumbAndHash } from "./thumb";
 
 let running = false;
 let cancelled = false;
+let activeUploadTask: FileSystem.UploadTask | null = null;
 
 function refreshRemoteData() {
   try {
     void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
+    void queryClient.invalidateQueries({ queryKey: ["storage"] }).catch(() => {});
   } catch {}
 }
 
+/**
+ * Corta la pasada y cancela la subida HTTP en vuelo (paridad con el AbortController
+ * de web). Sin esto el UploadTask seguía subiendo en background hasta terminar.
+ */
 export function cancelQueue() {
   cancelled = true;
+  void activeUploadTask?.cancelAsync().catch(() => {});
 }
 
 export function isRunning() {
@@ -64,6 +73,10 @@ function parseExifDate(exif: Record<string, unknown> | null | undefined): number
   return new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime();
 }
 
+/** Sin progreso en este tiempo = subida estancada → abortar y reintentar. */
+const STALL_MS = 90_000;
+const WATCHDOG_TICK_MS = 15_000;
+
 async function uploadFile(
   target: { url: string; headers: Record<string, string> },
   fileUri: string,
@@ -72,6 +85,7 @@ async function uploadFile(
   // Presigned PUT: enviar exactamente el content-type firmado; el OS pone content-length.
   const headers = { ...target.headers };
   delete headers["content-length"]; // el upload task lo calcula y debe coincidir
+  let lastEventAt = Date.now();
   const task = FileSystem.createUploadTask(
     target.url,
     fileUri,
@@ -81,11 +95,24 @@ async function uploadFile(
       sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
       headers,
     },
-    onProgress ? (p) => onProgress(p.totalBytesSent, p.totalBytesExpectedToSend) : undefined,
+    (p) => {
+      lastEventAt = Date.now();
+      onProgress?.(p.totalBytesSent, p.totalBytesExpectedToSend);
+    },
   );
-  const res = await task.uploadAsync();
-  if (!res || (res.status !== 200 && res.status !== 204)) {
-    throw new Error(`Upload failed: ${res?.status}`);
+  activeUploadTask = task;
+  // Watchdog: una conexión colgada sin eventos no puede congelar la cola.
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastEventAt > STALL_MS) void task.cancelAsync().catch(() => {});
+  }, WATCHDOG_TICK_MS);
+  try {
+    const res = await task.uploadAsync();
+    if (!res || (res.status !== 200 && res.status !== 204)) {
+      throw new Error(`La subida falló (HTTP ${res?.status}).`);
+    }
+  } finally {
+    clearInterval(watchdog);
+    if (activeUploadTask === task) activeUploadTask = null;
   }
 }
 
@@ -98,6 +125,17 @@ async function processItem(item: QueueItem): Promise<void> {
   const localUri = info.localUri ?? item.uri;
   const file = new File(localUri);
   const fileSize = file.size ?? 0;
+  // Extensión real del archivo: si no está soportada (RAW, AVIF…) el fallback
+  // de extFromFilename la etiquetaría como jpg/mp4 en R2 — mejor fallar claro.
+  const rawExt = (item.filename?.split(".").pop() ?? "").toLowerCase();
+  if (rawExt && !(rawExt in MIME_BY_EXT)) {
+    await setState(item.asset_id, "failed", {
+      last_error: `Formato no admitido (.${rawExt}).`,
+    });
+    useQueueEvents.getState().emit();
+    publishSyncProgress(true);
+    return;
+  }
   const ext = extFromFilename(item.filename, item.media_type);
   const mimeType = MIME_BY_EXT[ext];
   const mediaType = extToMediaType(ext);
@@ -175,7 +213,11 @@ async function processItem(item: QueueItem): Promise<void> {
     const now = Date.now();
     if (now - lastProgress > 500) {
       lastProgress = now;
-      db.runSync("UPDATE queue SET bytes_sent = ? WHERE asset_id = ?", [sent, item.asset_id]);
+      db.runSync("UPDATE queue SET bytes_sent = ? WHERE asset_id = ? AND user_id IS ?", [
+        sent,
+        item.asset_id,
+        item.user_id ?? null,
+      ]);
       useQueueEvents.getState().emit();
       publishSyncProgress(true);
     }
@@ -203,6 +245,9 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   cancelled = false;
   let processed = 0;
   try {
+    // La app pudo morir a mitad de un item (kill): devolver los estados
+    // transitorios a queued con bytes_sent=0 antes de elegir el siguiente.
+    await recoverInterrupted().catch(() => {});
     while (true) {
       if (cancelled) break;
       // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.
@@ -220,21 +265,42 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         await processItem(item);
         processed++;
       } catch (e) {
-        const db = getQueueDb();
-        const row = db.getFirstSync<{ attempts: number }>(
-          "SELECT attempts FROM queue WHERE asset_id = ?",
-          [item.asset_id],
-        );
-        const attempts = (row?.attempts ?? item.attempts) + 1;
-        await bumpAttempt(item.asset_id);
+        if (cancelled) {
+          // Cancelada por el usuario (logout): vuelve a queued sin gastar intento.
+          await setState(item.asset_id, "queued").catch(() => {});
+          break;
+        }
         const message =
           e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
-        if (attempts >= MAX_ATTEMPTS) {
+        // Sesión caída a mitad de pasada: reintentar quemaría intentos hasta
+        // 'failed' contra un 401 que no se arregla solo. Reencolar y cortar.
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          await setState(item.asset_id, "queued").catch(() => {});
+          break;
+        }
+        // 4xx definitivos no arreglan solos reintentando: failed directo.
+        // 413 quota_exceeded además pausa el respaldo para no quemar intentos
+        // en el resto de la cola — el usuario libera espacio y reanuda.
+        if (e instanceof ApiError && e.status === 413) {
+          await setState(item.asset_id, "failed", { last_error: message });
+          setBackupPaused(true);
+        } else if (e instanceof ApiError && e.status === 400) {
           await setState(item.asset_id, "failed", { last_error: message });
         } else {
-          const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
-          await setNextRetryAt(item.asset_id, Date.now() + wait);
-          await setState(item.asset_id, "queued", { last_error: message });
+          const db = getQueueDb();
+          const row = db.getFirstSync<{ attempts: number }>(
+            "SELECT attempts FROM queue WHERE asset_id = ? AND user_id IS ?",
+            [item.asset_id, item.user_id ?? null],
+          );
+          const attempts = (row?.attempts ?? item.attempts) + 1;
+          await bumpAttempt(item.asset_id);
+          if (attempts >= MAX_ATTEMPTS) {
+            await setState(item.asset_id, "failed", { last_error: message });
+          } else {
+            const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
+            await setNextRetryAt(item.asset_id, Date.now() + wait);
+            await setState(item.asset_id, "queued", { last_error: message });
+          }
         }
         useQueueEvents.getState().emit();
         publishSyncProgress(true);

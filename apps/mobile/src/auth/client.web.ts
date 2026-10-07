@@ -45,7 +45,7 @@ export const authClient = createAuthClient({
   },
 });
 
-export const { useSession, signIn, signUp } = authClient;
+export const { useSession, signIn, signUp, requestPasswordReset, resetPassword } = authClient;
 
 export const signOut: typeof authClient.signOut = async (options) => {
   try {

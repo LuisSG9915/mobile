@@ -5,6 +5,7 @@ import type {
   FavoriteResponse,
   MediaDetail,
   Stats,
+  StorageResponse,
   TimelineFilter,
   TimelineMonthsResponse,
   TimelineResponse,
@@ -24,6 +25,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Tope de espera para llamadas JSON al API. No usa AbortSignal.timeout (soporte
+ * irregular fuera de navegadores modernos): una carrera que rechaza a los 30 s
+ * basta — la petición huérfana resuelve tarde sin efectos. El `signal` del
+ * caller sigue pasando al fetch para cancelación real.
+ */
+const API_TIMEOUT_MS = 30_000;
+
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   for (const [key, value] of Object.entries(await getAuthHeaders())) {
@@ -32,7 +41,16 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const res = await Promise.race([
+    fetch(`${API_URL}${path}`, { ...init, headers }),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("La solicitud tardó demasiado. Revisa tu conexión.")),
+        API_TIMEOUT_MS,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
   if (!res.ok) {
     let code = "unknown";
     let message = "Algo salió mal.";
@@ -103,6 +121,8 @@ export const api = {
   trash: (): Promise<TrashResponse> => apiFetch("/v1/trash").then((r) => r.json()),
 
   stats: (): Promise<Stats> => apiFetch("/v1/stats").then((r) => r.json()),
+
+  userStorage: (): Promise<StorageResponse> => apiFetch("/v1/user/storage").then((r) => r.json()),
 
   adminStorage: (): Promise<AdminStorageResponse> =>
     apiFetch("/v1/admin/storage").then((r) => r.json()),

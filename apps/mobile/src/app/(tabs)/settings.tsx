@@ -1,4 +1,4 @@
-import { ADMIN_EMAIL, STORAGE_QUOTA_BYTES } from "@photos/shared";
+import { ADMIN_EMAIL } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { ChevronRight, Database, HardDrive, Trash2 } from "lucide-react-native";
@@ -19,6 +19,9 @@ const isWeb = Platform.OS === "web";
 export default function SettingsScreen() {
   const { data: session } = useSession();
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
+  // La cuota real la lleva user_storage_stats (incluye la papelera, que sigue
+  // ocupando R2 hasta la purga) — no el SUM de /v1/stats que excluye borrados.
+  const storage = useQuery({ queryKey: ["storage"], queryFn: api.userStorage });
   useQueueEvents((s) => s.tick); // re-render al liberar/cambiar la cola
 
   // En web no hay copia local que liberar (el blob se borra al terminar).
@@ -87,13 +90,13 @@ export default function SettingsScreen() {
             <View
               className="h-full bg-accent rounded-full"
               style={{
-                width: `${Math.min(100, ((stats.data?.totalBytes ?? 0) / (stats.data?.quotaBytes ?? STORAGE_QUOTA_BYTES)) * 100)}%`,
+                width: `${Math.min(100, storage.data?.usedPercent ?? 0)}%`,
               }}
             />
           </View>
           <View className="flex-row justify-between">
             <Text className="text-sm text-neutral-600 dark:text-neutral-300">
-              {t.settings.storageUsed(formatBytes(stats.data?.totalBytes ?? 0))}
+              {t.settings.storageUsed(formatBytes(storage.data?.usedBytes ?? 0))}
             </Text>
             <Text className="text-sm text-neutral-500">
               {t.settings.photosBackedUp(stats.data?.count ?? 0)}

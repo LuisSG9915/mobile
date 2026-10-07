@@ -3,8 +3,13 @@ import { useQueueEvents } from "../lib/events";
 import { processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
-/** En web no hay biblioteca que escanear (scanLibrary es no-op): solo procesa. */
-export async function runBackupPass(): Promise<void> {
+export type BackupPassOptions = { forceScan?: boolean };
+
+/**
+ * En web no hay biblioteca que escanear (scanLibrary es no-op): solo procesa.
+ * `forceScan` existe por paridad de firma con el runner nativo.
+ */
+export async function runBackupPass(_opts: BackupPassOptions = {}): Promise<void> {
   await scanLibrary();
   useQueueEvents.getState().emit();
   await processQueue();

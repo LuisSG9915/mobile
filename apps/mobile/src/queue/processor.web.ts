@@ -15,6 +15,7 @@ import {
   type QueueItem,
   recoverInterrupted,
   refreshProjection,
+  setBackupPaused,
   setNextRetryAt,
   setState,
 } from "./db";
@@ -41,6 +42,7 @@ function refreshRemoteData() {
   try {
     void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
+    void queryClient.invalidateQueries({ queryKey: ["storage"] }).catch(() => {});
   } catch {}
 }
 
@@ -57,9 +59,22 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
     await setState(item.asset_id, "failed", {
       last_error: "El archivo ya no está disponible. Vuelve a seleccionarlo.",
     });
+    useQueueEvents.getState().emit();
+    publishSyncProgress(true);
     return;
   }
 
+  // Extensión real del archivo: si no está soportada (RAW, AVIF…) el fallback
+  // de extFromFilename la etiquetaría como jpg/mp4 en R2 — mejor fallar claro.
+  const rawExt = (item.filename?.split(".").pop() ?? "").toLowerCase();
+  if (rawExt && !(rawExt in MIME_BY_EXT)) {
+    await setState(item.asset_id, "failed", {
+      last_error: `Formato no admitido (.${rawExt}).`,
+    });
+    useQueueEvents.getState().emit();
+    publishSyncProgress(true);
+    return;
+  }
   const ext = extFromFilename(item.filename, item.media_type);
   const mimeType = file.type || MIME_BY_EXT[ext];
   const mediaType = extToMediaType(ext);
@@ -216,14 +231,35 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
             }
             const message =
               e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
+            // Sesión caída a mitad de pasada: reintentar quemaría intentos
+            // hasta 'failed' contra un 401 que no se arregla solo. Cortar.
+            if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+              try {
+                await setState(item.asset_id, "queued");
+              } catch {}
+              break;
+            }
             try {
-              await bumpAttempt(item.asset_id);
-              if (item.attempts >= MAX_ATTEMPTS) {
+              // 4xx definitivos no arreglan solos reintentando: failed directo.
+              // 413 quota_exceeded además pausa el respaldo para no quemar
+              // intentos en el resto de la cola — el usuario libera y reanuda.
+              if (e instanceof ApiError && e.status === 413) {
+                await setState(item.asset_id, "failed", { last_error: message });
+                setBackupPaused(true);
+              } else if (e instanceof ApiError && e.status === 400) {
                 await setState(item.asset_id, "failed", { last_error: message });
               } else {
-                const wait = BACKOFF_MS[Math.min(item.attempts - 1, BACKOFF_MS.length - 1)];
-                await setNextRetryAt(item.asset_id, Date.now() + wait);
-                await setState(item.asset_id, "queued", { last_error: message });
+                // Leer attempts ANTES de bumpAttempt: la fila proyectada es la
+                // misma referencia viva y el bump la muta (doble conteo si no).
+                const attempts = item.attempts + 1;
+                await bumpAttempt(item.asset_id);
+                if (attempts >= MAX_ATTEMPTS) {
+                  await setState(item.asset_id, "failed", { last_error: message });
+                } else {
+                  const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
+                  await setNextRetryAt(item.asset_id, Date.now() + wait);
+                  await setState(item.asset_id, "queued", { last_error: message });
+                }
               }
             } catch {
               // La cola se cerró a mitad de la pasada (logout/cierre): nada que anotar.

@@ -19,6 +19,23 @@ export const t = {
       "¿Cerrar sesión en este dispositivo? Se eliminarán los archivos pendientes de respaldar guardados en este navegador. Las fotos ya respaldadas no se borran.",
     invalidCredentials: "Correo o contraseña incorrectos.",
     genericError: "Algo salió mal. Inténtalo de nuevo.",
+    forgotPassword: "¿Olvidaste tu contraseña?",
+    forgotTitle: "Recuperar contraseña",
+    forgotBody: "Escribe tu correo y te enviaremos un enlace para restablecerla.",
+    forgotAction: "Enviar enlace",
+    forgotSentTitle: "Revisa tu correo",
+    forgotSentBody:
+      "Si ese correo tiene una cuenta, te llegará un enlace para restablecer la contraseña. El enlace expira en 1 hora.",
+    resetTitle: "Elige una contraseña nueva",
+    resetNewPassword: "Nueva contraseña",
+    resetConfirm: "Repite la contraseña",
+    resetAction: "Restablecer contraseña",
+    resetTooShort: "La contraseña debe tener al menos 8 caracteres.",
+    resetMismatch: "Las contraseñas no coinciden.",
+    resetInvalid: "El enlace no es válido o ya expiró. Pide uno nuevo.",
+    resetDone: "Contraseña actualizada. Ya puedes iniciar sesión.",
+    backToLogin: "Volver a iniciar sesión",
+    tooManyAttempts: "Demasiados intentos. Espera un minuto.",
   },
   onboarding: {
     title: "Permisos",
@@ -62,6 +79,7 @@ export const t = {
     pickFiles: "Subir fotos y videos",
     pickFailed: (n: number) =>
       `${n} archivo(s) no se pudieron guardar. Libera espacio e inténtalo de nuevo.`,
+    pickSkipped: (n: number) => `${n} archivo(s) se omitieron: formato no admitido.`,
     noteIos:
       "En iOS el respaldo en segundo plano lo decide el sistema; abre la app para acelerarlo.",
     freeSpace: "Liberar espacio",

@@ -52,7 +52,7 @@ function elegirArchivos(input: HTMLInputElement, elegidos: File[]) {
 const UUID_RE = /^web-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 describe("pickAndEnqueue", () => {
-  it("encola solo las extensiones permitidas y devuelve {added, failed}", async () => {
+  it("encola solo las extensiones permitidas y cuenta las omitidas", async () => {
     const getInput = capturarInput();
     const promise = files.pickAndEnqueue();
     const input = getInput();
@@ -62,7 +62,7 @@ describe("pickAndEnqueue", () => {
     const txt = new File(["texto"], "c.txt", { type: "text/plain", lastModified: 3_333 });
     elegirArchivos(input, [jpg, mp4, txt]);
 
-    await expect(promise).resolves.toEqual({ added: 2, failed: 0 });
+    await expect(promise).resolves.toEqual({ added: 2, failed: 0, skipped: 1 });
 
     const items = db.getPendingItems();
     expect(items).toHaveLength(2);
@@ -103,12 +103,12 @@ describe("pickAndEnqueue", () => {
     expect(await restored?.text()).toBe("contenido-jpg");
   });
 
-  it("resuelve {added:0, failed:0} cuando el usuario cancela el selector", async () => {
+  it("resuelve {added:0, failed:0, skipped:0} cuando el usuario cancela el selector", async () => {
     const getInput = capturarInput();
     const promise = files.pickAndEnqueue();
     getInput().dispatchEvent(new Event("cancel"));
 
-    await expect(promise).resolves.toEqual({ added: 0, failed: 0 });
+    await expect(promise).resolves.toEqual({ added: 0, failed: 0, skipped: 0 });
     expect(db.getQueueStats().total).toBe(0);
   });
 });

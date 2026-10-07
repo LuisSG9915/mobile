@@ -53,5 +53,13 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./test/apply-migrations.ts"],
     include: ["test/**/*.test.ts"],
+    // better-auth lanza APIError (redirects 302, INVALID_TOKEN 400…) dentro de
+    // sus endpoints: la respuesta llega correcta pero alguna promesa interna
+    // queda como unhandled rejection ruidosa en workerd. Solo se ignora esa
+    // forma concreta (statusCode numérico HTTP); el resto sigue fallando.
+    onUnhandledError(err) {
+      const e = err as { statusCode?: number };
+      return !(typeof e?.statusCode === "number" && e.statusCode >= 300 && e.statusCode < 600);
+    },
   },
 });

@@ -28,7 +28,7 @@ export async function getFile(assetId: string): Promise<File | undefined> {
   return file;
 }
 
-export type PickResult = { added: number; failed: number };
+export type PickResult = { added: number; failed: number; skipped: number };
 
 /**
  * Abre el selector de archivos y encola lo elegido de forma SECUENCIAL (un
@@ -44,7 +44,7 @@ export function pickAndEnqueue(): Promise<PickResult> {
     input.accept = "image/*,video/*";
     const finish = (result: PickResult) => {
       input.remove();
-      if (result.added === 0 && result.failed > 0) {
+      if (result.added === 0 && result.failed > 0 && result.skipped === 0) {
         reject(
           new Error(
             "No se pudieron guardar los archivos para respaldar. Libera espacio e inténtalo de nuevo.",
@@ -58,9 +58,13 @@ export function pickAndEnqueue(): Promise<PickResult> {
       const procesar = async (): Promise<PickResult> => {
         let added = 0;
         let failed = 0;
+        let skipped = 0;
         for (const f of Array.from(input.files ?? [])) {
           const ext = (f.name.split(".").pop() ?? "").toLowerCase();
-          if (!(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) continue;
+          if (!(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
+            skipped++;
+            continue;
+          }
           const id = `web-${crypto.randomUUID()}`;
           try {
             await enqueueAsset(
@@ -79,12 +83,12 @@ export function pickAndEnqueue(): Promise<PickResult> {
             failed++;
           }
         }
-        return { added, failed };
+        return { added, failed, skipped };
       };
       // Si el procesamiento entero explota, cuenta como fallo global.
-      procesar().then(finish, () => finish({ added: 0, failed: 1 }));
+      procesar().then(finish, () => finish({ added: 0, failed: 1, skipped: 0 }));
     });
-    input.addEventListener("cancel", () => finish({ added: 0, failed: 0 }));
+    input.addEventListener("cancel", () => finish({ added: 0, failed: 0, skipped: 0 }));
     input.click();
   });
 }

@@ -10,9 +10,9 @@ import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import {
   getFailed,
+  getLastScanTs,
   getQueueStats,
   isBackupPaused,
-  kvGet,
   retryFailed,
   setBackupPaused,
 } from "../../queue/db";
@@ -35,7 +35,7 @@ export default function BackupScreen() {
   const sync = useSyncProgress();
   // En web no hay copia local que liberar (el blob se borra al terminar).
   const syncedLocal = isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal();
-  const lastBackup = Number(kvGet("last_scan_ts") ?? "0");
+  const lastBackup = getLastScanTs();
   const progress = stats.total ? stats.done / stats.total : 0;
   const running = isRunning();
   const paused = isBackupPaused();
@@ -44,7 +44,7 @@ export default function BackupScreen() {
     if (paused) {
       setBackupPaused(false);
       useQueueEvents.getState().emit();
-      void runBackupPass();
+      void runBackupPass().catch(() => {});
     } else {
       // El item en vuelo termina; el procesador frena en el siguiente.
       setBackupPaused(true);
@@ -203,7 +203,7 @@ export default function BackupScreen() {
               variant="ghost"
               onPress={async () => {
                 await retryFailed();
-                void runBackupPass();
+                void runBackupPass().catch(() => {});
               }}
             />
           </Card>
@@ -220,10 +220,12 @@ export default function BackupScreen() {
               if (isWeb) {
                 const result = await pickAndEnqueue();
                 if (result.failed > 0) setPickWarning(t.backup.pickFailed(result.failed));
+                else if (result.skipped > 0) setPickWarning(t.backup.pickSkipped(result.skipped));
               } else {
                 await requestMediaPermissions();
               }
-              await runBackupPass();
+              // Botón manual: fuerza el escaneo aunque el intervalo no haya vencido.
+              await runBackupPass({ forceScan: true });
             } catch (e) {
               setPickWarning(e instanceof Error ? e.message : String(e));
             } finally {

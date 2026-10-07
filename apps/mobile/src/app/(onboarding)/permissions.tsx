@@ -36,7 +36,8 @@ export default function Permissions() {
       return;
     }
     setOnboarded(true);
-    void runBackupPass();
+    // Primera activación: escanear ya, sin esperar al intervalo.
+    void runBackupPass({ forceScan: true }).catch(() => {});
     router.replace("/(tabs)");
   };
 

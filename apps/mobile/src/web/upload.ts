@@ -1,6 +1,10 @@
 type PresignedTarget = { url: string; headers: Record<string, string> };
 
 const CANCELLED_MSG = "Subida cancelada.";
+const STALLED_MSG = "La subida se estancó por falta de red.";
+/** Sin progreso en este tiempo = subida estancada → abortar y reintentar. */
+const STALL_MS = 90_000;
+const WATCHDOG_TICK_MS = 15_000;
 
 /**
  * PUT directo a la URL prefirmada de R2 con progreso (XHR, porque fetch no
@@ -9,7 +13,8 @@ const CANCELLED_MSG = "Subida cancelada.";
  *
  * `signal` cancela de verdad: si ya viene abortada rechaza sin crear el XHR;
  * si aborta a mitad se llama xhr.abort() y la promesa rechaza con
- * "Subida cancelada.". El listener se retira en todos los finales.
+ * "Subida cancelada.". Además un watchdog aborta si la subida no reporta
+ * progreso en STALL_MS — una conexión colgada no puede congelar la cola.
  */
 export function uploadBlob(
   target: PresignedTarget,
@@ -23,14 +28,26 @@ export function uploadBlob(
       return;
     }
     const xhr = new XMLHttpRequest();
+    let lastProgressAt = Date.now();
+    let stalled = false;
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastProgressAt > STALL_MS) {
+        stalled = true;
+        xhr.abort();
+      }
+    }, WATCHDOG_TICK_MS);
     const onAbortSignal = () => xhr.abort();
-    const stopListening = () => signal?.removeEventListener("abort", onAbortSignal);
+    const stopListening = () => {
+      clearInterval(watchdog);
+      signal?.removeEventListener("abort", onAbortSignal);
+    };
     xhr.open("PUT", target.url);
     for (const [key, value] of Object.entries(target.headers)) {
       if (key.toLowerCase() === "content-length") continue;
       xhr.setRequestHeader(key, value);
     }
     xhr.upload.onprogress = (e) => {
+      lastProgressAt = Date.now();
       if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
     };
     xhr.onload = () => {
@@ -48,7 +65,7 @@ export function uploadBlob(
     };
     xhr.onabort = () => {
       stopListening();
-      reject(new Error(CANCELLED_MSG));
+      reject(new Error(stalled || !signal?.aborted ? STALLED_MSG : CANCELLED_MSG));
     };
     signal?.addEventListener("abort", onAbortSignal);
     xhr.send(blob);

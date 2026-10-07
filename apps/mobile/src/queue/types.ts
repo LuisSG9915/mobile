@@ -16,6 +16,8 @@ export type QueueState =
 
 export type QueueItem = {
   asset_id: string;
+  /** Solo nativo: dueño de la fila (la web proyecta sin este campo). */
+  user_id?: string | null;
   uri: string;
   filename: string | null;
   media_type: "photo" | "video";
@@ -31,6 +33,9 @@ export type QueueItem = {
 };
 
 export type QueueStats = { total: number; done: number; pending: number; failed: number };
+
+/** Resultado del scan de biblioteca: encolados + omitidos por formato. */
+export type ScanResult = { added: number; skipped: number };
 
 export type SyncProgressStatus = "idle" | "syncing" | "completed" | "paused" | "error";
 

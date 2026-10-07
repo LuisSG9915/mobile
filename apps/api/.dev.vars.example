@@ -19,3 +19,12 @@ WEB_ORIGINS=http://localhost:8081
 
 # Email admin del panel /v1/admin/storage. En prod va en wrangler.jsonc vars.
 ADMIN_EMAIL=luis.sg9915@gmail.com
+
+# Correo transaccional (recuperación de contraseña) vía Resend.
+# Sin clave, el "envío" se escribe en el log de wrangler: copia el enlace de ahí.
+# En producción: `npx wrangler secret put RESEND_API_KEY` (nunca en vars).
+RESEND_API_KEY=
+# Remitente. onboarding@resend.dev solo envía al email dueño de la cuenta Resend;
+# para producción hace falta un dominio verificado en Resend y ponerlo aquí
+# (dev) o como var EMAIL_FROM en wrangler.jsonc (prod).
+EMAIL_FROM=Photos <onboarding@resend.dev>

@@ -32,5 +32,8 @@ Thumbs.db
 test-results/
 apps/mobile/e2e/.artifacts/
 
+# Volcados de la auditoría de prod (scripts/audit-prod.mjs --json)
+out.json
+
 # Notas locales (credenciales)
 uso.txt

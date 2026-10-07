@@ -34,6 +34,29 @@ const webCors = (env: Bindings) =>
   });
 
 app.use("/api/auth/*", async (c, next) => webCors(c.env)(c, next));
+
+// Freno de fuerza bruta por IP sobre los endpoints sensibles de auth
+// (login, registro y recuperación). En dev/tests el binding no existe → no-op.
+const AUTH_SENSITIVE = [
+  "/api/auth/sign-in",
+  "/api/auth/sign-up",
+  "/api/auth/request-password-reset",
+  "/api/auth/reset-password",
+];
+app.use("/api/auth/*", async (c, next) => {
+  const limiter = c.env.AUTH_LIMITER;
+  if (limiter && c.req.method === "POST" && AUTH_SENSITIVE.some((p) => c.req.path.startsWith(p))) {
+    const key = c.req.header("cf-connecting-ip") ?? "anon";
+    const { success } = await limiter.limit({ key });
+    if (!success) {
+      return c.json(
+        { error: "rate_limited", message: "Demasiados intentos. Espera un minuto." },
+        429,
+      );
+    }
+  }
+  return next();
+});
 app.use("/v1/*", async (c, next) => webCors(c.env)(c, next));
 app.use("/v1/*", requireUser);
 

@@ -60,7 +60,7 @@ export function SyncStatusAvatar() {
     // persiste en kv y nunca se auto-reanuda: solo este botón la quita.
     setBackupPaused(!paused);
     useQueueEvents.getState().emit();
-    if (paused) void runBackupPass();
+    if (paused) void runBackupPass().catch(() => {});
   };
 
   return (
