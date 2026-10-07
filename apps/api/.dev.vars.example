@@ -16,3 +16,6 @@ BETTER_AUTH_URL=http://localhost:8787
 # Orígenes web permitidos por CORS, separados por coma. En `wrangler dev`
 # sobrescribe al var de wrangler.jsonc (que lleva el origen de producción).
 WEB_ORIGINS=http://localhost:8081
+
+# Email admin del panel /v1/admin/storage. En prod va en wrangler.jsonc vars.
+ADMIN_EMAIL=luis.sg9915@gmail.com

@@ -161,6 +161,23 @@ export const downloadResponseSchema = z.object({
 
 export const okSchema = z.object({ ok: z.literal(true) });
 
+// ---------- admin ----------
+
+export const adminStorageRowSchema = z.object({
+  email: z.string(),
+  usedBytes: z.number(),
+  maxBytes: z.number(),
+  mediaCount: z.number(),
+  /** Porcentaje de cuota usado, 0-100 con 2 decimales. */
+  usedPercent: z.number(),
+});
+
+export const adminStorageResponseSchema = z.object({
+  rows: z.array(adminStorageRowSchema),
+  totalUsedBytes: z.number(),
+  userCount: z.number(),
+});
+
 // ---------- tipos ----------
 
 export type SyncStatus = z.infer<typeof syncStatusSchema>;
@@ -180,4 +197,6 @@ export type MediaDetail = z.infer<typeof mediaDetailSchema>;
 export type Stats = z.infer<typeof statsSchema>;
 export type StorageResponse = z.infer<typeof storageResponseSchema>;
 export type DownloadResponse = z.infer<typeof downloadResponseSchema>;
+export type AdminStorageRow = z.infer<typeof adminStorageRowSchema>;
+export type AdminStorageResponse = z.infer<typeof adminStorageResponseSchema>;
 export type ApiError = z.infer<typeof errorSchema>;

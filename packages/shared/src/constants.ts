@@ -63,3 +63,6 @@ export const TIMELINE_MAX_LIMIT = 200;
 export const TRASH_RETENTION_DAYS = 30;
 /** Cuota de almacenamiento por usuario (10 GB) */
 export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
+
+/** Email del administrador del panel de almacenamiento R2 (fase 6). */
+export const ADMIN_EMAIL = "luis.sg9915@gmail.com";

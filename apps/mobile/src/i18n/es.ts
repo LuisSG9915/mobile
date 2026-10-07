@@ -157,8 +157,20 @@ export const t = {
     freeSpaceHint: (b: string) =>
       `Tienes ${b} respaldados en la nube que puedes borrar de tu teléfono de forma segura.`,
     freeSpaceAction: "Liberar espacio",
+    admin: "Almacenamiento R2 (admin)",
+    adminHint: "Uso por usuario",
     about: "Acerca de",
     version: "Versión",
+  },
+  admin: {
+    title: "Almacenamiento R2",
+    email: "Usuario",
+    used: "Usado",
+    count: "Medios",
+    quota: "Cuota",
+    total: (n: number) => `Total · ${n} usuarios`,
+    empty: "Sin usuarios",
+    restricted: "Acceso restringido al administrador",
   },
   errors: {
     network: "Sin conexión. Revisa tu red.",

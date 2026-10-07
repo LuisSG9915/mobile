@@ -33,7 +33,8 @@
     "PRESIGN_TTL_SECONDS": "900",
     "MAX_ORIGINAL_BYTES": "5368709120",
     "BETTER_AUTH_URL": "https://photos-api.luis-sg9915.workers.dev",
-    "WEB_ORIGINS": "https://photos-web.luis-sg9915.workers.dev"
+    "WEB_ORIGINS": "https://photos-web.luis-sg9915.workers.dev",
+    "ADMIN_EMAIL": "luis.sg9915@gmail.com"
   },
   "triggers": {
     "crons": ["0 3 * * *"]

@@ -15,6 +15,9 @@ export type Bindings = {
 
   /** Orígenes web permitidos por CORS, separados por coma (ej. "http://localhost:8081,https://photos-web.workers.dev"). */
   WEB_ORIGINS?: string;
+
+  /** Email que habilita las rutas /v1/admin/*; ausente → 403 para todos. */
+  ADMIN_EMAIL?: string;
 };
 
 export function webOrigins(env: Bindings): string[] {

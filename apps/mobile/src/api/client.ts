@@ -1,4 +1,5 @@
 import type {
+  AdminStorageResponse,
   CheckHashesResponse,
   DownloadResponse,
   FavoriteResponse,
@@ -102,4 +103,7 @@ export const api = {
   trash: (): Promise<TrashResponse> => apiFetch("/v1/trash").then((r) => r.json()),
 
   stats: (): Promise<Stats> => apiFetch("/v1/stats").then((r) => r.json()),
+
+  adminStorage: (): Promise<AdminStorageResponse> =>
+    apiFetch("/v1/admin/storage").then((r) => r.json()),
 };

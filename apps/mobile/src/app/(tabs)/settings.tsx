@@ -1,7 +1,7 @@
-import { STORAGE_QUOTA_BYTES } from "@photos/shared";
+import { ADMIN_EMAIL, STORAGE_QUOTA_BYTES } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { ChevronRight, HardDrive, Trash2 } from "lucide-react-native";
+import { ChevronRight, Database, HardDrive, Trash2 } from "lucide-react-native";
 import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
@@ -135,6 +135,23 @@ export default function SettingsScreen() {
             <ChevronRight size={18} color="#a3a3a3" />
           </Card>
         </Pressable>
+
+        {session?.user.email === ADMIN_EMAIL ? (
+          <Pressable onPress={() => router.push("/admin")} accessibilityRole="button">
+            <Card className="flex-row items-center justify-between">
+              <View className="flex-row items-center gap-3">
+                <Database size={18} color="#a3a3a3" />
+                <View>
+                  <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                    {t.settings.admin}
+                  </Text>
+                  <Text className="text-xs text-neutral-500">{t.settings.adminHint}</Text>
+                </View>
+              </View>
+              <ChevronRight size={18} color="#a3a3a3" />
+            </Card>
+          </Pressable>
+        ) : null}
 
         <Button label={t.auth.logout} variant="ghost" onPress={logout} />
 
