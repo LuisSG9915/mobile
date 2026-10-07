@@ -13,4 +13,4 @@
 | **Fase 4** | `docs/fases/04_liberar_espacio_papelera.md` | Liberar Espacio y Purga de Papelera a 30 días | [x] Completado | bd67afa |
 | **Fase 5** | `docs/fases/05_filtros_favoritos_busqueda.md` | Favoritos, Chips de Filtro y Date Jump | [x] Completado | 6ed25ed |
 | **Fase 6** | `docs/fases/06_admin_r2_storage.md` | Panel Almacenamiento R2 para luis.sg9915@gmail.com | [x] Completado | 423f7fe |
-| **Fase 7** | `docs/fases/07_ux_gestos_pipeline.md` | Gestos (Zoom, Scrubber, Swipe) y Tests Finales | [x] Completado | c4b8739 |
+| **Fase 7** | `docs/fases/07_ux_gestos_pipeline.md` | Gestos (Zoom, Scrubber, Swipe) y Tests Finales | [x] Completado | c171624 |
