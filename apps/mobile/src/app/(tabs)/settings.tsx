@@ -1,19 +1,46 @@
 import { STORAGE_QUOTA_BYTES } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { ChevronRight, Trash2 } from "lucide-react-native";
+import { ChevronRight, HardDrive, Trash2 } from "lucide-react-native";
 import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
+import { useQueueEvents } from "../../lib/events";
 import { formatBytes, formatRelative } from "../../lib/format";
+import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { performLogout } from "../../queue/logout";
 import { Button, Card } from "../../ui";
+
+const isWeb = Platform.OS === "web";
 
 export default function SettingsScreen() {
   const { data: session } = useSession();
   const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats });
+  useQueueEvents((s) => s.tick); // re-render al liberar/cambiar la cola
+
+  // En web no hay copia local que liberar (el blob se borra al terminar).
+  const syncedLocal = isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal();
+
+  const freeSpace = () => {
+    const { assetIds, totalBytes } = getSyncedLocal();
+    if (!assetIds.length) return;
+    const size = formatBytes(totalBytes);
+    Alert.alert(t.backup.freeSpace, t.backup.freeSpaceConfirm(assetIds.length, size), [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: t.backup.freeSpace,
+        style: "destructive",
+        onPress: () => {
+          void freeSyncedSpace().then((n) => {
+            if (n > 0) toast.success(t.backup.freed(n, size));
+          });
+        },
+      },
+    ]);
+  };
 
   const doLogout = async () => {
     // Capturar antes de que la sesión desaparezca: performLogout lo usa para
@@ -78,6 +105,21 @@ export default function SettingsScreen() {
             </Text>
           ) : null}
         </Card>
+
+        {syncedLocal.assetIds.length > 0 ? (
+          <Card className="gap-3">
+            <View className="flex-row items-center gap-2">
+              <HardDrive size={16} color="#4f46e5" />
+              <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                {t.settings.freeSpace}
+              </Text>
+            </View>
+            <Text className="text-sm text-neutral-500">
+              {t.settings.freeSpaceHint(formatBytes(syncedLocal.totalBytes))}
+            </Text>
+            <Button label={t.settings.freeSpaceAction} variant="ghost" onPress={freeSpace} />
+          </Card>
+        ) : null}
 
         <Pressable onPress={() => router.push("/trash")} accessibilityRole="button">
           <Card className="flex-row items-center justify-between">

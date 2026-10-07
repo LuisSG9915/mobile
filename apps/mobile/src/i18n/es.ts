@@ -134,6 +134,10 @@ export const t = {
     storageUsed: (used: string) => `${used} usados`,
     photosBackedUp: (n: number) => `${n} elementos respaldados`,
     trash: "Papelera",
+    freeSpace: "Liberar espacio del teléfono",
+    freeSpaceHint: (b: string) =>
+      `Tienes ${b} respaldados en la nube que puedes borrar de tu teléfono de forma segura.`,
+    freeSpaceAction: "Liberar espacio",
     about: "Acerca de",
     version: "Versión",
   },

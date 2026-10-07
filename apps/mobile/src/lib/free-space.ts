@@ -4,13 +4,17 @@ import { useLibraryEvents, useQueueEvents } from "./events";
 
 /**
  * "Liberar espacio": fotos con respaldo confirmado (done/duplicate con
- * remote_id) cuya copia local sigue ocupando espacio en el dispositivo.
- * Tras borrarlas, mergeGallery las refleja como REMOTE_ONLY (la fila de la
- * cola queda como vínculo asset_id ↔ remote_id).
+ * remote_id y sha256 registrado) cuya copia local sigue ocupando espacio
+ * en el dispositivo. Tras borrarlas, mergeGallery las refleja como
+ * REMOTE_ONLY (la fila de la cola queda como vínculo asset_id ↔ remote_id).
  */
 export function getSyncedLocal(): { assetIds: string[]; totalBytes: number } {
   const items = getQueueItems().filter(
-    (i) => (i.state === "done" || i.state === "duplicate") && i.remote_id != null,
+    (i) =>
+      (i.state === "done" || i.state === "duplicate") &&
+      i.remote_id != null &&
+      i.sha256 != null &&
+      i.asset_id,
   );
   return {
     assetIds: items.map((i) => i.asset_id),
