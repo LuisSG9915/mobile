@@ -17,8 +17,19 @@
         "buildType": "apk"
       }
     },
+    "release-apk": {
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev"
+      }
+    },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev"
+      }
     }
   }
 }

@@ -47,3 +47,18 @@ pnpm test         # API (Miniflare) + mobile (happy-dom) vía turbo
 ```
 
 Estado actual: 46 tests API + 116 tests mobile, todos verdes sin llamadas externas a Cloudflare. El plan de fases y sus commits viven en `docs/PLAN_GENERAL.md`.
+
+## Distribución
+
+APK público para GitHub Releases / Obtainium / repo F-Droid propio:
+
+```bash
+cd apps/mobile
+npx eas-cli build -p android --profile release-apk
+```
+
+El profile `release-apk` firma con el keystore gestionado por EAS y hornea `EXPO_PUBLIC_API_URL` apuntando al API de producción.
+
+## Licencia
+
+[AGPL-3.0](LICENSE) para todo el monorepo (app, API y `shared`). Quien despliegue una versión modificada del API como servicio debe publicar sus cambios.

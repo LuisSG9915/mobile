@@ -9,14 +9,14 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.photos.app",
+      "bundleIdentifier": "com.photosR2.app",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Necesitamos acceso a tu biblioteca para respaldar tus fotos y videos en tu propio almacenamiento.",
         "UIBackgroundModes": ["fetch", "processing"]
       }
     },
     "android": {
-      "package": "com.photos.app",
+      "package": "com.photosR2.app",
       "permissions": [
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
