@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { Info, Trash2, X } from "lucide-react-native";
+import { Download, Info, Trash2, X } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -26,6 +26,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import { deleteLocalCopy, hasLocalCopy } from "../../lib/free-space";
+import { saveDownload } from "../../lib/save-download";
 import { useTimeline } from "../../lib/timeline";
 import { Button } from "../../ui";
 
@@ -209,6 +210,21 @@ export default function MediaViewer() {
     },
   });
 
+  const [downloading, setDownloading] = useState(false);
+  const onDownload = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const { url, filename } = await api.downloadMedia(activeId);
+      await saveDownload(url, filename);
+      toast.success(t.viewer.downloadDone);
+    } catch {
+      toast.error(t.viewer.downloadFailed);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const onDeleteLocal = async () => {
     const ok = await deleteLocalCopy(activeId);
     if (ok) toast.success(t.viewer.deleteLocalDone);
@@ -242,6 +258,18 @@ export default function MediaViewer() {
           <X color="#fff" size={26} />
         </Pressable>
         <View className="flex-row gap-5">
+          <Pressable
+            onPress={() => void onDownload()}
+            disabled={downloading}
+            accessibilityLabel={t.viewer.download}
+            hitSlop={12}
+          >
+            {downloading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Download color="#fff" size={24} />
+            )}
+          </Pressable>
           <Pressable
             onPress={() => setShowInfo(true)}
             accessibilityLabel={t.viewer.info}

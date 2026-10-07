@@ -1,5 +1,6 @@
 import type {
   CheckHashesResponse,
+  DownloadResponse,
   MediaDetail,
   Stats,
   TimelineResponse,
@@ -75,6 +76,9 @@ export const api = {
 
   mediaDetail: (id: string): Promise<MediaDetail> =>
     apiFetch(`/v1/media/${id}`).then((r) => r.json()),
+
+  downloadMedia: (id: string): Promise<DownloadResponse> =>
+    apiFetch(`/v1/media/${id}/download`).then((r) => r.json()),
 
   deleteMedia: (id: string): Promise<{ ok: true }> =>
     apiFetch(`/v1/media/${id}`, { method: "DELETE" }).then((r) => r.json()),

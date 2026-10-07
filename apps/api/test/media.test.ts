@@ -72,6 +72,38 @@ describe("media", () => {
     expect((await j(tl2)).items.length).toBe(1);
   });
 
+  it("download devuelve URL prefirmada con attachment y caché inmutable", async () => {
+    const { cookie, userId } = await createUser();
+    const id = await seedOne(userId);
+    const res = await SELF.fetch(`http://localhost/v1/media/${id}/download`, authed(cookie));
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.filename).toMatch(/^IMG-.{16}\.jpg$/);
+    const url = decodeURIComponent(json.url);
+    expect(url).toContain("response-content-disposition=attachment");
+    expect(url).toContain(`filename="${json.filename}"`);
+    expect(url).toContain("response-cache-control=public, max-age=31536000, immutable");
+    expect(json.url).toContain("X-Amz-Signature");
+  });
+
+  it("download de elemento ajeno o en papelera → 404; sin sesión → 401", async () => {
+    const a = await createUser();
+    const b = await createUser();
+    const foreign = await seedOne(a.userId);
+    const trashed = await seedOne(a.userId, true, 1);
+
+    const anon = await SELF.fetch(`http://localhost/v1/media/${foreign}/download`);
+    expect(anon.status).toBe(401);
+
+    const res = await SELF.fetch(`http://localhost/v1/media/${foreign}/download`, authed(b.cookie));
+    expect(res.status).toBe(404);
+    const res2 = await SELF.fetch(
+      `http://localhost/v1/media/${trashed}/download`,
+      authed(a.cookie),
+    );
+    expect(res2.status).toBe(404);
+  });
+
   it("detalle/borrado de elemento ajeno → 404", async () => {
     const a = await createUser();
     const b = await createUser();

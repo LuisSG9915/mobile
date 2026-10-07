@@ -26,6 +26,17 @@ function getClient(env: Bindings): S3Client {
 
 export type PresignedTarget = { url: string; headers: Record<string, string> };
 
+// Las claves R2 van direccionadas por sha256: el contenido nunca cambia bajo
+// la misma clave, así que cualquier caché (CDN, navegador, expo-image) puede
+// tratar la respuesta como inmutable.
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+// Ventana de firma reutilizada por todas las lecturas GET (ver presignGet).
+const getSigningDate = () => {
+  const windowMs = PRESIGN_GET_WINDOW_SECONDS * 1000;
+  return new Date(Math.floor(Date.now() / windowMs) * windowMs);
+};
+
 export async function presignPut(
   env: Bindings,
   key: string,
@@ -59,13 +70,33 @@ export async function presignGet(env: Bindings, key: string): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: env.R2_BUCKET_NAME,
     Key: key,
+    ResponseCacheControl: IMMUTABLE_CACHE_CONTROL,
   });
   // Fecha de firma redondeada a bloques de 6 h: la URL no cambia dentro de la
   // ventana, así que las caches (expo-image, CDN) pueden reutilizarla.
-  const windowMs = PRESIGN_GET_WINDOW_SECONDS * 1000;
-  const signingDate = new Date(Math.floor(Date.now() / windowMs) * windowMs);
   return getSignedUrl(getClient(env), command, {
     expiresIn: PRESIGN_GET_TTL_SECONDS,
-    signingDate,
+    signingDate: getSigningDate(),
+  });
+}
+
+/**
+ * GET prefirmado para descarga: fuerza `Content-Disposition: attachment` con
+ * un nombre de archivo legible en la respuesta de R2.
+ */
+export async function presignGetDownload(
+  env: Bindings,
+  key: string,
+  filename: string,
+): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: key,
+    ResponseCacheControl: IMMUTABLE_CACHE_CONTROL,
+    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`,
+  });
+  return getSignedUrl(getClient(env), command, {
+    expiresIn: PRESIGN_GET_TTL_SECONDS,
+    signingDate: getSigningDate(),
   });
 }

@@ -135,6 +135,12 @@ export const storageResponseSchema = z.object({
   usedPercent: z.number(),
 });
 
+export const downloadResponseSchema = z.object({
+  /** URL prefirmada GET con Content-Disposition: attachment. */
+  url: z.string(),
+  filename: z.string(),
+});
+
 export const okSchema = z.object({ ok: z.literal(true) });
 
 // ---------- tipos ----------
@@ -151,4 +157,5 @@ export type TrashResponse = z.infer<typeof trashResponseSchema>;
 export type MediaDetail = z.infer<typeof mediaDetailSchema>;
 export type Stats = z.infer<typeof statsSchema>;
 export type StorageResponse = z.infer<typeof storageResponseSchema>;
+export type DownloadResponse = z.infer<typeof downloadResponseSchema>;
 export type ApiError = z.infer<typeof errorSchema>;

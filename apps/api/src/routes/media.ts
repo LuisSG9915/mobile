@@ -1,5 +1,6 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  downloadResponseSchema,
   errorSchema,
   mediaDetailSchema,
   okSchema,
@@ -11,7 +12,7 @@ import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
-import { presignGet } from "../lib/s3";
+import { presignGet, presignGetDownload } from "../lib/s3";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -28,6 +29,24 @@ const detailRoute = createRoute({
   request: { params: idParam },
   responses: {
     200: { content: { "application/json": { schema: mediaDetailSchema } }, description: "Detalle" },
+    401: err("Sin sesión"),
+    404: err("No encontrado"),
+  },
+});
+
+const downloadRoute = createRoute({
+  method: "get",
+  path: "/media/{id}/download",
+  tags: ["media"],
+  summary: "Descargar el original",
+  description:
+    "Devuelve una URL prefirmada GET cuya respuesta llega con Content-Disposition: attachment y nombre de archivo legible (el original nunca pasa por el Worker).",
+  request: { params: idParam },
+  responses: {
+    200: {
+      content: { "application/json": { schema: downloadResponseSchema } },
+      description: "URL de descarga",
+    },
     401: err("Sin sesión"),
     404: err("No encontrado"),
   },
@@ -129,6 +148,24 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       },
       200,
     );
+  })
+  .openapi(downloadRoute, async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const db = getDb(c.env.DB);
+    const row = await db
+      .select()
+      .from(media)
+      .where(and(eq(media.id, id), eq(media.userId, user.id)))
+      .get();
+    if (row?.status !== "ready" || row.deletedAt) {
+      return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
+    }
+    // No hay columna de nombre original: se deriva uno legible y único.
+    const prefix = row.mediaType === "video" ? "VID" : "IMG";
+    const filename = `${prefix}-${row.sha256.slice(0, 16)}.${row.ext}`;
+    const url = await presignGetDownload(c.env, row.r2KeyOriginal, filename);
+    return c.json({ url, filename }, 200);
   })
   .openapi(deleteRoute, async (c) => {
     const user = c.get("user");
