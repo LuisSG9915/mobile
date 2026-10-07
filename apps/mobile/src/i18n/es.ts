@@ -76,6 +76,13 @@ export const t = {
     emptyBody: "Activa el respaldo y tus fotos aparecerán aquí al instante.",
     emptyAction: "Ir al respaldo",
     pendingBadge: "Pendiente",
+    selectedN: (n: number) => `${n} seleccionadas`,
+    cancelSelection: "Cancelar selección",
+    downloadAction: "Descargar",
+    deleteAction: "Eliminar",
+    deleteConfirm: (n: number) => `¿Mover ${n} elementos a la papelera?`,
+    downloadedN: (n: number) => `${n} elementos descargados`,
+    deletedN: (n: number) => `${n} elementos movidos a la papelera`,
   },
   sync: {
     localOnly: "Solo en este dispositivo",
