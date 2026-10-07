@@ -73,8 +73,8 @@
   },
   "scripts": {
     "start": "expo start --dev-client",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "build:web": "node scripts/check-web-env.mjs && expo export -p web",
     "deploy:web": "node scripts/check-web-env.mjs && expo export -p web && node ../../node_modules/wrangler/bin/wrangler.js deploy",
