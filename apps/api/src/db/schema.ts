@@ -82,6 +82,8 @@ export const media = sqliteTable(
     status: text("status", { enum: ["pending", "ready"] })
       .notNull()
       .default("pending"),
+    // Favorito del usuario: conmuta vía POST /media/{id}/favorite.
+    isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     deletedAt: integer("deleted_at"),
@@ -89,6 +91,7 @@ export const media = sqliteTable(
   (t) => [
     uniqueIndex("media_user_sha").on(t.userId, t.sha256),
     index("media_timeline").on(t.userId, t.status, t.deletedAt, t.takenAt, t.id),
+    index("media_favorites").on(t.userId, t.isFavorite, t.deletedAt, t.takenAt),
     index("idx_media_date_group").on(t.userId, t.dateGroup),
     index("media_status_created").on(t.status, t.createdAt),
     index("media_deleted").on(t.deletedAt),

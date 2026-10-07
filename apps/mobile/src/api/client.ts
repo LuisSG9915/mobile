@@ -1,8 +1,11 @@
 import type {
   CheckHashesResponse,
   DownloadResponse,
+  FavoriteResponse,
   MediaDetail,
   Stats,
+  TimelineFilter,
+  TimelineMonthsResponse,
   TimelineResponse,
   TrashResponse,
   UploadInitInput,
@@ -68,11 +71,18 @@ export const api = {
       r.json(),
     ),
 
-  timeline: (cursor?: string, limit = 60): Promise<TimelineResponse> => {
-    const q = new URLSearchParams({ limit: String(limit) });
+  timeline: (
+    cursor?: string,
+    limit = 60,
+    filter: TimelineFilter = "all",
+  ): Promise<TimelineResponse> => {
+    const q = new URLSearchParams({ limit: String(limit), filter });
     if (cursor) q.set("cursor", cursor);
     return apiFetch(`/v1/timeline?${q}`).then((r) => r.json());
   },
+
+  timelineMonths: (): Promise<TimelineMonthsResponse> =>
+    apiFetch("/v1/timeline/months").then((r) => r.json()),
 
   mediaDetail: (id: string): Promise<MediaDetail> =>
     apiFetch(`/v1/media/${id}`).then((r) => r.json()),
@@ -85,6 +95,9 @@ export const api = {
 
   restoreMedia: (id: string): Promise<{ ok: true }> =>
     apiFetch(`/v1/media/${id}/restore`, { method: "POST" }).then((r) => r.json()),
+
+  toggleFavorite: (id: string): Promise<FavoriteResponse> =>
+    apiFetch(`/v1/media/${id}/favorite`, { method: "POST" }).then((r) => r.json()),
 
   trash: (): Promise<TrashResponse> => apiFetch("/v1/trash").then((r) => r.json()),
 

@@ -1,16 +1,24 @@
+import { type TimelineFilter, timelineFilterSchema } from "@photos/shared";
 import { create } from "zustand";
 import { kvGet, kvSet } from "../queue/db";
 import type { SyncProgressState } from "../queue/types";
+
+const storedFilter = (): TimelineFilter => {
+  const v = kvGet("timeline_filter");
+  return timelineFilterSchema.options.includes(v as TimelineFilter) ? (v as TimelineFilter) : "all";
+};
 
 type Settings = {
   wifiOnly: boolean;
   includeVideos: boolean;
   gridColumns: number;
   onboarded: boolean;
+  timelineFilter: TimelineFilter;
   setWifiOnly: (v: boolean) => void;
   setIncludeVideos: (v: boolean) => void;
   setGridColumns: (v: number) => void;
   setOnboarded: (v: boolean) => void;
+  setTimelineFilter: (v: TimelineFilter) => void;
 };
 
 export const useSettings = create<Settings>((set) => ({
@@ -18,6 +26,7 @@ export const useSettings = create<Settings>((set) => ({
   includeVideos: kvGet("include_videos") !== "0", // default true
   gridColumns: Number(kvGet("grid_columns") ?? "4") || 4,
   onboarded: kvGet("onboarded") === "1",
+  timelineFilter: storedFilter(),
   setWifiOnly: (v) => {
     kvSet("wifi_only", v ? "1" : "0");
     set({ wifiOnly: v });
@@ -33,6 +42,10 @@ export const useSettings = create<Settings>((set) => ({
   setOnboarded: (v) => {
     kvSet("onboarded", v ? "1" : "0");
     set({ onboarded: v });
+  },
+  setTimelineFilter: (v) => {
+    kvSet("timeline_filter", v);
+    set({ timelineFilter: v });
   },
 }));
 

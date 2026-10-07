@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { Download, Info, Trash2, X } from "lucide-react-native";
+import { Download, Heart, Info, Trash2, X } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -27,6 +27,7 @@ import { t } from "../../i18n/es";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import { deleteLocalCopy, hasLocalCopy } from "../../lib/free-space";
 import { saveDownload } from "../../lib/save-download";
+import { useSettings } from "../../lib/store";
 import { useTimeline } from "../../lib/timeline";
 import { Button } from "../../ui";
 
@@ -169,7 +170,9 @@ export default function MediaViewer() {
   const { width } = useWindowDimensions();
   const qc = useQueryClient();
   const [showInfo, setShowInfo] = useState(false);
-  const timeline = useTimeline();
+  // El carrusel respeta el filtro activo de la galería (favoritos incluidos).
+  const filter = useSettings((s) => s.timelineFilter);
+  const timeline = useTimeline(filter);
   const items = useMemo(() => timeline.data?.pages.flatMap((p) => p.items) ?? [], [timeline.data]);
 
   // Carrusel solo cuando el timeline ya resolvió y contiene el id pedido; si
@@ -188,6 +191,17 @@ export default function MediaViewer() {
     staleTime: 60_000,
   });
   const d = detail.data;
+
+  const isFav =
+    items[activeIndex]?.id === activeId ? items[activeIndex]?.isFavorite : (d?.isFavorite ?? false);
+
+  const fav = useMutation({
+    mutationFn: api.toggleFavorite,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["timeline"] });
+      void qc.invalidateQueries({ queryKey: ["media", activeId] });
+    },
+  });
 
   const del = useMutation({
     mutationFn: api.deleteMedia,
@@ -258,6 +272,14 @@ export default function MediaViewer() {
           <X color="#fff" size={26} />
         </Pressable>
         <View className="flex-row gap-5">
+          <Pressable
+            onPress={() => fav.mutate(activeId)}
+            disabled={fav.isPending}
+            accessibilityLabel={t.viewer.favorite}
+            hitSlop={12}
+          >
+            <Heart color="#fff" size={24} fill={isFav ? "#f43f5e" : "none"} />
+          </Pressable>
           <Pressable
             onPress={() => void onDownload()}
             disabled={downloading}

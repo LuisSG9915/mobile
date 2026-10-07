@@ -35,6 +35,7 @@ function makeRemote(over: Partial<TimelineItem> = {}): TimelineItem {
     width: 100,
     height: 100,
     durationMs: null,
+    isFavorite: false,
     thumbhash: "hash",
     thumbUrl: "https://example.com/t.webp",
     ...over,

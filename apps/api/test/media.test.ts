@@ -117,6 +117,53 @@ describe("media", () => {
     expect(del.status).toBe(404);
   });
 
+  it("favorite alterna is_favorite y se refleja en detalle y timeline", async () => {
+    const { cookie, userId } = await createUser();
+    const id = await seedOne(userId);
+
+    const res = await SELF.fetch(`http://localhost/v1/media/${id}/favorite`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    expect((await j(res)).isFavorite).toBe(true);
+
+    const det = await SELF.fetch(`http://localhost/v1/media/${id}`, authed(cookie));
+    expect((await j(det)).isFavorite).toBe(true);
+
+    const res2 = await SELF.fetch(`http://localhost/v1/media/${id}/favorite`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect((await j(res2)).isFavorite).toBe(false);
+
+    const tl = await SELF.fetch("http://localhost/v1/timeline", authed(cookie));
+    expect((await j(tl)).items[0].isFavorite).toBe(false);
+  });
+
+  it("favorite de elemento ajeno o en papelera → 404; sin sesión → 401", async () => {
+    const a = await createUser();
+    const b = await createUser();
+    const foreign = await seedOne(a.userId);
+    const trashed = await seedOne(a.userId, true, 1);
+
+    const anon = await SELF.fetch(`http://localhost/v1/media/${foreign}/favorite`, {
+      method: "POST",
+    });
+    expect(anon.status).toBe(401);
+
+    const res = await SELF.fetch(`http://localhost/v1/media/${foreign}/favorite`, {
+      method: "POST",
+      headers: { cookie: b.cookie },
+    });
+    expect(res.status).toBe(404);
+    const res2 = await SELF.fetch(`http://localhost/v1/media/${trashed}/favorite`, {
+      method: "POST",
+      headers: { cookie: a.cookie },
+    });
+    expect(res2.status).toBe(404);
+  });
+
   it("stats refleja count y bytes", async () => {
     const { cookie, userId } = await createUser();
     await seedOne(userId, false, 0);

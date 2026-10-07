@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
@@ -84,5 +85,77 @@ describe("timeline", () => {
     const { cookie } = await createUser();
     const res = await SELF.fetch("http://localhost/v1/timeline?cursor=%%%", authed(cookie));
     expect(res.status).toBe(400);
+  });
+
+  it("filter=photos/videos/favorites restringen el resultado", async () => {
+    const { cookie, userId } = await createUser();
+    await seedMedia(userId, 14); // i%7===0 → 2 videos, 12 fotos
+    const db = getDb(env.DB);
+    const rows = await db
+      .select({ id: media.id })
+      .from(media)
+      .where(and(eq(media.userId, userId), eq(media.mediaType, "photo")))
+      .limit(3);
+    for (const r of rows) {
+      await db.update(media).set({ isFavorite: true }).where(eq(media.id, r.id));
+    }
+
+    const photos = await j(
+      await SELF.fetch("http://localhost/v1/timeline?filter=photos", authed(cookie)),
+    );
+    expect(photos.items.length).toBe(12);
+    for (const it of photos.items) expect(it.mediaType).toBe("photo");
+
+    const videos = await j(
+      await SELF.fetch("http://localhost/v1/timeline?filter=videos", authed(cookie)),
+    );
+    expect(videos.items.length).toBe(2);
+    for (const it of videos.items) expect(it.mediaType).toBe("video");
+
+    const favs = await j(
+      await SELF.fetch("http://localhost/v1/timeline?filter=favorites", authed(cookie)),
+    );
+    expect(favs.items.length).toBe(3);
+    for (const it of favs.items) expect(it.isFavorite).toBe(true);
+  });
+
+  it("months devuelve los meses con conteo en orden descendente", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+    const mk = async (takenAt: number) => {
+      const s = sha(`m${takenAt}-${Math.random().toString(16).slice(2, 8)}`);
+      await db.insert(media).values({
+        id: crypto.randomUUID(),
+        userId,
+        sha256: s,
+        mediaType: "photo",
+        mimeType: "image/jpeg",
+        ext: "jpg",
+        takenAt,
+        dateGroup: new Date(takenAt).toISOString().slice(0, 10),
+        width: 1,
+        height: 1,
+        thumbhash: "AQAAAA==",
+        r2KeyOriginal: `users/${userId}/originals/${s}.jpg`,
+        r2KeyThumb: `users/${userId}/thumbs/${s}.webp`,
+        fileSize: 1,
+        thumbSize: 1,
+        status: "ready",
+        createdAt: takenAt,
+        updatedAt: takenAt,
+        deletedAt: null,
+      });
+    };
+    await mk(Date.UTC(2026, 5, 10));
+    await mk(Date.UTC(2026, 5, 11));
+    await mk(Date.UTC(2026, 4, 5));
+
+    const res = await SELF.fetch("http://localhost/v1/timeline/months", authed(cookie));
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.months).toEqual([
+      { month: "2026-06", count: 2 },
+      { month: "2026-05", count: 1 },
+    ]);
   });
 });

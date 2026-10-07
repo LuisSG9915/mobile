@@ -75,6 +75,8 @@ export const checkHashesResponseSchema = z.object({
 
 // ---------- timeline ----------
 
+export const timelineFilterSchema = z.enum(["all", "photos", "videos", "favorites"]);
+
 export const timelineItemSchema = z.object({
   id: z.string(),
   sha256: z.string(),
@@ -85,6 +87,7 @@ export const timelineItemSchema = z.object({
   width: z.number(),
   height: z.number(),
   durationMs: z.number().nullable(),
+  isFavorite: z.boolean(),
   thumbhash: z.string(),
   thumbUrl: z.string(),
 });
@@ -102,6 +105,21 @@ export const trashItemSchema = timelineItemSchema.extend({
 export const trashResponseSchema = z.object({
   items: z.array(trashItemSchema),
   nextCursor: z.null(),
+});
+
+export const timelineMonthSchema = z.object({
+  /** Mes YYYY-MM (UTC) derivado de date_group. */
+  month: z.string(),
+  count: z.number(),
+});
+
+export const timelineMonthsResponseSchema = z.object({
+  months: z.array(timelineMonthSchema),
+});
+
+export const favoriteResponseSchema = z.object({
+  id: z.string(),
+  isFavorite: z.boolean(),
 });
 
 // ---------- media ----------
@@ -150,8 +168,12 @@ export type UploadInitInput = z.infer<typeof uploadInitSchema>;
 export type UploadInitResponse = z.infer<typeof uploadInitResponseSchema>;
 export type CheckHashesRequest = z.infer<typeof checkHashesRequestSchema>;
 export type CheckHashesResponse = z.infer<typeof checkHashesResponseSchema>;
+export type TimelineFilter = z.infer<typeof timelineFilterSchema>;
 export type TimelineItem = z.infer<typeof timelineItemSchema>;
 export type TimelineResponse = z.infer<typeof timelineResponseSchema>;
+export type TimelineMonth = z.infer<typeof timelineMonthSchema>;
+export type TimelineMonthsResponse = z.infer<typeof timelineMonthsResponseSchema>;
+export type FavoriteResponse = z.infer<typeof favoriteResponseSchema>;
 export type TrashItem = z.infer<typeof trashItemSchema>;
 export type TrashResponse = z.infer<typeof trashResponseSchema>;
 export type MediaDetail = z.infer<typeof mediaDetailSchema>;

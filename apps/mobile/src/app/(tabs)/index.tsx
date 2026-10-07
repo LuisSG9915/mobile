@@ -1,11 +1,15 @@
+import type { TimelineFilter } from "@photos/shared";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { Check, Download, Play, Trash2, X } from "lucide-react-native";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { Calendar, Check, Download, Heart, Play, Trash2, X } from "lucide-react-native";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  FlatList,
   type GestureResponderEvent,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -33,6 +37,21 @@ const isWeb = Platform.OS === "web";
 
 // Densidades del pinch-to-zoom: detalle (1), normal (3), compacta (5).
 const DENSITY_LEVELS = [1, 3, 5];
+
+const FILTER_KEYS = [
+  ["all", t.gallery.filterAll],
+  ["photos", t.gallery.filterPhotos],
+  ["videos", t.gallery.filterVideos],
+  ["favorites", t.gallery.filterFavorites],
+] as const;
+
+/** "2026-10" → "octubre de 2026" (dateGroup es UTC; forzamos timeZone). */
+const monthLabel = (ym: string) =>
+  new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("es", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 
 function pinchLevel(columns: number, dir: -1 | 1): number {
   let i = 0;
@@ -96,6 +115,9 @@ const PhotoCell = memo(
             {selected ? <Check size={12} color="#fff" /> : null}
           </View>
         ) : null}
+        {photo.remote?.isFavorite ? (
+          <Heart size={14} color="#fff" fill="#f43f5e" className="absolute bottom-1.5 left-1.5" />
+        ) : null}
         <SyncBadge status={photo.syncStatus} progress={photo.progress} />
       </Pressable>
     );
@@ -109,17 +131,20 @@ const PhotoCell = memo(
     prev.photo.progress === next.photo.progress &&
     prev.photo.localUri === next.photo.localUri &&
     prev.photo.thumbUrl === next.photo.thumbUrl &&
-    prev.photo.remoteId === next.photo.remoteId,
+    prev.photo.remoteId === next.photo.remoteId &&
+    prev.photo.remote?.isFavorite === next.photo.remote?.isFavorite,
 );
 
 export default function GalleryScreen() {
   const { width } = useWindowDimensions();
   const columns = useSettings((s) => s.gridColumns);
   const setGridColumns = useSettings((s) => s.setGridColumns);
+  const timelineFilter = useSettings((s) => s.timelineFilter);
+  const setTimelineFilter = useSettings((s) => s.setTimelineFilter);
   const cell = width / columns;
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.
-  const { photos, rows, query, refreshLocal } = useHybridGallery();
+  const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter);
 
   const listRef = useRef<FlashListRef<GalleryRow>>(null);
   const gridRef = useRef<View>(null);
@@ -133,6 +158,44 @@ export default function GalleryScreen() {
   selectedRef.current = selected;
   const [dragSelecting, setDragSelecting] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
+  // Salto temporal: mes elegido en el modal; el efecto de abajo va trayendo
+  // páginas del timeline hasta localizar la primera foto de ese mes.
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const [jumpYm, setJumpYm] = useState<string | null>(null);
+  const months = useQuery({
+    queryKey: ["timeline-months"],
+    queryFn: api.timelineMonths,
+    enabled: jumpOpen,
+    staleTime: 60_000,
+  });
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetchNextPage se invoca sin depender del objeto query completo.
+  useEffect(() => {
+    if (!jumpYm) return;
+    let idx = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.type === "photo" && new Date(r.photo.takenAt).toISOString().slice(0, 7) === jumpYm) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) {
+      let target = idx;
+      for (let i = idx; i >= 0; i--) {
+        if (rows[i].type === "header") {
+          target = i;
+          break;
+        }
+      }
+      listRef.current?.scrollToIndex({ index: target, animated: true });
+      setJumpYm(null);
+    } else if (query.hasNextPage && !query.isFetchingNextPage) {
+      void query.fetchNextPage();
+    } else if (!query.hasNextPage) {
+      setJumpYm(null);
+    }
+  }, [jumpYm, rows, query.hasNextPage, query.isFetchingNextPage]);
 
   const sticky = useMemo(
     () => rows.map((r, i) => (r.type === "header" ? i : -1)).filter((i) => i >= 0),
@@ -298,6 +361,39 @@ export default function GalleryScreen() {
           <SyncStatusAvatar />
         </View>
       )}
+      {selected ? null : (
+        <View className="flex-row items-center gap-2 px-4 pb-3">
+          {FILTER_KEYS.map(([f, label]) => (
+            <Pressable
+              key={f}
+              onPress={() => setTimelineFilter(f)}
+              accessibilityLabel={label}
+              accessibilityRole="button"
+              className={`px-3 py-1.5 rounded-full border ${
+                timelineFilter === f
+                  ? "bg-accent border-accent"
+                  : "border-neutral-300 dark:border-neutral-700"
+              }`}
+            >
+              <Text
+                className={`text-sm font-medium ${
+                  timelineFilter === f ? "text-white" : "text-neutral-600 dark:text-neutral-300"
+                }`}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+          <View className="flex-1" />
+          <Pressable
+            onPress={() => setJumpOpen(true)}
+            accessibilityLabel={t.gallery.jumpToMonth}
+            hitSlop={8}
+          >
+            <Calendar size={20} color="#737373" />
+          </Pressable>
+        </View>
+      )}
       {isEmpty ? (
         <EmptyState
           title={t.gallery.emptyTitle}
@@ -384,6 +480,43 @@ export default function GalleryScreen() {
           </View>
         </GestureDetector>
       )}
+      <Modal
+        visible={jumpOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setJumpOpen(false)}
+      >
+        <Pressable className="flex-1 bg-black/40" onPress={() => setJumpOpen(false)} />
+        <View className="bg-white dark:bg-neutral-900 rounded-t-3xl px-6 pt-4 pb-8 max-h-[60%]">
+          <View className="w-10 h-1.5 rounded-full bg-neutral-300 self-center mb-4" />
+          <Text className="text-xl font-bold text-neutral-900 dark:text-white mb-2">
+            {t.gallery.jumpToMonth}
+          </Text>
+          <FlatList
+            data={months.data?.months ?? []}
+            keyExtractor={(m) => m.month}
+            ListEmptyComponent={
+              <Text className="text-sm text-neutral-500 py-6 text-center">
+                {months.isPending ? "…" : t.gallery.jumpEmpty}
+              </Text>
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                className="flex-row justify-between items-center py-3 border-b border-neutral-100 dark:border-neutral-800"
+                onPress={() => {
+                  setJumpOpen(false);
+                  setJumpYm(item.month);
+                }}
+              >
+                <Text className="text-base text-neutral-900 dark:text-white capitalize">
+                  {monthLabel(item.month)}
+                </Text>
+                <Text className="text-sm text-neutral-500">{item.count}</Text>
+              </Pressable>
+            )}
+          />
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

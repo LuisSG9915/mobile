@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   downloadResponseSchema,
   errorSchema,
+  favoriteResponseSchema,
   mediaDetailSchema,
   okSchema,
   STORAGE_QUOTA_BYTES,
@@ -81,6 +82,23 @@ const restoreRoute = createRoute({
   },
 });
 
+const favoriteRoute = createRoute({
+  method: "post",
+  path: "/media/{id}/favorite",
+  tags: ["media"],
+  summary: "Alternar favorito",
+  description: "Conmuta is_favorite del elemento; la respuesta trae el estado nuevo.",
+  request: { params: idParam },
+  responses: {
+    200: {
+      content: { "application/json": { schema: favoriteResponseSchema } },
+      description: "Nuevo estado de favorito",
+    },
+    401: err("Sin sesión"),
+    404: err("No encontrado"),
+  },
+});
+
 const trashRoute = createRoute({
   method: "get",
   path: "/trash",
@@ -135,6 +153,7 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         width: row.width,
         height: row.height,
         durationMs: row.durationMs,
+        isFavorite: row.isFavorite,
         thumbhash: row.thumbhash,
         thumbUrl,
         mimeType: row.mimeType,
@@ -193,6 +212,29 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
     }
     return c.json({ ok: true } as const, 200);
   })
+  .openapi(favoriteRoute, async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const db = getDb(c.env.DB);
+    const row = await db
+      .select({ id: media.id, isFavorite: media.isFavorite })
+      .from(media)
+      .where(
+        and(
+          eq(media.id, id),
+          eq(media.userId, user.id),
+          eq(media.status, "ready"),
+          isNull(media.deletedAt),
+        ),
+      )
+      .get();
+    if (!row) {
+      return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
+    }
+    const isFavorite = !row.isFavorite;
+    await db.update(media).set({ isFavorite, updatedAt: Date.now() }).where(eq(media.id, row.id));
+    return c.json({ id: row.id, isFavorite }, 200);
+  })
   .openapi(trashRoute, async (c) => {
     const user = c.get("user");
     const db = getDb(c.env.DB);
@@ -212,6 +254,7 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         width: m.width,
         height: m.height,
         durationMs: m.durationMs,
+        isFavorite: m.isFavorite,
         thumbhash: m.thumbhash,
         thumbUrl: await presignGet(c.env, m.r2KeyThumb),
         deletedAt: m.deletedAt ?? 0,

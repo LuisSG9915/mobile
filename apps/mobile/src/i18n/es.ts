@@ -86,6 +86,12 @@ export const t = {
     deleteConfirm: (n: number) => `¿Mover ${n} elementos a la papelera?`,
     downloadedN: (n: number) => `${n} elementos descargados`,
     deletedN: (n: number) => `${n} elementos movidos a la papelera`,
+    filterAll: "Todo",
+    filterPhotos: "Fotos",
+    filterVideos: "Videos",
+    filterFavorites: "Favoritos",
+    jumpToMonth: "Ir a un mes",
+    jumpEmpty: "No hay meses disponibles",
   },
   sync: {
     localOnly: "Solo en este dispositivo",
@@ -130,6 +136,7 @@ export const t = {
     deleteLocal: "Eliminar copia local",
     deleteLocalDone: "Copia local eliminada. Sigue disponible en tu nube.",
     deleteLocalNone: "No hay copia local que eliminar",
+    favorite: "Favorito",
   },
   trash: {
     title: "Papelera",

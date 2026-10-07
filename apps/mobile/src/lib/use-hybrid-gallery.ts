@@ -1,3 +1,4 @@
+import type { TimelineFilter } from "@photos/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getQueueItems } from "../queue/db";
 import { useLibraryEvents, useQueueEvents } from "./events";
@@ -21,7 +22,7 @@ import { useTimeline } from "./timeline";
  * y cada tick de la cola (useQueueEvents) — así el badge de una foto cambia
  * sin recargar la cuadrícula.
  */
-export function useHybridGallery() {
+export function useHybridGallery(filter: TimelineFilter = "all") {
   const tick = useQueueEvents((s) => s.tick);
   // Solo se re-lista MediaLibrary al montar, al refrescar a mano y cuando la
   // biblioteca cambia de verdad (escaneo o "Liberar espacio"), no ante cada
@@ -42,13 +43,19 @@ export function useHybridGallery() {
     void refreshLocal();
   }, [refreshLocal, libTick]);
 
-  const query = useTimeline();
+  const query = useTimeline(filter);
 
   const photos = useMemo<HybridPhoto[]>(() => {
     void tick; // la cola local se lee en vivo dentro del memo
     const remoteItems = query.data?.pages.flatMap((p) => p.items) ?? [];
-    return mergeGallery({ localAssets, queueItems: getQueueItems(), remoteItems });
-  }, [query.data, localAssets, tick]);
+    const merged = mergeGallery({ localAssets, queueItems: getQueueItems(), remoteItems });
+    // Los locales/en-cola no conocen favoritos: bajo ese filtro solo quedan
+    // los remotos marcados (y las filas de cola enlazadas a ellos).
+    if (filter === "favorites") return merged.filter((p) => p.remote?.isFavorite === true);
+    if (filter === "photos") return merged.filter((p) => p.mediaType === "photo");
+    if (filter === "videos") return merged.filter((p) => p.mediaType === "video");
+    return merged;
+  }, [query.data, localAssets, tick, filter]);
 
   const rows = useMemo<GalleryRow[]>(() => buildGalleryRows(photos), [photos]);
 
