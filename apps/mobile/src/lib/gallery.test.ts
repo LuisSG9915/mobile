@@ -31,6 +31,7 @@ function makeRemote(over: Partial<TimelineItem> = {}): TimelineItem {
     sha256: SHA_A,
     mediaType: "photo",
     takenAt: 1_000,
+    dateGroup: "2025-10-15",
     width: 100,
     height: 100,
     durationMs: null,

@@ -77,6 +77,7 @@ export const timelineApp = new OpenAPIHono<AppEnv>().openapi(timelineRoute, asyn
       sha256: m.sha256,
       mediaType: m.mediaType,
       takenAt: m.takenAt,
+      dateGroup: m.dateGroup,
       width: m.width,
       height: m.height,
       durationMs: m.durationMs,

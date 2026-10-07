@@ -13,6 +13,10 @@ import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { originalKey, thumbKey } from "../lib/keys";
 import { presignPut } from "../lib/s3";
+import { addStorageUsage } from "../lib/storage-stats";
+
+/** Grupo de fecha YYYY-MM-DD en UTC derivado del epoch ms de captura. */
+const dateGroupOf = (takenAt: number) => new Date(takenAt).toISOString().slice(0, 10);
 
 const jsonBody = <T extends z.ZodType>(schema: T) => ({
   content: { "application/json": { schema } },
@@ -152,6 +156,7 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
       mimeType: body.mimeType,
       ext: body.ext,
       takenAt: body.takenAt,
+      dateGroup: dateGroupOf(body.takenAt),
       latitude: body.latitude ?? null,
       longitude: body.longitude ?? null,
       width: body.width,
@@ -249,5 +254,8 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
       .update(media)
       .set({ status: "ready", updatedAt: Date.now() })
       .where(eq(media.id, row.id));
+    // Los bytes cuentan para la cuota solo cuando la subida queda confirmada.
+    // Se descuentan al purgar la papelera (cron), no al mover a papelera.
+    await addStorageUsage(db, user.id, row.fileSize + row.thumbSize);
     return c.json({ id: row.id, status: "ready" } as const, 200);
   });

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { runCleanup } from "../src/cron/cleanup";
 import { getDb } from "../src/db/client";
-import { media } from "../src/db/schema";
+import { media, userStorageStats } from "../src/db/schema";
 import { createUser, sha } from "./helpers";
 
 const DAY = 24 * 3600 * 1000;
@@ -73,5 +73,30 @@ describe("cron cleanup", () => {
     expect(rows[0].sha256).toBe(freshSha);
     expect(await env.BUCKET.head(`users/${userId}/originals/${oldSha}.jpg`)).toBeNull();
     expect(await env.BUCKET.head(`users/${userId}/originals/${freshSha}.jpg`)).not.toBeNull();
+  });
+
+  it("la purga de papelera descuenta la cuota (solo medios 'ready')", async () => {
+    const { userId } = await createUser();
+    const db = getDb(env.DB);
+    // 'ready' purgado: fileSize 1_000 + thumbSize 500 = 1_500 contados
+    await seed(userId, { seed: "rq", status: "ready", deletedAt: Date.now() - 31 * DAY });
+    // 'pending' borrado suave: nunca sumó cuota
+    await seed(userId, { seed: "pq", status: "pending", deletedAt: Date.now() - 31 * DAY });
+    await db.insert(userStorageStats).values({
+      userId,
+      usedBytes: 1_500,
+      mediaCount: 1,
+      updatedAt: Date.now(),
+    });
+
+    await runCleanup(env);
+
+    const stats = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(stats?.usedBytes).toBe(0);
+    expect(stats?.mediaCount).toBe(0);
   });
 });

@@ -66,6 +66,9 @@ export const media = sqliteTable(
     mimeType: text("mime_type").notNull(),
     ext: text("ext").notNull(),
     takenAt: integer("taken_at").notNull(), // epoch ms
+    // YYYY-MM-DD en UTC derivado de taken_at. El default '' solo existe para
+    // permitir el ALTER TABLE sobre filas previas; la app siempre lo escribe.
+    dateGroup: text("date_group").notNull().default(""),
     latitude: real("latitude"),
     longitude: real("longitude"),
     width: integer("width").notNull(),
@@ -86,7 +89,26 @@ export const media = sqliteTable(
   (t) => [
     uniqueIndex("media_user_sha").on(t.userId, t.sha256),
     index("media_timeline").on(t.userId, t.status, t.deletedAt, t.takenAt, t.id),
+    index("idx_media_date_group").on(t.userId, t.dateGroup),
     index("media_status_created").on(t.status, t.createdAt),
     index("media_deleted").on(t.deletedAt),
   ],
 );
+
+// ---------- Cuota de almacenamiento ----------
+
+/**
+ * Contadores materializados de uso de R2 por usuario. Se actualizan de forma
+ * atómica (upsert en /uploads/complete, decremento al purgar la papelera) para
+ * responder la cuota en O(1) sin SUM() sobre media. usedBytes incluye original
+ * + miniatura y los elementos en papelera (siguen ocupando R2 hasta la purga).
+ */
+export const userStorageStats = sqliteTable("user_storage_stats", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  usedBytes: integer("used_bytes").notNull().default(0),
+  maxBytes: integer("max_bytes").notNull().default(10_737_418_240), // 10 GB
+  mediaCount: integer("media_count").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(), // epoch ms
+});

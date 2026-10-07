@@ -8,6 +8,7 @@ import { requireUser } from "./middleware/session";
 import { mediaApp } from "./routes/media";
 import { timelineApp } from "./routes/timeline";
 import { uploadsApp } from "./routes/uploads";
+import { userApp } from "./routes/user";
 
 const app = new OpenAPIHono<AppEnv>({ strict: false });
 
@@ -39,7 +40,11 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 
 // eslint-disable-next-line -- encadenado para inferencia de tipos RPC (hc<AppType>)
-const v1 = app.route("/v1", uploadsApp).route("/v1", timelineApp).route("/v1", mediaApp);
+const v1 = app
+  .route("/v1", uploadsApp)
+  .route("/v1", timelineApp)
+  .route("/v1", mediaApp)
+  .route("/v1", userApp);
 
 app.doc("/openapi.json", {
   openapi: "3.1.0",

@@ -80,6 +80,8 @@ export const timelineItemSchema = z.object({
   sha256: z.string(),
   mediaType: mediaTypeSchema,
   takenAt: z.number(),
+  /** Grupo de fecha YYYY-MM-DD (UTC) para agrupar el timeline. */
+  dateGroup: z.string(),
   width: z.number(),
   height: z.number(),
   durationMs: z.number().nullable(),
@@ -122,6 +124,17 @@ export const statsSchema = z.object({
   quotaBytes: z.number(),
 });
 
+// ---------- user ----------
+
+export const storageResponseSchema = z.object({
+  /** Bytes en R2 (originales + miniaturas), incluye la papelera. */
+  usedBytes: z.number(),
+  maxBytes: z.number(),
+  mediaCount: z.number(),
+  /** Porcentaje de cuota usado, 0-100 con 2 decimales. */
+  usedPercent: z.number(),
+});
+
 export const okSchema = z.object({ ok: z.literal(true) });
 
 // ---------- tipos ----------
@@ -137,4 +150,5 @@ export type TrashItem = z.infer<typeof trashItemSchema>;
 export type TrashResponse = z.infer<typeof trashResponseSchema>;
 export type MediaDetail = z.infer<typeof mediaDetailSchema>;
 export type Stats = z.infer<typeof statsSchema>;
+export type StorageResponse = z.infer<typeof storageResponseSchema>;
 export type ApiError = z.infer<typeof errorSchema>;

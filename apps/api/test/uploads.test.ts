@@ -166,6 +166,67 @@ describe("uploads/check-hashes", () => {
   });
 });
 
+describe("user/storage", () => {
+  const storage = (cookie: string) =>
+    SELF.fetch("http://localhost/v1/user/storage", authed(cookie));
+
+  it("sin sesión → 401", async () => {
+    const res = await SELF.fetch("http://localhost/v1/user/storage");
+    expect(res.status).toBe(401);
+  });
+
+  it("usuario sin medios → cuota vacía con maxBytes por defecto", async () => {
+    const { cookie } = await createUser();
+    const res = await storage(cookie);
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.usedBytes).toBe(0);
+    expect(json.mediaCount).toBe(0);
+    expect(json.maxBytes).toBe(10 * 1024 * 1024 * 1024);
+    expect(json.usedPercent).toBe(0);
+  });
+
+  it("suma bytes y medios al confirmar; ignora pendientes y duplicados", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({ sha256: sha("ab44"), fileSize: 2_000_000, thumbSize: 10_000 });
+    await makeReady(cookie, userId, body);
+
+    let json = await j(await storage(cookie));
+    expect(json.usedBytes).toBe(2_010_000); // original + miniatura
+    expect(json.mediaCount).toBe(1);
+    expect(json.usedPercent).toBeGreaterThan(0);
+
+    const body2 = initBody({ sha256: sha("cd55"), fileSize: 500_000, thumbSize: 5_000 });
+    await makeReady(cookie, userId, body2);
+    json = await j(await storage(cookie));
+    expect(json.usedBytes).toBe(2_515_000);
+    expect(json.mediaCount).toBe(2);
+
+    // El duplicado (mismo sha ya 'ready') no vuelve a contar
+    const dup = await init(cookie, body);
+    expect((await j(dup)).status).toBe("duplicate");
+    // El pendiente (init sin complete) tampoco cuenta
+    await init(cookie, initBody({ sha256: sha("ef66"), fileSize: 9_000_000 }));
+    json = await j(await storage(cookie));
+    expect(json.usedBytes).toBe(2_515_000);
+    expect(json.mediaCount).toBe(2);
+  });
+});
+
+describe("date_group", () => {
+  it("deriva YYYY-MM-DD (UTC) de takenAt y lo expone en el timeline", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({ sha256: sha("ab77"), takenAt: Date.UTC(2024, 0, 15, 12) });
+    await makeReady(cookie, userId, body);
+
+    const res = await SELF.fetch("http://localhost/v1/timeline", authed(cookie));
+    const json = await j(res);
+    const item = json.items.find((i: { sha256: string }) => i.sha256 === body.sha256);
+    expect(item).toBeTruthy();
+    expect(item.dateGroup).toBe("2024-01-15");
+  });
+});
+
 async function userIdOf(cookie: string): Promise<string> {
   const res = await SELF.fetch("http://localhost/api/auth/get-session", {
     headers: { cookie },

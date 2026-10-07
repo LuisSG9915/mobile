@@ -2,6 +2,7 @@ import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { Bindings } from "../env";
+import { removeStorageUsage } from "../lib/storage-stats";
 
 const BATCH = 500;
 const PENDING_TTL_MS = 24 * 3600 * 1000;
@@ -52,6 +53,11 @@ export async function runCleanup(env: Bindings): Promise<void> {
     );
     for (const m of expiredTrash) {
       await db.delete(media).where(eq(media.id, m.id));
+      // Solo los 'ready' sumaron cuota al confirmarse la subida; los 'pending'
+      // borrados suave nunca llegaron a contarse.
+      if (m.status === "ready") {
+        await removeStorageUsage(db, m.userId, m.fileSize + m.thumbSize);
+      }
     }
   }
 }
