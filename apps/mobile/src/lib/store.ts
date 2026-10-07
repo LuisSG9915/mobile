@@ -24,7 +24,7 @@ type Settings = {
 export const useSettings = create<Settings>((set) => ({
   wifiOnly: kvGet("wifi_only") === "1",
   includeVideos: kvGet("include_videos") !== "0", // default true
-  gridColumns: Number(kvGet("grid_columns") ?? "4") || 4,
+  gridColumns: Number(kvGet("grid_columns") ?? "3") || 3, // default = densidad "normal" del pinch
   onboarded: kvGet("onboarded") === "1",
   timelineFilter: storedFilter(),
   setWifiOnly: (v) => {

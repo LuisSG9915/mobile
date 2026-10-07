@@ -19,7 +19,12 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../../api/client";
@@ -35,10 +40,13 @@ function ZoomableImage({
   uri,
   thumbhash,
   active,
+  onDismiss,
 }: {
   uri: string;
   thumbhash: string;
   active: boolean;
+  /** Swipe-down a escala 1 → cerrar el visor (fase 7). */
+  onDismiss?: () => void;
 }) {
   const scale = useSharedValue(1);
   const saved = useSharedValue(1);
@@ -78,11 +86,25 @@ function ZoomableImage({
       if (saved.value > 1) {
         tx.value = savedTx.value + e.translationX;
         ty.value = savedTy.value + e.translationY;
+      } else if (Math.abs(e.translationY) > Math.abs(e.translationX)) {
+        // A escala 1 un arrastre vertical es candidato a swipe-down: la foto
+        // sigue al dedo y encoge; el swipe horizontal queda para el carrusel.
+        ty.value = e.translationY;
+        scale.value = Math.max(0.7, 1 - Math.abs(e.translationY) / 1000);
       }
     })
-    .onEnd(() => {
-      savedTx.value = tx.value;
-      savedTy.value = ty.value;
+    .onEnd((e) => {
+      if (saved.value > 1) {
+        savedTx.value = tx.value;
+        savedTy.value = ty.value;
+        return;
+      }
+      if (onDismiss && (Math.abs(e.translationY) > 120 || Math.abs(e.velocityY) > 700)) {
+        runOnJS(onDismiss)();
+        return;
+      }
+      ty.value = withTiming(0);
+      scale.value = withTiming(1);
     });
 
   const doubleTap = Gesture.Tap()
@@ -142,7 +164,17 @@ function ThumbPage({ item }: { item: TimelineItem }) {
  * (URL prefirmada) solo cuando la página está activa o es adyacente — así
  * deslizar se siente inmediato sin precargar toda la biblioteca.
  */
-function MediaPage({ item, active, near }: { item: TimelineItem; active: boolean; near: boolean }) {
+function MediaPage({
+  item,
+  active,
+  near,
+  onDismiss,
+}: {
+  item: TimelineItem;
+  active: boolean;
+  near: boolean;
+  onDismiss?: () => void;
+}) {
   const detail = useQuery({
     queryKey: ["media", item.id],
     queryFn: () => api.mediaDetail(item.id),
@@ -159,7 +191,12 @@ function MediaPage({ item, active, near }: { item: TimelineItem; active: boolean
     return active && originalUrl ? <VideoPage uri={originalUrl} /> : <ThumbPage item={item} />;
   }
   return originalUrl ? (
-    <ZoomableImage uri={originalUrl} thumbhash={item.thumbhash} active={active} />
+    <ZoomableImage
+      uri={originalUrl}
+      thumbhash={item.thumbhash}
+      active={active}
+      onDismiss={onDismiss}
+    />
   ) : (
     <ThumbPage item={item} />
   );
@@ -264,6 +301,7 @@ export default function MediaViewer() {
   };
 
   const showSpinner = detail.isPending && !carousel;
+  const onDismiss = () => router.back();
 
   return (
     <SafeAreaView className="flex-1 bg-black" edges={["top", "bottom"]}>
@@ -334,6 +372,7 @@ export default function MediaViewer() {
                   item={item}
                   active={index === activeIndex}
                   near={Math.abs(index - activeIndex) <= 1}
+                  onDismiss={onDismiss}
                 />
               </View>
             )}
@@ -349,7 +388,7 @@ export default function MediaViewer() {
         ) : d.mediaType === "video" ? (
           <VideoPage uri={d.originalUrl} />
         ) : (
-          <ZoomableImage uri={d.originalUrl} thumbhash={d.thumbhash} active />
+          <ZoomableImage uri={d.originalUrl} thumbhash={d.thumbhash} active onDismiss={onDismiss} />
         )}
       </View>
 
