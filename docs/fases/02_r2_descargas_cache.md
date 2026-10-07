@@ -1,7 +1,3 @@
----
-
-#### `docs/fases/02_r2_descargas_cache.md`
-```markdown
 # Fase 2: Descargas y Reglas de Caché R2
 
 ## 🎯 Objetivo
