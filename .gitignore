@@ -31,3 +31,6 @@ Thumbs.db
 # Resultados de pruebas
 test-results/
 apps/mobile/e2e/.artifacts/
+
+# Notas locales (credenciales)
+uso.txt
