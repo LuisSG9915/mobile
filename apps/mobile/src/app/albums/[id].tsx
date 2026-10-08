@@ -284,7 +284,12 @@ export default function AlbumDetailScreen() {
           renderItem={({ item }: { item: TimelineItem }) => (
             <Pressable
               style={{ width: itemSize, height: itemSize, margin: gap / 2 }}
-              onPress={() => router.push({ pathname: "/media/[id]", params: { id: item.id } })}
+              onPress={() =>
+                router.push({
+                  pathname: "/media/[id]",
+                  params: { id: item.id, albumId },
+                })
+              }
               className="bg-neutral-200 dark:bg-neutral-900 overflow-hidden"
               accessibilityRole="button"
             >

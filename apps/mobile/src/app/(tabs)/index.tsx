@@ -295,6 +295,7 @@ export default function GalleryScreen() {
           pathname: "/media/[id]",
           params: {
             id: photo.remoteId ?? photo.key,
+            albumId: albumFilter?.type === "remote" ? albumFilter.albumId : undefined,
             localUri: photo.localUri ?? "",
             mediaType: photo.mediaType,
             syncStatus: photo.syncStatus,

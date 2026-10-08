@@ -5,6 +5,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import {
   Camera,
+  ChevronLeft,
+  ChevronRight,
   Crop,
   Download,
   ExternalLink,
@@ -17,7 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -164,11 +166,93 @@ function ZoomableImage({
   );
 }
 
-function VideoPage({ uri }: { uri: string }) {
+function NativeVideoPlayer({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = false;
   });
-  return <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls />;
+  return (
+    <VideoView
+      player={player}
+      style={{ flex: 1, width: "100%", height: "100%" }}
+      contentFit="contain"
+      nativeControls
+    />
+  );
+}
+
+function WebVideoPlayer({ uri }: { uri: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {/* biome-ignore lint/a11y/useMediaCaption: videos personales subidos por el usuario */}
+      <video
+        src={uri}
+        controls
+        autoPlay
+        playsInline
+        style={{
+          maxWidth: "100%",
+          maxHeight: "80vh",
+          width: "auto",
+          height: "auto",
+          objectFit: "contain",
+        }}
+      />
+    </View>
+  );
+}
+
+function VideoPage({ uri }: { uri: string }) {
+  if (Platform.OS === "web") {
+    return <WebVideoPlayer uri={uri} />;
+  }
+  return <NativeVideoPlayer uri={uri} />;
+}
+
+function WebImageViewer({
+  uri,
+  thumbUrl,
+  thumbhash,
+}: {
+  uri?: string | null;
+  thumbUrl?: string | null;
+  thumbhash?: string | null;
+}) {
+  const displayUri = uri || thumbUrl;
+  return (
+    <View
+      style={{
+        flex: 1,
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      {displayUri ? (
+        <Image
+          source={{ uri: displayUri }}
+          placeholder={thumbhash ? { thumbhash } : undefined}
+          style={{
+            maxWidth: "100%",
+            maxHeight: "85%",
+            width: "100%",
+            height: "100%",
+          }}
+          contentFit="contain"
+          transition={150}
+        />
+      ) : null}
+    </View>
+  );
 }
 
 function ThumbPage({ item }: { item: TimelineItem }) {
@@ -177,7 +261,7 @@ function ThumbPage({ item }: { item: TimelineItem }) {
       source={{ uri: item.thumbUrl }}
       placeholder={{ thumbhash: item.thumbhash }}
       contentFit="contain"
-      style={{ flex: 1 }}
+      style={{ flex: 1, width: "100%", height: "100%" }}
       transition={150}
     />
   );
@@ -232,6 +316,7 @@ function MediaPage({
 export default function MediaViewer() {
   const params = useLocalSearchParams<{
     id: string;
+    albumId?: string;
     localUri?: string;
     mediaType?: "photo" | "video";
     syncStatus?: string;
@@ -242,6 +327,7 @@ export default function MediaViewer() {
     thumbhash?: string;
   }>();
   const id = params.id;
+  const isWeb = Platform.OS === "web";
   const isLocalItem = !id || id.startsWith("l-") || id.startsWith("q-") || Boolean(params.localUri);
 
   const { width } = useWindowDimensions();
@@ -249,19 +335,116 @@ export default function MediaViewer() {
   const [showInfo, setShowInfo] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  // El carrusel respeta el filtro activo de la galería (favoritos incluidos).
+
+  // El carrusel respeta el filtro activo de la galería (favoritos incluidos) o el álbum si viene de uno.
   const filter = useSettings((s) => s.timelineFilter);
   const timeline = useTimeline(filter);
-  const items = useMemo(() => timeline.data?.pages.flatMap((p) => p.items) ?? [], [timeline.data]);
 
-  // Carrusel solo cuando el timeline ya resolvió y contiene el id pedido; si
-  // el elemento vive en una página aún no cargada, cae a la vista única.
+  const albumDetailQuery = useQuery({
+    queryKey: ["album", params.albumId],
+    queryFn: () => (params.albumId ? api.albumDetail(params.albumId) : null),
+    enabled: Boolean(params.albumId),
+    staleTime: 60_000,
+  });
+
+  const items = useMemo(() => {
+    if (params.albumId && albumDetailQuery.data?.items) {
+      return albumDetailQuery.data.items;
+    }
+    return timeline.data?.pages.flatMap((p) => p.items) ?? [];
+  }, [params.albumId, albumDetailQuery.data, timeline.data]);
+
+  // Carrusel solo cuando el timeline/álbum ya resolvió y contiene el id pedido
   const foundIndex = items.findIndex((i) => i.id === id);
   const carousel = !timeline.isPending && foundIndex >= 0;
+
+  // Índice web cuando se visualiza en navegador
+  const [webIndex, setWebIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (isWeb && foundIndex >= 0 && webIndex === null) {
+      setWebIndex(foundIndex);
+    }
+  }, [isWeb, foundIndex, webIndex]);
+
+  const currentWebIndex = webIndex ?? (foundIndex >= 0 ? foundIndex : 0);
+
   // activeIndex = última página a la que se deslizó; antes de deslizar es la del id.
   const [scrolledIndex, setScrolledIndex] = useState<number | null>(null);
-  const activeIndex = scrolledIndex ?? Math.max(0, foundIndex);
-  const activeId = carousel ? (items[activeIndex]?.id ?? id) : id;
+  const activeIndex = isWeb ? currentWebIndex : (scrolledIndex ?? Math.max(0, foundIndex));
+
+  const activeItem = items.length > 0 && activeIndex < items.length ? items[activeIndex] : null;
+  const activeId = activeItem?.id ?? id;
+
+  const canGoPrev = isWeb && items.length > 1 && currentWebIndex > 0;
+  const canGoNext = isWeb && items.length > 1 && currentWebIndex < items.length - 1;
+
+  const goPrev = useCallback(() => {
+    if (currentWebIndex > 0) setWebIndex(currentWebIndex - 1);
+  }, [currentWebIndex]);
+
+  const goNext = useCallback(() => {
+    if (currentWebIndex < items.length - 1) setWebIndex(currentWebIndex + 1);
+  }, [currentWebIndex, items.length]);
+
+  // Precarga de elementos adyacentes en Web
+  useEffect(() => {
+    if (!isWeb || items.length === 0) return;
+    const prevIdx = currentWebIndex - 1;
+    const nextIdx = currentWebIndex + 1;
+    if (prevIdx >= 0 && items[prevIdx]) {
+      void qc.prefetchQuery({
+        queryKey: ["media", items[prevIdx].id],
+        queryFn: () => api.mediaDetail(items[prevIdx].id),
+        staleTime: 60_000,
+      });
+    }
+    if (nextIdx < items.length && items[nextIdx]) {
+      void qc.prefetchQuery({
+        queryKey: ["media", items[nextIdx].id],
+        queryFn: () => api.mediaDetail(items[nextIdx].id),
+        staleTime: 60_000,
+      });
+    }
+  }, [isWeb, currentWebIndex, items, qc]);
+
+  // Navegación con teclado en Web
+  useEffect(() => {
+    if (!isWeb) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key === "ArrowLeft") {
+        setWebIndex((curr) => {
+          const idx = curr ?? (foundIndex >= 0 ? foundIndex : 0);
+          return idx > 0 ? idx - 1 : idx;
+        });
+      } else if (e.key === "ArrowRight") {
+        setWebIndex((curr) => {
+          const idx = curr ?? (foundIndex >= 0 ? foundIndex : 0);
+          return idx < items.length - 1 ? idx + 1 : idx;
+        });
+      } else if (e.key === "Escape") {
+        router.back();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isWeb, items.length, foundIndex]);
+
+  const filmstripRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (!isWeb || !filmstripRef.current || items.length <= 1) return;
+    filmstripRef.current.scrollTo({
+      x: Math.max(0, currentWebIndex * 54 - 200),
+      animated: true,
+    });
+  }, [isWeb, currentWebIndex, items.length]);
 
   const detail = useQuery({
     queryKey: ["media", activeId],
@@ -306,7 +489,46 @@ export default function MediaViewer() {
     };
   }, [params, id]);
 
-  const d = detail.data ?? localMedia;
+  const d =
+    detail.data ??
+    (activeItem
+      ? {
+          id: activeItem.id,
+          originalUrl: activeItem.thumbUrl,
+          thumbUrl: activeItem.thumbUrl,
+          thumbhash: activeItem.thumbhash,
+          mediaType: activeItem.mediaType,
+          width: activeItem.width,
+          height: activeItem.height,
+          durationMs: activeItem.durationMs,
+          takenAt: activeItem.takenAt,
+          createdAt: activeItem.takenAt,
+          fileSize: 0,
+          ext: activeItem.mediaType === "video" ? "mp4" : "jpg",
+          mimeType: activeItem.mediaType === "video" ? "video/mp4" : "image/jpeg",
+          isFavorite: activeItem.isFavorite,
+          caption: null,
+          tags: [] as string[],
+          syncStatus: "SYNCED" as const,
+          cameraModel: null,
+          cameraMake: null,
+          lensModel: null,
+          focalLength: null,
+          fNumber: null,
+          iso: null,
+          exposureTime: null,
+          latitude: null,
+          longitude: null,
+          locationName: null,
+        }
+      : null) ??
+    localMedia;
+
+  const currentOriginalUrl =
+    detail.data?.originalUrl ?? (isLocalItem ? localMedia?.originalUrl : undefined);
+  const currentThumbUrl = activeItem?.thumbUrl ?? d?.thumbUrl ?? "";
+  const currentThumbhash = activeItem?.thumbhash ?? d?.thumbhash;
+  const currentMediaType = activeItem?.mediaType ?? d?.mediaType ?? params.mediaType ?? "photo";
 
   const [captionInput, setCaptionInput] = useState("");
   const [newTagInput, setNewTagInput] = useState("");
@@ -541,7 +763,66 @@ export default function MediaViewer() {
           <Heart size={96} color="#f43f5e" fill="#f43f5e" />
         </Animated.View>
 
-        {carousel ? (
+        {isWeb ? (
+          <View className="flex-1 items-center justify-center relative px-2">
+            {/* Flecha anterior */}
+            {canGoPrev ? (
+              <Pressable
+                onPress={goPrev}
+                hitSlop={16}
+                className="absolute left-4 z-20 p-3 rounded-full bg-black/60 hover:bg-black/85 active:scale-95 text-white backdrop-blur-md transition"
+                accessibilityLabel="Anterior"
+              >
+                <ChevronLeft size={28} color="#fff" />
+              </Pressable>
+            ) : null}
+
+            {/* Renderizado de video o imagen */}
+            {currentMediaType === "video" ? (
+              currentOriginalUrl ? (
+                <WebVideoPlayer uri={currentOriginalUrl} />
+              ) : (
+                <View className="flex-1 w-full h-full items-center justify-center relative">
+                  {currentThumbUrl ? (
+                    <Image
+                      source={{ uri: currentThumbUrl }}
+                      placeholder={currentThumbhash ? { thumbhash: currentThumbhash } : undefined}
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: "85%",
+                        width: "100%",
+                        height: "100%",
+                        opacity: 0.7,
+                      }}
+                      contentFit="contain"
+                    />
+                  ) : null}
+                  <View className="absolute items-center justify-center">
+                    <ActivityIndicator color="#fff" size="large" />
+                  </View>
+                </View>
+              )
+            ) : (
+              <WebImageViewer
+                uri={currentOriginalUrl}
+                thumbUrl={currentThumbUrl}
+                thumbhash={currentThumbhash}
+              />
+            )}
+
+            {/* Flecha siguiente */}
+            {canGoNext ? (
+              <Pressable
+                onPress={goNext}
+                hitSlop={16}
+                className="absolute right-4 z-20 p-3 rounded-full bg-black/60 hover:bg-black/85 active:scale-95 text-white backdrop-blur-md transition"
+                accessibilityLabel="Siguiente"
+              >
+                <ChevronRight size={28} color="#fff" />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : carousel ? (
           <FlatList
             data={items}
             keyExtractor={(i) => i.id}
@@ -596,6 +877,39 @@ export default function MediaViewer() {
         )}
       </View>
 
+      {/* Tira inferior de miniaturas (filmstrip) en Web */}
+      {isWeb && items.length > 1 ? (
+        <View className="py-2.5 px-3 bg-black/70 backdrop-blur-md border-t border-white/10 z-20">
+          <ScrollView
+            ref={filmstripRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 6, alignItems: "center" }}
+          >
+            {items.map((it, idx) => {
+              const isCurrent = idx === currentWebIndex;
+              return (
+                <Pressable
+                  key={it.id}
+                  onPress={() => setWebIndex(idx)}
+                  className={`w-12 h-12 rounded-lg overflow-hidden border-2 transition ${
+                    isCurrent
+                      ? "border-accent scale-105 shadow-md"
+                      : "border-transparent opacity-60 hover:opacity-100"
+                  }`}
+                >
+                  <Image
+                    source={{ uri: it.thumbUrl }}
+                    style={{ width: "100%", height: "100%" }}
+                    contentFit="cover"
+                  />
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
       <Modal
         visible={showInfo}
         transparent
@@ -603,7 +917,7 @@ export default function MediaViewer() {
         onRequestClose={() => setShowInfo(false)}
       >
         <Pressable className="flex-1 bg-black/40" onPress={() => setShowInfo(false)} />
-        <View className="bg-white dark:bg-neutral-900 rounded-t-3xl px-6 pt-4 pb-10">
+        <View className="bg-white dark:bg-neutral-900 rounded-t-3xl md:rounded-3xl px-6 pt-4 pb-10 w-full max-w-lg self-center">
           <View className="w-10 h-1.5 rounded-full bg-neutral-300 self-center mb-4" />
           <Text className="text-xl font-bold text-neutral-900 dark:text-white mb-4">
             {t.viewer.info}
