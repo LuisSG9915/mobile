@@ -134,6 +134,8 @@ export const timelineApp = new OpenAPIHono<AppEnv>()
               height: m.height,
               durationMs: m.durationMs,
               isFavorite: m.isFavorite,
+              isScreenshot: Boolean(m.isScreenshot),
+              isDocument: Boolean(m.isDocument),
               thumbhash: m.thumbhash,
               thumbUrl: await presignGet(c.env, m.r2KeyThumb),
             })),
@@ -186,6 +188,8 @@ export const timelineApp = new OpenAPIHono<AppEnv>()
     if (filter === "photos") conditions.push(eq(media.mediaType, "photo"));
     else if (filter === "videos") conditions.push(eq(media.mediaType, "video"));
     else if (filter === "favorites") conditions.push(eq(media.isFavorite, true));
+    else if (filter === "screenshots") conditions.push(eq(media.isScreenshot, true));
+    else if (filter === "documents") conditions.push(eq(media.isDocument, true));
     if (cur) {
       const cond = or(
         lt(media.takenAt, cur.t),
@@ -217,6 +221,8 @@ export const timelineApp = new OpenAPIHono<AppEnv>()
         height: m.height,
         durationMs: m.durationMs,
         isFavorite: m.isFavorite,
+        isScreenshot: Boolean(m.isScreenshot),
+        isDocument: Boolean(m.isDocument),
         thumbhash: m.thumbhash,
         thumbUrl: await presignGet(c.env, m.r2KeyThumb),
       })),

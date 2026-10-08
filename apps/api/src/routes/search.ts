@@ -107,6 +107,8 @@ export const searchApp = new OpenAPIHono<AppEnv>()
     if (filter === "photos") baseConditions.push(eq(media.mediaType, "photo"));
     else if (filter === "videos") baseConditions.push(eq(media.mediaType, "video"));
     else if (filter === "favorites") baseConditions.push(eq(media.isFavorite, true));
+    else if (filter === "screenshots") baseConditions.push(eq(media.isScreenshot, true));
+    else if (filter === "documents") baseConditions.push(eq(media.isDocument, true));
 
     if (dateFrom) baseConditions.push(gte(media.dateGroup, dateFrom));
     if (dateTo) baseConditions.push(lte(media.dateGroup, dateTo));
@@ -123,6 +125,9 @@ export const searchApp = new OpenAPIHono<AppEnv>()
       const textMatch = or(
         sql`lower(${media.caption}) like ${pattern}`,
         sql`lower(${media.tags}) like ${pattern}`,
+        sql`lower(${media.city}) like ${pattern}`,
+        sql`lower(${media.country}) like ${pattern}`,
+        sql`lower(${media.locationName}) like ${pattern}`,
         sql`lower(${media.ext}) like ${pattern}`,
       );
       if (textMatch) {
@@ -174,6 +179,8 @@ export const searchApp = new OpenAPIHono<AppEnv>()
         height: row.height,
         durationMs: row.durationMs,
         isFavorite: row.isFavorite,
+        isScreenshot: Boolean(row.isScreenshot),
+        isDocument: Boolean(row.isDocument),
         thumbhash: row.thumbhash,
         thumbUrl: await presignGet(c.env, row.r2KeyThumb),
       })),

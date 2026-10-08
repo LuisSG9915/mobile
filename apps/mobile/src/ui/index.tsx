@@ -207,3 +207,5 @@ export function ProgressRing({
     </View>
   );
 }
+
+export { PhotoEditorModal } from "./PhotoEditorModal";

@@ -2,7 +2,7 @@ import type { MemoryGroup } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { Play, Sparkles, X } from "lucide-react-native";
+import { Heart, Play, Sparkles, X } from "lucide-react-native";
 import { memo, useState } from "react";
 import { FlatList, Modal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -65,6 +65,11 @@ function MemoryModal({ group, onClose }: MemoryModalProps) {
                   <Text className="text-white text-[10px] font-medium">
                     {formatDuration(item.durationMs) ?? ""}
                   </Text>
+                </View>
+              ) : null}
+              {item.isFavorite ? (
+                <View className="absolute bottom-2 left-2 bg-black/50 rounded-full p-1 shadow-sm">
+                  <Heart size={12} color="#f43f5e" fill="#f43f5e" />
                 </View>
               ) : null}
             </Pressable>

@@ -23,6 +23,7 @@ import {
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   Text,
   useWindowDimensions,
   View,
@@ -55,6 +56,8 @@ const FILTER_KEYS = [
   ["photos", t.gallery.filterPhotos],
   ["videos", t.gallery.filterVideos],
   ["favorites", t.gallery.filterFavorites],
+  ["screenshots", t.gallery.filterScreenshots],
+  ["documents", t.gallery.filterDocuments],
 ] as const;
 
 /** "2026-10" → "octubre de 2026" (dateGroup es UTC; forzamos timeZone). */
@@ -128,7 +131,9 @@ const PhotoCell = memo(
           </View>
         ) : null}
         {photo.remote?.isFavorite ? (
-          <Heart size={14} color="#fff" fill="#f43f5e" className="absolute bottom-1.5 left-1.5" />
+          <View className="absolute bottom-1.5 left-1.5 bg-black/50 rounded-full p-1 shadow-sm">
+            <Heart size={12} color="#f43f5e" fill="#f43f5e" />
+          </View>
         ) : null}
         <SyncBadge status={photo.syncStatus} progress={photo.progress} />
       </Pressable>
@@ -400,33 +405,40 @@ export default function GalleryScreen() {
         </View>
       )}
       {selected ? null : (
-        <View className="flex-row items-center gap-2 px-4 pb-3">
-          {FILTER_KEYS.map(([f, label]) => (
-            <Pressable
-              key={f}
-              onPress={() => setTimelineFilter(f)}
-              accessibilityLabel={label}
-              accessibilityRole="button"
-              className={`px-3 py-1.5 rounded-full border ${
-                timelineFilter === f
-                  ? "bg-accent border-accent"
-                  : "border-neutral-300 dark:border-neutral-700"
-              }`}
-            >
-              <Text
-                className={`text-sm font-medium ${
-                  timelineFilter === f ? "text-white" : "text-neutral-600 dark:text-neutral-300"
+        <View className="flex-row items-center px-4 pb-3">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            className="flex-1"
+            contentContainerStyle={{ gap: 8, paddingRight: 8 }}
+          >
+            {FILTER_KEYS.map(([f, label]) => (
+              <Pressable
+                key={f}
+                onPress={() => setTimelineFilter(f)}
+                accessibilityLabel={label}
+                accessibilityRole="button"
+                className={`px-3 py-1.5 rounded-full border ${
+                  timelineFilter === f
+                    ? "bg-accent border-accent"
+                    : "border-neutral-300 dark:border-neutral-700"
                 }`}
               >
-                {label}
-              </Text>
-            </Pressable>
-          ))}
-          <View className="flex-1" />
+                <Text
+                  className={`text-sm font-medium ${
+                    timelineFilter === f ? "text-white" : "text-neutral-600 dark:text-neutral-300"
+                  }`}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
           <Pressable
             onPress={() => setJumpOpen(true)}
             accessibilityLabel={t.gallery.jumpToMonth}
             hitSlop={8}
+            className="pl-2"
           >
             <Calendar size={20} color="#737373" />
           </Pressable>

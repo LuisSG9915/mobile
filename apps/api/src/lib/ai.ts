@@ -136,14 +136,30 @@ export async function tagMediaItem(
   // Fusión sin duplicados conservando el orden de las etiquetas previas del usuario
   const merged = Array.from(new Set([...existingTags, ...aiTags])).slice(0, 20);
 
-  if (merged.length !== existingTags.length) {
-    await db
-      .update(media)
-      .set({
-        tags: JSON.stringify(merged),
-        updatedAt: Date.now(),
-      })
-      .where(eq(media.id, row.id));
+  const docKeywords = [
+    "documento",
+    "document",
+    "recibo",
+    "factura",
+    "texto",
+    "papel",
+    "hoja",
+    "libro",
+    "comprobante",
+  ];
+  const isDoc = merged.some((tag) => docKeywords.some((kw) => tag.includes(kw)));
+  const shotKeywords = ["captura", "screenshot", "pantalla"];
+  const isShot = merged.some((tag) => shotKeywords.some((kw) => tag.includes(kw)));
+
+  const updates: Record<string, unknown> = {
+    tags: JSON.stringify(merged),
+    updatedAt: Date.now(),
+  };
+  if (isDoc) updates.isDocument = true;
+  if (isShot) updates.isScreenshot = true;
+
+  if (merged.length !== existingTags.length || isDoc || isShot) {
+    await db.update(media).set(updates).where(eq(media.id, row.id));
   }
 
   return merged;

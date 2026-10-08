@@ -43,6 +43,27 @@
       "when": 1791415647560,
       "tag": "0005_secret_shadowcat",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791429000000,
+      "tag": "0006_fluffy_exif",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791431541238,
+      "tag": "0007_cooing_alex_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791432674998,
+      "tag": "0008_medical_thundra",
+      "breakpoints": true
     }
   ]
 }

@@ -104,6 +104,13 @@ export const media = sqliteTable(
     fNumber: real("f_number"),
     iso: integer("iso"),
     exposureTime: text("exposure_time"),
+    // Geocodificación inversa derivada del GPS (ciudad, país y nombre legible)
+    city: text("city"),
+    country: text("country"),
+    locationName: text("location_name"),
+    // Clasificación automática de capturas y documentos
+    isScreenshot: integer("is_screenshot", { mode: "boolean" }).notNull().default(false),
+    isDocument: integer("is_document", { mode: "boolean" }).notNull().default(false),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     deletedAt: integer("deleted_at"),
@@ -116,6 +123,9 @@ export const media = sqliteTable(
     index("media_status_created").on(t.status, t.createdAt),
     index("media_deleted").on(t.deletedAt),
     index("idx_media_location").on(t.userId, t.latitude, t.longitude),
+    index("idx_media_city").on(t.userId, t.city),
+    index("idx_media_screenshot").on(t.userId, t.isScreenshot),
+    index("idx_media_document").on(t.userId, t.isDocument),
   ],
 );
 

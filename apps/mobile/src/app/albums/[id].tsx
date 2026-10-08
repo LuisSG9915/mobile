@@ -7,6 +7,7 @@ import {
   Download,
   Edit2,
   FolderPlus,
+  Heart,
   MoreVertical,
   Play,
   Plus,
@@ -92,18 +93,23 @@ export default function AlbumDetailScreen() {
       void qc.invalidateQueries({ queryKey: ["album", albumId] });
       void qc.invalidateQueries({ queryKey: ["albums"] });
 
+      let shareUrl = data.shareUrl;
+      if (Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin) {
+        shareUrl = `${window.location.origin}/shared/album/${data.shareToken}`;
+      }
+
       if (Platform.OS === "web") {
         if (navigator.clipboard) {
-          await navigator.clipboard.writeText(data.shareUrl);
+          await navigator.clipboard.writeText(shareUrl);
           toast.success(t.albums.shareLinkCopied);
         } else {
-          window.prompt("Copia el enlace del álbum:", data.shareUrl);
+          window.prompt("Copia el enlace del álbum:", shareUrl);
         }
       } else {
         await Share.share({
           title: album?.title ?? t.albums.title,
-          message: data.shareUrl,
-          url: data.shareUrl,
+          message: shareUrl,
+          url: shareUrl,
         });
       }
     },
@@ -297,6 +303,11 @@ export default function AlbumDetailScreen() {
                       {formatDuration(item.durationMs)}
                     </Text>
                   ) : null}
+                </View>
+              ) : null}
+              {item.isFavorite ? (
+                <View className="absolute bottom-1.5 left-1.5 bg-black/50 rounded-full p-1 shadow-sm">
+                  <Heart size={12} color="#f43f5e" fill="#f43f5e" />
                 </View>
               ) : null}
             </Pressable>

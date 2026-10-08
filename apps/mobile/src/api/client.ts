@@ -5,6 +5,9 @@ import type {
   AutoTagBatchResponse,
   AutoTagResponse,
   CheckHashesResponse,
+  CleanerBurstsResponse,
+  CleanerCleanupInput,
+  CleanerCleanupResponse,
   CreateAlbumInput,
   DownloadResponse,
   EmptyTrashResponse,
@@ -13,6 +16,7 @@ import type {
   LocationsResponse,
   MediaDetail,
   MemoriesResponse,
+  PlacesResponse,
   PublicAlbumResponse,
   SearchQuery,
   SearchResponse,
@@ -225,4 +229,17 @@ export const api = {
     const qs = q.toString();
     return apiFetch(`/v1/locations${qs ? `?${qs}` : ""}`).then((r) => r.json());
   },
+
+  places: (): Promise<PlacesResponse> => apiFetch("/v1/locations/places").then((r) => r.json()),
+
+  geocodeBatch: (): Promise<{ geocoded: number }> =>
+    apiFetch("/v1/locations/geocode-batch", { method: "POST" }).then((r) => r.json()),
+
+  cleanerBursts: (): Promise<CleanerBurstsResponse> =>
+    apiFetch("/v1/cleaner/bursts").then((r) => r.json()),
+
+  cleanerCleanup: (body: CleanerCleanupInput): Promise<CleanerCleanupResponse> =>
+    apiFetch("/v1/cleaner/cleanup", { method: "POST", body: JSON.stringify(body) }).then((r) =>
+      r.json(),
+    ),
 };

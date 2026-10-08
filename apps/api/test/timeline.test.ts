@@ -117,6 +117,21 @@ describe("timeline", () => {
     );
     expect(favs.items.length).toBe(3);
     for (const it of favs.items) expect(it.isFavorite).toBe(true);
+
+    await db.update(media).set({ isScreenshot: true }).where(eq(media.id, rows[0].id));
+    await db.update(media).set({ isDocument: true }).where(eq(media.id, rows[1].id));
+
+    const screenshots = await j(
+      await SELF.fetch("http://localhost/v1/timeline?filter=screenshots", authed(cookie)),
+    );
+    expect(screenshots.items.length).toBe(1);
+    expect(screenshots.items[0].isScreenshot).toBe(true);
+
+    const docs = await j(
+      await SELF.fetch("http://localhost/v1/timeline?filter=documents", authed(cookie)),
+    );
+    expect(docs.items.length).toBe(1);
+    expect(docs.items[0].isDocument).toBe(true);
   });
 
   it("months devuelve los meses con conteo en orden descendente", async () => {

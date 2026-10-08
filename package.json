@@ -18,7 +18,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "turbo run typecheck",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "backup:r2": "node scripts/backup-r2.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

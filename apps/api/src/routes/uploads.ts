@@ -12,6 +12,7 @@ import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { tagMediaItem } from "../lib/ai";
+import { geocodeMediaItem } from "../lib/geo";
 import { originalKey, thumbKey } from "../lib/keys";
 import { presignPut } from "../lib/s3";
 import { addStorageUsage, getUsageBytes } from "../lib/storage-stats";
@@ -176,6 +177,15 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
     ]);
 
     const now = Date.now();
+    let isScreenshot = body.isScreenshot ?? false;
+    if (!isScreenshot && !body.cameraMake && !body.cameraModel && body.mediaType === "photo") {
+      const ratio = Math.max(body.width, body.height) / Math.min(body.width, body.height);
+      if (ratio >= 1.95 && ratio <= 2.35) {
+        isScreenshot = true;
+      }
+    }
+    const isDocument = body.isDocument ?? false;
+
     const values = {
       userId: user.id,
       sha256: body.sha256,
@@ -201,6 +211,8 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
       r2KeyThumb: tKey,
       fileSize: body.fileSize,
       thumbSize: body.thumbSize,
+      isScreenshot,
+      isDocument,
       status: "pending" as const,
       updatedAt: now,
       deletedAt: null,
@@ -303,6 +315,20 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
         console.warn("auto_tag_upload_error", row.id, err);
       });
       c.executionCtx?.waitUntil?.(backgroundTag);
+    }
+
+    // Geocodificación inversa si el elemento tiene coordenadas GPS
+    if (row.latitude != null && row.longitude != null) {
+      const backgroundGeo = geocodeMediaItem(
+        c.env,
+        row.id,
+        user.id,
+        row.latitude,
+        row.longitude,
+      ).catch((err) => {
+        console.warn("geocode_upload_error", row.id, err);
+      });
+      c.executionCtx?.waitUntil?.(backgroundGeo);
     }
 
     return c.json({ id: row.id, status: "ready" } as const, 200);

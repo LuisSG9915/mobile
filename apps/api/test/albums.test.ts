@@ -130,6 +130,7 @@ describe("albums y compartido", () => {
     expect(publicJson.mediaCount).toBe(2);
     expect(publicJson.items[0].thumbUrl).toContain("X-Amz-Signature");
     expect(publicJson.items[0].originalUrl).toContain("X-Amz-Signature");
+    expect(publicJson.items[0].downloadUrl).toContain("X-Amz-Signature");
 
     // 9. Revocar enlace de compartir
     const unshareRes = await SELF.fetch(`http://localhost/v1/albums/${albumId}/share`, {

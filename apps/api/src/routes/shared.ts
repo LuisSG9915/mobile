@@ -63,7 +63,8 @@ export const sharedApp = new OpenAPIHono<AppEnv>().openapi(getSharedAlbumRoute, 
       durationMs: m.durationMs,
       thumbhash: m.thumbhash,
       thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-      originalUrl: await presignGetDownload(c.env, m.r2KeyOriginal, `${m.id}.${m.ext}`),
+      originalUrl: await presignGet(c.env, m.r2KeyOriginal),
+      downloadUrl: await presignGetDownload(c.env, m.r2KeyOriginal, `${m.id}.${m.ext}`),
     })),
   );
 

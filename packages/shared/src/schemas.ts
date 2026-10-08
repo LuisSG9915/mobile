@@ -48,6 +48,8 @@ export const uploadInitSchema = z.object({
   fNumber: z.number().nullable().optional(),
   iso: z.number().int().nullable().optional(),
   exposureTime: z.string().trim().max(50).nullable().optional(),
+  isScreenshot: z.boolean().optional(),
+  isDocument: z.boolean().optional(),
 });
 
 export const presignedTargetSchema = z.object({
@@ -82,7 +84,14 @@ export const checkHashesResponseSchema = z.object({
 
 // ---------- timeline ----------
 
-export const timelineFilterSchema = z.enum(["all", "photos", "videos", "favorites"]);
+export const timelineFilterSchema = z.enum([
+  "all",
+  "photos",
+  "videos",
+  "favorites",
+  "screenshots",
+  "documents",
+]);
 
 export const timelineItemSchema = z.object({
   id: z.string(),
@@ -95,6 +104,8 @@ export const timelineItemSchema = z.object({
   height: z.number(),
   durationMs: z.number().nullable(),
   isFavorite: z.boolean(),
+  isScreenshot: z.boolean().default(false),
+  isDocument: z.boolean().default(false),
   thumbhash: z.string(),
   thumbUrl: z.string(),
 });
@@ -161,6 +172,9 @@ export const mediaDetailSchema = timelineItemSchema.extend({
   fNumber: z.number().nullable().default(null),
   iso: z.number().nullable().default(null),
   exposureTime: z.string().nullable().default(null),
+  city: z.string().nullable().default(null),
+  country: z.string().nullable().default(null),
+  locationName: z.string().nullable().default(null),
   caption: z.string().nullable().default(null),
   tags: z.array(z.string()).default([]),
   createdAt: z.number(),
@@ -284,6 +298,7 @@ export const publicAlbumItemSchema = z.object({
   thumbhash: z.string(),
   thumbUrl: z.string(),
   originalUrl: z.string(),
+  downloadUrl: z.string().optional(),
 });
 
 export const publicAlbumResponseSchema = z.object({
@@ -295,7 +310,43 @@ export const publicAlbumResponseSchema = z.object({
 
 // ---------- búsqueda y filtros avanzados ----------
 
-export const searchFilterSchema = z.enum(["all", "photos", "videos", "favorites"]);
+export const searchFilterSchema = z.enum([
+  "all",
+  "photos",
+  "videos",
+  "favorites",
+  "screenshots",
+  "documents",
+]);
+
+// ---------- limpiador de ráfagas / fotos similares ----------
+
+export const burstClusterSchema = z.object({
+  id: z.string(),
+  takenAt: z.number(),
+  dateGroup: z.string(),
+  items: z.array(timelineItemSchema),
+});
+
+export const cleanerBurstsResponseSchema = z.object({
+  clusters: z.array(burstClusterSchema),
+  totalPhotos: z.number(),
+});
+
+export const cleanerCleanupSchema = z.object({
+  keepId: z.string().optional(),
+  deleteIds: z.array(z.string()).min(1),
+});
+
+export const cleanerCleanupResponseSchema = z.object({
+  ok: z.literal(true),
+  trashedCount: z.number(),
+});
+
+export type BurstCluster = z.infer<typeof burstClusterSchema>;
+export type CleanerBurstsResponse = z.infer<typeof cleanerBurstsResponseSchema>;
+export type CleanerCleanupInput = z.infer<typeof cleanerCleanupSchema>;
+export type CleanerCleanupResponse = z.infer<typeof cleanerCleanupResponseSchema>;
 
 export const searchQuerySchema = z.object({
   q: z.string().trim().optional(),
@@ -336,11 +387,15 @@ export const locationItemSchema = z.object({
   id: z.string(),
   latitude: z.number(),
   longitude: z.number(),
+  city: z.string().nullable().default(null),
+  country: z.string().nullable().default(null),
+  locationName: z.string().nullable().default(null),
   thumbUrl: z.string(),
   thumbhash: z.string(),
   mediaType: mediaTypeSchema,
   takenAt: z.number(),
   dateGroup: z.string(),
+  isFavorite: z.boolean().default(false),
   caption: z.string().nullable().default(null),
 });
 
@@ -349,6 +404,7 @@ export const locationsQuerySchema = z.object({
   maxLat: z.coerce.number().optional(),
   minLng: z.coerce.number().optional(),
   maxLng: z.coerce.number().optional(),
+  city: z.string().trim().optional(),
   filter: searchFilterSchema.optional().default("all"),
 });
 
@@ -356,6 +412,22 @@ export const locationsResponseSchema = z.object({
   items: z.array(locationItemSchema),
   totalWithGps: z.number(),
 });
+
+export const placeItemSchema = z.object({
+  city: z.string(),
+  country: z.string(),
+  locationName: z.string(),
+  count: z.number(),
+  thumbUrl: z.string().nullable(),
+  thumbhash: z.string().nullable(),
+});
+
+export const placesResponseSchema = z.object({
+  places: z.array(placeItemSchema),
+});
+
+export type PlaceItem = z.infer<typeof placeItemSchema>;
+export type PlacesResponse = z.infer<typeof placesResponseSchema>;
 
 // ---------- tipos ----------
 

@@ -31,6 +31,9 @@ async function seedLocationMedia(userId: string): Promise<void> {
     thumbSize: 10_000,
     status: "ready",
     caption: "Playa en Cancún",
+    city: "Cancún",
+    country: "México",
+    locationName: "Cancún, México",
     createdAt: base,
     updatedAt: base,
   });
@@ -164,5 +167,33 @@ describe("rutas de ubicación y mapa (locations)", () => {
     const data = await j(res);
     expect(data.totalWithGps).toBe(1);
     expect(data.items[0].caption).toBe("Playa en Cancún");
+  });
+
+  it("GET /v1/locations/places agrupa fotos por ciudad con conteo", async () => {
+    const { cookie, userId } = await createUser();
+    await seedLocationMedia(userId);
+
+    const res = await SELF.fetch("http://localhost/v1/locations/places", authed(cookie));
+    expect(res.status).toBe(200);
+    const data = await j(res);
+    expect(Array.isArray(data.places)).toBe(true);
+    expect(data.places.length).toBeGreaterThanOrEqual(1);
+    const cancun = data.places.find((p: { city: string }) => p.city === "Cancún");
+    expect(cancun).toBeDefined();
+    expect(cancun.country).toBe("México");
+    expect(cancun.count).toBe(1);
+  });
+
+  it("POST /v1/locations/geocode-batch procesa fotos pendientes de geocodificación", async () => {
+    const { cookie, userId } = await createUser();
+    await seedLocationMedia(userId);
+
+    const res = await SELF.fetch(
+      "http://localhost/v1/locations/geocode-batch",
+      authed(cookie, { method: "POST" }),
+    );
+    expect(res.status).toBe(200);
+    const data = await j(res);
+    expect(typeof data.geocoded).toBe("number");
   });
 });

@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import {
   Camera,
+  Crop,
   Download,
   ExternalLink,
   FolderPlus,
@@ -51,7 +52,7 @@ import { deleteLocalCopy, hasLocalCopy } from "../../lib/free-space";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { useTimeline } from "../../lib/timeline";
-import { Button } from "../../ui";
+import { Button, PhotoEditorModal } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 
 function ZoomableImage({
@@ -234,6 +235,7 @@ export default function MediaViewer() {
   const qc = useQueryClient();
   const [showInfo, setShowInfo] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   // El carrusel respeta el filtro activo de la galería (favoritos incluidos).
   const filter = useSettings((s) => s.timelineFilter);
   const timeline = useTimeline(filter);
@@ -399,6 +401,15 @@ export default function MediaViewer() {
           <X color="#fff" size={26} />
         </Pressable>
         <View className="flex-row gap-5">
+          {d?.mediaType === "photo" ? (
+            <Pressable
+              onPress={() => setEditorOpen(true)}
+              accessibilityLabel={t.editor.title}
+              hitSlop={12}
+            >
+              <Crop color="#fff" size={24} />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => fav.mutate(activeId)}
             disabled={fav.isPending}
@@ -718,9 +729,16 @@ export default function MediaViewer() {
                 <View className="py-2 border-b border-neutral-100 dark:border-neutral-800 gap-2">
                   <View className="flex-row justify-between items-center">
                     <Text className="text-sm text-neutral-500">{t.viewer.location}</Text>
-                    <Text className="text-sm font-medium text-neutral-900 dark:text-white">
-                      {d.latitude.toFixed(4)}, {d.longitude.toFixed(4)}
-                    </Text>
+                    <View className="items-end">
+                      {d.locationName ? (
+                        <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
+                          {d.locationName}
+                        </Text>
+                      ) : null}
+                      <Text className="text-xs text-neutral-400">
+                        {d.latitude.toFixed(4)}, {d.longitude.toFixed(4)}
+                      </Text>
+                    </View>
                   </View>
                   <View className="flex-row gap-2">
                     <Pressable
@@ -775,6 +793,20 @@ export default function MediaViewer() {
         mediaIds={[activeId]}
         onClose={() => setAddToAlbumOpen(false)}
       />
+
+      {d && d.mediaType === "photo" ? (
+        <PhotoEditorModal
+          visible={editorOpen}
+          uri={d.originalUrl}
+          width={d.width}
+          height={d.height}
+          onClose={() => setEditorOpen(false)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ["timeline"] });
+            void qc.invalidateQueries({ queryKey: ["media", activeId] });
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

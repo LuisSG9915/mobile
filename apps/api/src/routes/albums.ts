@@ -299,6 +299,8 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
         height: m.height,
         durationMs: m.durationMs,
         isFavorite: m.isFavorite,
+        isScreenshot: Boolean(m.isScreenshot),
+        isDocument: Boolean(m.isDocument),
         thumbhash: m.thumbhash,
         thumbUrl: await presignGet(c.env, m.r2KeyThumb),
       })),
@@ -356,6 +358,8 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
         height: m.height,
         durationMs: m.durationMs,
         isFavorite: m.isFavorite,
+        isScreenshot: Boolean(m.isScreenshot),
+        isDocument: Boolean(m.isDocument),
         thumbhash: m.thumbhash,
         thumbUrl: await presignGet(c.env, m.r2KeyThumb),
       })),
@@ -431,6 +435,8 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
         height: m.height,
         durationMs: m.durationMs,
         isFavorite: m.isFavorite,
+        isScreenshot: Boolean(m.isScreenshot),
+        isDocument: Boolean(m.isDocument),
         thumbhash: m.thumbhash,
         thumbUrl: await presignGet(c.env, m.r2KeyThumb),
       })),
@@ -563,7 +569,14 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
     }
 
     const origins = webOrigins(c.env);
-    const origin = origins[0] ?? "https://photos-web.luis-sg9915.workers.dev";
+    let origin = origins[0] ?? "https://photos-web.luis-sg9915.workers.dev";
+    const reqOrigin = c.req.header("origin") || c.req.header("referer");
+    if (reqOrigin) {
+      try {
+        const u = new URL(reqOrigin);
+        origin = u.origin;
+      } catch {}
+    }
     const shareUrl = `${origin}/shared/album/${shareToken}`;
 
     return c.json({ shareToken, shareUrl }, 200);

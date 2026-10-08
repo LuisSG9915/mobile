@@ -2,7 +2,7 @@ import type { SearchFilter, TimelineItem } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { ChevronLeft, Play, Search, Tag, X } from "lucide-react-native";
+import { ChevronLeft, Heart, MapPin, Play, Search, Tag, X } from "lucide-react-native";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -25,6 +25,8 @@ const FILTER_TYPES: { key: SearchFilter; label: string }[] = [
   { key: "photos", label: t.search.photos },
   { key: "videos", label: t.search.videos },
   { key: "favorites", label: t.search.favorites },
+  { key: "screenshots", label: t.search.screenshots },
+  { key: "documents", label: t.search.documents },
 ];
 
 export default function SearchScreen() {
@@ -37,6 +39,11 @@ export default function SearchScreen() {
   const tagsQuery = useQuery({
     queryKey: ["tags"],
     queryFn: api.tags,
+  });
+
+  const placesQuery = useQuery({
+    queryKey: ["places"],
+    queryFn: api.places,
   });
 
   const minBytes =
@@ -61,6 +68,7 @@ export default function SearchScreen() {
   const results = searchQuery.data?.items ?? [];
   const totalMatches = searchQuery.data?.totalMatches ?? 0;
   const availableTags = tagsQuery.data?.tags ?? [];
+  const availablePlaces = placesQuery.data?.places ?? [];
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top", "bottom"]}>
@@ -166,6 +174,45 @@ export default function SearchScreen() {
           </Pressable>
         </ScrollView>
 
+        {/* Fila de lugares si existen */}
+        {availablePlaces.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerClassName="px-3 gap-1.5 pt-2"
+          >
+            <View className="flex-row items-center mr-1">
+              <MapPin size={13} color="#4f46e5" />
+            </View>
+            {availablePlaces.map(({ city, count }) => {
+              const isSelected = searchText.toLowerCase() === city.toLowerCase();
+              return (
+                <Pressable
+                  key={city}
+                  onPress={() =>
+                    setSearchText((prev) => (prev.toLowerCase() === city.toLowerCase() ? "" : city))
+                  }
+                  className={`px-2.5 py-1 rounded-lg border flex-row items-center gap-1 ${
+                    isSelected
+                      ? "bg-accent/20 border-accent"
+                      : "border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-850"
+                  }`}
+                >
+                  <Text
+                    className={`text-xs font-medium ${
+                      isSelected
+                        ? "text-accent font-bold"
+                        : "text-neutral-600 dark:text-neutral-400"
+                    }`}
+                  >
+                    📍 {city} ({count})
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
         {/* Fila de etiquetas del usuario si existen */}
         {availableTags.length > 0 ? (
           <ScrollView
@@ -267,6 +314,11 @@ export default function SearchScreen() {
                         {formatDuration(item.durationMs)}
                       </Text>
                     ) : null}
+                  </View>
+                ) : null}
+                {item.isFavorite ? (
+                  <View className="absolute bottom-1.5 left-1.5 bg-black/50 rounded-full p-1 shadow-sm">
+                    <Heart size={12} color="#f43f5e" fill="#f43f5e" />
                   </View>
                 ) : null}
               </Pressable>

@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
@@ -209,5 +210,30 @@ describe("búsqueda y filtros avanzados", () => {
     const heavyJson = await j(heavyRes);
     expect(heavyJson.totalMatches).toBe(1);
     expect(heavyJson.items[0].mediaType).toBe("video");
+  });
+
+  it("filtra por capturas y documentos", async () => {
+    const { cookie, userId } = await createUser();
+    const [id1, id2] = await seedTestMedia(userId);
+    const db = getDb(env.DB);
+    await db.update(media).set({ isScreenshot: true }).where(eq(media.id, id1));
+    await db.update(media).set({ isDocument: true }).where(eq(media.id, id2));
+
+    const screenRes = await SELF.fetch(
+      "http://localhost/v1/search?filter=screenshots",
+      authed(cookie),
+    );
+    expect(screenRes.status).toBe(200);
+    const screenJson = await j(screenRes);
+    expect(screenJson.totalMatches).toBe(1);
+    expect(screenJson.items[0].id).toBe(id1);
+    expect(screenJson.items[0].isScreenshot).toBe(true);
+
+    const docRes = await SELF.fetch("http://localhost/v1/search?filter=documents", authed(cookie));
+    expect(docRes.status).toBe(200);
+    const docJson = await j(docRes);
+    expect(docJson.totalMatches).toBe(1);
+    expect(docJson.items[0].id).toBe(id2);
+    expect(docJson.items[0].isDocument).toBe(true);
   });
 });

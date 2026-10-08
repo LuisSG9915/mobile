@@ -1,7 +1,7 @@
 import { ADMIN_EMAIL } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { ChevronRight, Database, HardDrive, Trash2 } from "lucide-react-native";
+import { ChevronRight, Database, HardDrive, Sparkles, Trash2 } from "lucide-react-native";
 import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
@@ -123,6 +123,21 @@ export default function SettingsScreen() {
             <Button label={t.settings.freeSpaceAction} variant="ghost" onPress={freeSpace} />
           </Card>
         ) : null}
+
+        <Pressable onPress={() => router.push("/cleaner")} accessibilityRole="button">
+          <Card className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-3">
+              <Sparkles size={18} color="#6366f1" />
+              <View>
+                <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                  {t.settings.cleaner}
+                </Text>
+                <Text className="text-xs text-neutral-500">{t.settings.cleanerHint}</Text>
+              </View>
+            </View>
+            <ChevronRight size={18} color="#a3a3a3" />
+          </Card>
+        </Pressable>
 
         <Pressable onPress={() => router.push("/trash")} accessibilityRole="button">
           <Card className="flex-row items-center justify-between">

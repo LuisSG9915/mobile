@@ -53,6 +53,8 @@ export function useHybridGallery(filter: TimelineFilter = "all") {
     if (filter === "favorites") return merged.filter((p) => p.remote?.isFavorite === true);
     if (filter === "photos") return merged.filter((p) => p.mediaType === "photo");
     if (filter === "videos") return merged.filter((p) => p.mediaType === "video");
+    if (filter === "screenshots") return merged.filter((p) => p.remote?.isScreenshot === true);
+    if (filter === "documents") return merged.filter((p) => p.remote?.isDocument === true);
     return merged;
   }, [query.data, localAssets, tick, filter]);
 

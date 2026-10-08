@@ -2,7 +2,16 @@ import type { LocationItem, SearchFilter } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, ExternalLink, MapPin, Minus, Play, Plus, X } from "lucide-react-native";
+import {
+  ChevronLeft,
+  ExternalLink,
+  Heart,
+  MapPin,
+  Minus,
+  Play,
+  Plus,
+  X,
+} from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -346,14 +355,26 @@ export default function MapScreen() {
               style={{ width: "100%", height: "100%" }}
               contentFit="cover"
             />
+            {selectedPin.mediaType === "video" ? (
+              <View className="absolute bottom-1 right-1 bg-black/60 rounded px-1.5 py-0.5 flex-row items-center gap-1">
+                <Play size={10} color="#fff" fill="#fff" />
+              </View>
+            ) : null}
+            {selectedPin.isFavorite ? (
+              <View className="absolute bottom-1 left-1 bg-black/50 rounded-full p-1 shadow-sm">
+                <Heart size={10} color="#f43f5e" fill="#f43f5e" />
+              </View>
+            ) : null}
           </Pressable>
 
           <View className="flex-1 justify-center">
             <Text className="text-sm font-bold text-neutral-900 dark:text-white" numberOfLines={1}>
-              {selectedPin.caption || "Foto con ubicación"}
+              {selectedPin.locationName || selectedPin.caption || "Foto con ubicación"}
             </Text>
             <Text className="text-xs text-neutral-500 mt-0.5">
-              {formatDateTime(selectedPin.takenAt)}
+              {selectedPin.locationName && selectedPin.caption
+                ? selectedPin.caption
+                : formatDateTime(selectedPin.takenAt)}
             </Text>
             <View className="flex-row items-center gap-1 mt-1">
               <MapPin size={12} color="#737373" />
