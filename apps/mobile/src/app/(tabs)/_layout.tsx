@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { CloudUpload, Images, Settings } from "lucide-react-native";
+import { CloudUpload, Folder, Images, Settings } from "lucide-react-native";
 import { ActivityIndicator, Platform, Text, View } from "react-native";
 import { t } from "../../i18n/es";
 import { useSyncProgressAuto } from "../../queue/progress";
@@ -46,6 +46,14 @@ export default function TabsLayout() {
           title: t.tabs.photos,
           tabBarIcon: ({ color, size }) => <Images color={color} size={size} />,
           tabBarAccessibilityLabel: t.tabs.photos,
+        }}
+      />
+      <Tabs.Screen
+        name="albums"
+        options={{
+          title: t.tabs.albums,
+          tabBarIcon: ({ color, size }) => <Folder color={color} size={size} />,
+          tabBarAccessibilityLabel: t.tabs.albums,
         }}
       />
       <Tabs.Screen

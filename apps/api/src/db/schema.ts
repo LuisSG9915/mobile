@@ -1,4 +1,12 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 // ---------- Better Auth ----------
 
@@ -84,6 +92,18 @@ export const media = sqliteTable(
       .default("pending"),
     // Favorito del usuario: conmuta vía POST /media/{id}/favorite.
     isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
+    // Pie de foto / notas / descripción para búsqueda y detalle
+    caption: text("caption"),
+    // Etiquetas de usuario en formato JSON array (ej. '["viaje","playa"]')
+    tags: text("tags"),
+    // Metadatos EXIF fotográficos
+    cameraMake: text("camera_make"),
+    cameraModel: text("camera_model"),
+    lensModel: text("lens_model"),
+    focalLength: real("focal_length"),
+    fNumber: real("f_number"),
+    iso: integer("iso"),
+    exposureTime: text("exposure_time"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     deletedAt: integer("deleted_at"),
@@ -95,6 +115,7 @@ export const media = sqliteTable(
     index("idx_media_date_group").on(t.userId, t.dateGroup),
     index("media_status_created").on(t.status, t.createdAt),
     index("media_deleted").on(t.deletedAt),
+    index("idx_media_location").on(t.userId, t.latitude, t.longitude),
   ],
 );
 
@@ -115,3 +136,42 @@ export const userStorageStats = sqliteTable("user_storage_stats", {
   mediaCount: integer("media_count").notNull().default(0),
   updatedAt: integer("updated_at").notNull(), // epoch ms
 });
+
+// ---------- Álbumes ----------
+
+export const album = sqliteTable(
+  "album",
+  {
+    id: text("id").primaryKey(), // crypto.randomUUID()
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    coverMediaId: text("cover_media_id").references(() => media.id, { onDelete: "set null" }),
+    shareToken: text("share_token"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_album_user").on(t.userId, t.updatedAt),
+    uniqueIndex("idx_album_share_token").on(t.shareToken),
+  ],
+);
+
+export const albumMedia = sqliteTable(
+  "album_media",
+  {
+    albumId: text("album_id")
+      .notNull()
+      .references(() => album.id, { onDelete: "cascade" }),
+    mediaId: text("media_id")
+      .notNull()
+      .references(() => media.id, { onDelete: "cascade" }),
+    addedAt: integer("added_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.albumId, t.mediaId] }),
+    index("idx_album_media_album").on(t.albumId, t.addedAt),
+    index("idx_album_media_media").on(t.mediaId),
+  ],
+);

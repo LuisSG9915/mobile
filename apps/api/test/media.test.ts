@@ -175,4 +175,115 @@ describe("media", () => {
     expect(json.lastUploadAt).toBeTruthy();
     expect(json.quotaBytes).toBeGreaterThan(0);
   });
+
+  it("POST /v1/trash/empty vacía permanentemente la papelera del usuario", async () => {
+    const { cookie, userId } = await createUser();
+    const other = await createUser();
+    await seedOne(userId, true, 10);
+    await seedOne(userId, true, 11);
+    await seedOne(other.userId, true, 12);
+
+    const res = await SELF.fetch("http://localhost/v1/trash/empty", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.ok).toBe(true);
+    expect(json.deletedCount).toBe(2);
+
+    // Papelera del usuario queda vacía
+    const trash = await SELF.fetch("http://localhost/v1/trash", authed(cookie));
+    expect((await j(trash)).items.length).toBe(0);
+
+    // Papelera de otro usuario no se toca
+    const otherTrash = await SELF.fetch("http://localhost/v1/trash", authed(other.cookie));
+    expect((await j(otherTrash)).items.length).toBe(1);
+  });
+
+  it("detalle expone metadatos fotográficos EXIF", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+    const id = crypto.randomUUID();
+    const s = sha("exif-photo");
+    await db.insert(media).values({
+      id,
+      userId,
+      sha256: s,
+      mediaType: "photo",
+      mimeType: "image/jpeg",
+      ext: "jpg",
+      takenAt: Date.now(),
+      width: 6000,
+      height: 4000,
+      thumbhash: "AQAAAA==",
+      r2KeyOriginal: `users/${userId}/originals/${s}.jpg`,
+      r2KeyThumb: `users/${userId}/thumbs/${s}.webp`,
+      fileSize: 5_000_000,
+      thumbSize: 12_000,
+      status: "ready",
+      cameraMake: "Sony",
+      cameraModel: "A7 IV",
+      lensModel: "FE 24-70mm F2.8 GM",
+      focalLength: 35,
+      fNumber: 2.8,
+      iso: 400,
+      exposureTime: "1/500s",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      deletedAt: null,
+    });
+
+    const res = await SELF.fetch(`http://localhost/v1/media/${id}`, authed(cookie));
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.cameraMake).toBe("Sony");
+    expect(json.cameraModel).toBe("A7 IV");
+    expect(json.lensModel).toBe("FE 24-70mm F2.8 GM");
+    expect(json.focalLength).toBe(35);
+    expect(json.fNumber).toBe(2.8);
+    expect(json.iso).toBe(400);
+    expect(json.exposureTime).toBe("1/500s");
+  });
+
+  it("POST /v1/media/:id/auto-tag → 401 sin sesión, 404 si ajeno", async () => {
+    const { userId } = await createUser();
+    const other = await createUser();
+    const id = await seedOne(userId);
+
+    const anon = await SELF.fetch(`http://localhost/v1/media/${id}/auto-tag`, {
+      method: "POST",
+    });
+    expect(anon.status).toBe(401);
+
+    const forbidden = await SELF.fetch(
+      `http://localhost/v1/media/${id}/auto-tag`,
+      authed(other.cookie, { method: "POST" }),
+    );
+    expect(forbidden.status).toBe(404);
+  });
+
+  it("POST /v1/media/:id/auto-tag y batch funcionan correctamente", async () => {
+    const { cookie, userId } = await createUser();
+    const id = await seedOne(userId);
+
+    // Sin binding AI en el entorno de pruebas, devuelve 200 y no falla
+    const res = await SELF.fetch(
+      `http://localhost/v1/media/${id}/auto-tag`,
+      authed(cookie, { method: "POST" }),
+    );
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.id).toBe(id);
+    expect(Array.isArray(json.tags)).toBe(true);
+
+    // Lote batch
+    const batchRes = await SELF.fetch(
+      "http://localhost/v1/media/auto-tag-batch",
+      authed(cookie, { method: "POST" }),
+    );
+    expect(batchRes.status).toBe(200);
+    const batchJson = await j(batchRes);
+    expect(batchJson.processed).toBeGreaterThanOrEqual(1);
+  });
 });

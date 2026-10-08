@@ -139,7 +139,7 @@ export default function SettingsScreen() {
           </Card>
         </Pressable>
 
-        {session?.user.email === ADMIN_EMAIL ? (
+        {ADMIN_EMAIL && session?.user.email === ADMIN_EMAIL ? (
           <Pressable onPress={() => router.push("/admin")} accessibilityRole="button">
             <Card className="flex-row items-center justify-between">
               <View className="flex-row items-center gap-3">

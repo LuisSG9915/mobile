@@ -16,18 +16,23 @@ export default function ForgotPassword() {
   const submit = async () => {
     setError(null);
     setLoading(true);
-    const res = await requestPasswordReset({
-      email: email.trim(),
-      redirectTo: resetRedirectTarget(),
-    });
-    setLoading(false);
-    if (res.error) {
-      setError(res.error.status === 429 ? t.auth.tooManyAttempts : t.auth.genericError);
-      return;
+    try {
+      const res = await requestPasswordReset({
+        email: email.trim(),
+        redirectTo: resetRedirectTarget(),
+      });
+      if (res?.error) {
+        setError(res.error.status === 429 ? t.auth.tooManyAttempts : t.auth.genericError);
+        return;
+      }
+      // La API responde igual exista o no el correo (anti-enumeración):
+      // confirmación genérica siempre.
+      setSent(true);
+    } catch {
+      setError(t.auth.genericError);
+    } finally {
+      setLoading(false);
     }
-    // La API responde igual exista o no el correo (anti-enumeración):
-    // confirmación genérica siempre.
-    setSent(true);
   };
 
   return (

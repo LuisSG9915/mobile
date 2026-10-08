@@ -1,9 +1,19 @@
-import type { TimelineFilter } from "@photos/shared";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { Calendar, Check, Download, Heart, Play, Trash2, X } from "lucide-react-native";
+import {
+  Calendar,
+  Check,
+  Download,
+  FolderPlus,
+  Heart,
+  MapPin,
+  Play,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react-native";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -30,7 +40,9 @@ import { buildGridGeometry, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-g
 import { useSettings } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { EmptyState, SyncBadge } from "../../ui";
+import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { FastScrubber } from "../../ui/FastScrubber";
+import { MemoriesBar } from "../../ui/MemoriesBar";
 import { SyncStatusAvatar } from "../../ui/SyncStatusAvatar";
 
 const isWeb = Platform.OS === "web";
@@ -158,6 +170,7 @@ export default function GalleryScreen() {
   selectedRef.current = selected;
   const [dragSelecting, setDragSelecting] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
+  const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
   // Salto temporal: mes elegido en el modal; el efecto de abajo va trayendo
   // páginas del timeline hasta localizar la primera foto de ese mes.
   const [jumpOpen, setJumpOpen] = useState(false);
@@ -169,7 +182,6 @@ export default function GalleryScreen() {
     staleTime: 60_000,
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fetchNextPage se invoca sin depender del objeto query completo.
   useEffect(() => {
     if (!jumpYm) return;
     let idx = -1;
@@ -345,6 +357,14 @@ export default function GalleryScreen() {
             <Download size={20} color={remoteSel.length ? "#4f46e5" : "#d4d4d4"} />
           </Pressable>
           <Pressable
+            onPress={() => setAddToAlbumOpen(true)}
+            accessibilityLabel={t.albums.addToAlbum}
+            hitSlop={8}
+            disabled={!remoteSel.length || busyAction}
+          >
+            <FolderPlus size={20} color={remoteSel.length ? "#4f46e5" : "#d4d4d4"} />
+          </Pressable>
+          <Pressable
             onPress={deleteSelected}
             accessibilityLabel={t.gallery.deleteAction}
             hitSlop={8}
@@ -358,7 +378,25 @@ export default function GalleryScreen() {
           <Text className="text-2xl font-bold text-neutral-900 dark:text-white">
             {t.tabs.photos}
           </Text>
-          <SyncStatusAvatar />
+          <View className="flex-row items-center gap-2">
+            <Pressable
+              onPress={() => router.push("/map")}
+              accessibilityLabel={t.map.title}
+              hitSlop={8}
+              className="p-1 rounded-full active:bg-neutral-200 dark:active:bg-neutral-800"
+            >
+              <MapPin size={21} color="#737373" />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/search")}
+              accessibilityLabel={t.search.title}
+              hitSlop={8}
+              className="p-1 rounded-full active:bg-neutral-200 dark:active:bg-neutral-800"
+            >
+              <Search size={21} color="#737373" />
+            </Pressable>
+            <SyncStatusAvatar />
+          </View>
         </View>
       )}
       {selected ? null : (
@@ -394,6 +432,7 @@ export default function GalleryScreen() {
           </Pressable>
         </View>
       )}
+      {selected || timelineFilter !== "all" ? null : <MemoriesBar />}
       {isEmpty ? (
         <EmptyState
           title={t.gallery.emptyTitle}
@@ -517,6 +556,13 @@ export default function GalleryScreen() {
           />
         </View>
       </Modal>
+
+      <AddToAlbumModal
+        visible={addToAlbumOpen}
+        mediaIds={remoteSel.map((p) => p.remoteId as string)}
+        onClose={() => setAddToAlbumOpen(false)}
+        onSuccess={() => setSelected(null)}
+      />
     </SafeAreaView>
   );
 }

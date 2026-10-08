@@ -158,4 +158,61 @@ describe("timeline", () => {
       { month: "2026-05", count: 1 },
     ]);
   });
+
+  it("memories devuelve fotos de años anteriores agrupadas por año", async () => {
+    const { cookie, userId } = await createUser();
+    const other = await createUser();
+    const db = getDb(env.DB);
+    const mk = async (
+      uId: string,
+      dateStr: string,
+      opts: { status?: "pending" | "ready"; deleted?: boolean } = {},
+    ) => {
+      const takenAt = new Date(`${dateStr}T12:00:00Z`).getTime();
+      const s = sha(`mem-${uId}-${dateStr}-${Math.random()}`);
+      await db.insert(media).values({
+        id: crypto.randomUUID(),
+        userId: uId,
+        sha256: s,
+        mediaType: "photo",
+        mimeType: "image/jpeg",
+        ext: "jpg",
+        takenAt,
+        dateGroup: dateStr,
+        width: 100,
+        height: 100,
+        thumbhash: "AQAAAA==",
+        r2KeyOriginal: `users/${uId}/originals/${s}.jpg`,
+        r2KeyThumb: `users/${uId}/thumbs/${s}.webp`,
+        fileSize: 100,
+        thumbSize: 50,
+        status: opts.status ?? "ready",
+        createdAt: takenAt,
+        updatedAt: takenAt,
+        deletedAt: opts.deleted ? takenAt : null,
+      });
+    };
+
+    // Current year is 2026
+    await mk(userId, "2025-10-15"); // Hace 1 año
+    await mk(userId, "2024-10-15"); // Hace 2 años
+    await mk(userId, "2023-10-15", { deleted: true }); // Borrado -> excluir
+    await mk(userId, "2022-10-15", { status: "pending" }); // Pending -> excluir
+    await mk(userId, "2025-10-16"); // Diferente día -> excluir
+    await mk(other.userId, "2025-10-15"); // Otro usuario -> excluir
+
+    const res = await SELF.fetch(
+      "http://localhost/v1/timeline/memories?monthDay=10-15",
+      authed(cookie),
+    );
+    expect(res.status).toBe(200);
+    const json = await j(res);
+    expect(json.memories.length).toBe(2);
+    expect(json.memories[0].yearsAgo).toBe(1);
+    expect(json.memories[0].title).toBe("Hace 1 año");
+    expect(json.memories[0].items.length).toBe(1);
+    expect(json.memories[1].yearsAgo).toBe(2);
+    expect(json.memories[1].title).toBe("Hace 2 años");
+    expect(json.memories[1].items.length).toBe(1);
+  });
 });

@@ -64,21 +64,64 @@ function drawScaled(frame: Frame, maxDim: number): HTMLCanvasElement {
   return canvas;
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return reject(new Error(DECODE_ERROR));
-        // Safari devuelve PNG cuando pides WebP: el API exige image/webp.
-        if (blob.type !== "image/webp") {
-          return reject(new Error("Este navegador no puede generar miniaturas WebP."));
-        }
-        resolve(blob);
-      },
-      "image/webp",
-      quality,
-    );
+let wasmInitPromise: Promise<void> | null = null;
+
+async function ensureWasmInitialized(): Promise<void> {
+  if (!wasmInitPromise) {
+    wasmInitPromise = (async () => {
+      let wasmBuffer: ArrayBuffer | null = null;
+      // 1. Intentar el asset estático local (servido en /webp_enc.wasm vía Expo web public/)
+      try {
+        const res = await fetch("/webp_enc.wasm");
+        if (res.ok) wasmBuffer = await res.arrayBuffer();
+      } catch {}
+
+      // 2. Fallback a CDN público si el archivo local no resolvió
+      if (!wasmBuffer) {
+        try {
+          const cdnRes = await fetch(
+            "https://unpkg.com/@jsquash/webp@1.5.0/codec/enc/webp_enc.wasm",
+          );
+          if (cdnRes.ok) wasmBuffer = await cdnRes.arrayBuffer();
+        } catch {}
+      }
+
+      if (!wasmBuffer) {
+        throw new Error("No se pudo cargar el codificador WebP para este navegador.");
+      }
+
+      const { init } = await import("@jsquash/webp/encode.js");
+      await init({ wasmBinary: wasmBuffer });
+    })();
+  }
+  return wasmInitPromise;
+}
+
+async function encodeWebpFallback(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error(DECODE_ERROR);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  await ensureWasmInitialized();
+  const { default: encode } = await import("@jsquash/webp/encode.js");
+  const buffer = await encode(imageData, { quality: Math.round(quality * 100) });
+  return new Blob([buffer], { type: "image/webp" });
+}
+
+async function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  const nativeBlob = await new Promise<Blob | null>((resolve) => {
+    try {
+      canvas.toBlob((blob) => resolve(blob), "image/webp", quality);
+    } catch {
+      resolve(null);
+    }
   });
+
+  if (nativeBlob && nativeBlob.type === "image/webp") {
+    return nativeBlob;
+  }
+
+  // Safari / WebKit o navegadores que devuelven PNG en vez de WebP en canvas:
+  return encodeWebpFallback(canvas, quality);
 }
 
 function thumbhashFrom(frame: Frame): string {

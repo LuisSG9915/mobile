@@ -1,6 +1,16 @@
+export type AiBinding = {
+  run: (
+    model: string,
+    inputs: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => Promise<unknown>;
+};
+
 export type Bindings = {
   DB: D1Database;
   BUCKET: R2Bucket;
+  /** Cloudflare Workers AI para reconocimiento visual y etiquetado automático. */
+  AI?: AiBinding;
   UPLOAD_LIMITER?: RateLimit;
   /** Rate limit de Cloudflare para /api/auth/* (login/registro); ausente en dev/tests. */
   AUTH_LIMITER?: RateLimit;

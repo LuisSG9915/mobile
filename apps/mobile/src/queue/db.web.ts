@@ -425,3 +425,18 @@ export function getQueueStats(): QueueStats {
   }
   return { total: queue.size, done, pending, failed };
 }
+
+/**
+ * Elimina items de la cola por asset_id (paridad con db.ts).
+ */
+export async function removeQueueItems(assetIds: string[]): Promise<void> {
+  if (!assetIds.length) return;
+  const ctx = store.getActiveContext();
+  if (!ctx) return;
+  await mutation(async (c) => {
+    for (const id of assetIds) {
+      queue.delete(id);
+      await store.deleteFile(c.userId, id).catch(() => {});
+    }
+  });
+}

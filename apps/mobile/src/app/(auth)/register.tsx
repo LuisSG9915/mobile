@@ -20,13 +20,18 @@ export default function Register() {
       return;
     }
     setLoading(true);
-    const res = await signUp.email({ name: name.trim(), email: email.trim(), password });
-    setLoading(false);
-    if (res.error) {
-      setError(res.error.message ?? t.auth.genericError);
-      return;
+    try {
+      const res = await signUp.email({ name: name.trim(), email: email.trim(), password });
+      if (res?.error) {
+        setError(res.error.message ?? t.auth.genericError);
+        return;
+      }
+      router.replace("/permissions");
+    } catch {
+      setError(t.auth.genericError);
+    } finally {
+      setLoading(false);
     }
-    router.replace("/permissions");
   };
 
   return (

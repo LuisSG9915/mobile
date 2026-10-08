@@ -16,7 +16,7 @@ import { formatBytes } from "../lib/format";
  */
 export default function AdminScreen() {
   const { data: session } = useSession();
-  const isAdmin = session?.user.email === ADMIN_EMAIL;
+  const isAdmin = Boolean(ADMIN_EMAIL && session?.user.email === ADMIN_EMAIL);
   const query = useQuery({
     queryKey: ["admin-storage"],
     queryFn: api.adminStorage,

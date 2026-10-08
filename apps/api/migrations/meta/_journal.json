@@ -22,6 +22,27 @@
       "when": 1791349226239,
       "tag": "0002_complex_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791406830662,
+      "tag": "0003_exotic_infant_terrible",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791414917834,
+      "tag": "0004_watery_polaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791415647560,
+      "tag": "0005_secret_shadowcat",
+      "breakpoints": true
     }
   ]
 }

@@ -342,3 +342,17 @@ export function getQueueStats(): QueueStats {
   );
   return row ?? { total: 0, done: 0, pending: 0, failed: 0 };
 }
+
+/**
+ * Elimina items de la cola por asset_id. Usado al liberar espacio local
+ * para que no sigan figurando como copias locales ni como pendientes de liberar.
+ */
+export async function removeQueueItems(assetIds: string[]): Promise<void> {
+  if (!assetIds.length) return;
+  const db = getQueueDb();
+  db.withTransactionSync(() => {
+    for (const id of assetIds) {
+      db.runSync("DELETE FROM queue WHERE user_id IS ? AND asset_id = ?", [activeUserId, id]);
+    }
+  });
+}

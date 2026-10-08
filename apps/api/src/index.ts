@@ -6,7 +6,11 @@ import { runCleanup } from "./cron/cleanup";
 import { type AppEnv, type Bindings, webOrigins } from "./env";
 import { requireUser } from "./middleware/session";
 import { adminApp } from "./routes/admin";
+import { albumsApp } from "./routes/albums";
+import { locationsApp } from "./routes/locations";
 import { mediaApp } from "./routes/media";
+import { searchApp } from "./routes/search";
+import { sharedApp } from "./routes/shared";
 import { timelineApp } from "./routes/timeline";
 import { uploadsApp } from "./routes/uploads";
 import { userApp } from "./routes/user";
@@ -58,7 +62,12 @@ app.use("/api/auth/*", async (c, next) => {
   return next();
 });
 app.use("/v1/*", async (c, next) => webCors(c.env)(c, next));
-app.use("/v1/*", requireUser);
+app.use("/v1/*", async (c, next) => {
+  if (c.req.path.startsWith("/v1/shared/")) {
+    return next();
+  }
+  return requireUser(c, next);
+});
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
@@ -68,6 +77,10 @@ const v1 = app
   .route("/v1", uploadsApp)
   .route("/v1", timelineApp)
   .route("/v1", mediaApp)
+  .route("/v1", albumsApp)
+  .route("/v1", locationsApp)
+  .route("/v1", searchApp)
+  .route("/v1", sharedApp)
   .route("/v1", userApp)
   .route("/v1", adminApp);
 

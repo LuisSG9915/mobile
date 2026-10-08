@@ -15,17 +15,22 @@ export default function Login() {
   const submit = async () => {
     setError(null);
     setLoading(true);
-    const res = await signIn.email({ email: email.trim(), password });
-    setLoading(false);
-    if (res.error) {
-      setError(
-        res.error.status === 401
-          ? t.auth.invalidCredentials
-          : (res.error.message ?? t.auth.genericError),
-      );
-      return;
+    try {
+      const res = await signIn.email({ email: email.trim(), password });
+      if (res?.error) {
+        setError(
+          res.error.status === 401
+            ? t.auth.invalidCredentials
+            : (res.error.message ?? t.auth.genericError),
+        );
+        return;
+      }
+      router.replace("/permissions");
+    } catch {
+      setError(t.auth.genericError);
+    } finally {
+      setLoading(false);
     }
-    router.replace("/permissions");
   };
 
   return (

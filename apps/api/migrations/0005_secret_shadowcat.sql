@@ -1,0 +1,1 @@
+CREATE INDEX `idx_media_location` ON `media` (`user_id`,`latitude`,`longitude`);

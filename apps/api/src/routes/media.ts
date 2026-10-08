@@ -1,6 +1,9 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  autoTagBatchResponseSchema,
+  autoTagResponseSchema,
   downloadResponseSchema,
+  emptyTrashResponseSchema,
   errorSchema,
   favoriteResponseSchema,
   mediaDetailSchema,
@@ -8,12 +11,25 @@ import {
   STORAGE_QUOTA_BYTES,
   statsSchema,
   trashResponseSchema,
+  updateMediaSchema,
 } from "@photos/shared";
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
+import { tagMediaItem } from "../lib/ai";
 import { presignGet, presignGetDownload } from "../lib/s3";
+import { removeStorageUsage } from "../lib/storage-stats";
+
+export function parseTags(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -32,6 +48,62 @@ const detailRoute = createRoute({
     200: { content: { "application/json": { schema: mediaDetailSchema } }, description: "Detalle" },
     401: err("Sin sesión"),
     404: err("No encontrado"),
+  },
+});
+
+const patchMediaRoute = createRoute({
+  method: "patch",
+  path: "/media/{id}",
+  tags: ["media"],
+  summary: "Actualizar metadatos del elemento (pie de foto / etiquetas)",
+  request: {
+    params: idParam,
+    body: {
+      content: { "application/json": { schema: updateMediaSchema } },
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: mediaDetailSchema } },
+      description: "Actualizado",
+    },
+    400: err("Entrada inválida"),
+    401: err("Sin sesión"),
+    404: err("No encontrado"),
+  },
+});
+
+const autoTagRoute = createRoute({
+  method: "post",
+  path: "/media/{id}/auto-tag",
+  tags: ["media"],
+  summary: "Generar etiquetas con IA para un elemento",
+  description:
+    "Analiza la miniatura del elemento con Workers AI y añade etiquetas descriptivas automáticamente.",
+  request: { params: idParam },
+  responses: {
+    200: {
+      content: { "application/json": { schema: autoTagResponseSchema } },
+      description: "Etiquetas generadas",
+    },
+    401: err("Sin sesión"),
+    404: err("No encontrado"),
+  },
+});
+
+const autoTagBatchRoute = createRoute({
+  method: "post",
+  path: "/media/auto-tag-batch",
+  tags: ["media"],
+  summary: "Generar etiquetas con IA en lote para fotos sin etiquetas",
+  description:
+    "Analiza hasta 15 elementos listos sin etiquetas previas y les asigna etiquetas automáticas.",
+  responses: {
+    200: {
+      content: { "application/json": { schema: autoTagBatchResponseSchema } },
+      description: "Lote procesado",
+    },
+    401: err("Sin sesión"),
   },
 });
 
@@ -115,6 +187,22 @@ const trashRoute = createRoute({
   },
 });
 
+const emptyTrashRoute = createRoute({
+  method: "post",
+  path: "/trash/empty",
+  tags: ["media"],
+  summary: "Vaciar la papelera (purga permanente inmediata)",
+  description:
+    "Elimina definitivamente todos los elementos en la papelera del usuario, borrando sus objetos de R2 y liberando su cuota de almacenamiento.",
+  responses: {
+    200: {
+      content: { "application/json": { schema: emptyTrashResponseSchema } },
+      description: "Papelera vaciada",
+    },
+    401: err("Sin sesión"),
+  },
+});
+
 const statsRoute = createRoute({
   method: "get",
   path: "/stats",
@@ -161,12 +249,130 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         fileSize: row.fileSize,
         latitude: row.latitude,
         longitude: row.longitude,
+        cameraMake: row.cameraMake ?? null,
+        cameraModel: row.cameraModel ?? null,
+        lensModel: row.lensModel ?? null,
+        focalLength: row.focalLength ?? null,
+        fNumber: row.fNumber ?? null,
+        iso: row.iso ?? null,
+        exposureTime: row.exposureTime ?? null,
+        caption: row.caption ?? null,
+        tags: parseTags(row.tags),
         createdAt: row.createdAt,
         deletedAt: row.deletedAt,
         originalUrl,
       },
       200,
     );
+  })
+  .openapi(patchMediaRoute, async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const db = getDb(c.env.DB);
+
+    const row = await db
+      .select()
+      .from(media)
+      .where(and(eq(media.id, id), eq(media.userId, user.id)))
+      .get();
+    if (row?.status !== "ready" || row.deletedAt != null) {
+      return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
+    }
+
+    const updates: Partial<{ caption: string | null; tags: string; updatedAt: number }> = {
+      updatedAt: Date.now(),
+    };
+    if (body.caption !== undefined) {
+      updates.caption = body.caption;
+    }
+    if (body.tags !== undefined) {
+      const cleanTags = Array.from(new Set(body.tags.map((t) => t.trim()).filter(Boolean)));
+      updates.tags = JSON.stringify(cleanTags);
+    }
+
+    await db.update(media).set(updates).where(eq(media.id, id));
+
+    const updatedRow = await db.select().from(media).where(eq(media.id, id)).get();
+    if (!updatedRow) {
+      return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
+    }
+
+    const [thumbUrl, originalUrl] = await Promise.all([
+      presignGet(c.env, updatedRow.r2KeyThumb),
+      presignGet(c.env, updatedRow.r2KeyOriginal),
+    ]);
+
+    return c.json(
+      {
+        id: updatedRow.id,
+        sha256: updatedRow.sha256,
+        mediaType: updatedRow.mediaType,
+        takenAt: updatedRow.takenAt,
+        dateGroup: updatedRow.dateGroup,
+        width: updatedRow.width,
+        height: updatedRow.height,
+        durationMs: updatedRow.durationMs,
+        isFavorite: updatedRow.isFavorite,
+        thumbhash: updatedRow.thumbhash,
+        thumbUrl,
+        mimeType: updatedRow.mimeType,
+        ext: updatedRow.ext,
+        fileSize: updatedRow.fileSize,
+        latitude: updatedRow.latitude,
+        longitude: updatedRow.longitude,
+        cameraMake: updatedRow.cameraMake ?? null,
+        cameraModel: updatedRow.cameraModel ?? null,
+        lensModel: updatedRow.lensModel ?? null,
+        focalLength: updatedRow.focalLength ?? null,
+        fNumber: updatedRow.fNumber ?? null,
+        iso: updatedRow.iso ?? null,
+        exposureTime: updatedRow.exposureTime ?? null,
+        caption: updatedRow.caption ?? null,
+        tags: parseTags(updatedRow.tags),
+        createdAt: updatedRow.createdAt,
+        deletedAt: updatedRow.deletedAt,
+        originalUrl,
+      },
+      200,
+    );
+  })
+  .openapi(autoTagRoute, async (c) => {
+    const user = c.get("user");
+    const { id } = c.req.valid("param");
+    const db = getDb(c.env.DB);
+    const row = await db
+      .select({ id: media.id, status: media.status, deletedAt: media.deletedAt })
+      .from(media)
+      .where(and(eq(media.id, id), eq(media.userId, user.id)))
+      .get();
+    if (row?.status !== "ready" || row.deletedAt != null) {
+      return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
+    }
+    const tags = await tagMediaItem(c.env, id, user.id);
+    return c.json({ id, tags }, 200);
+  })
+  .openapi(autoTagBatchRoute, async (c) => {
+    const user = c.get("user");
+    const db = getDb(c.env.DB);
+    const rows = await db
+      .select({ id: media.id })
+      .from(media)
+      .where(
+        and(
+          eq(media.userId, user.id),
+          eq(media.status, "ready"),
+          isNull(media.deletedAt),
+          or(isNull(media.tags), eq(media.tags, "[]")),
+        ),
+      )
+      .limit(15);
+    const items: Array<{ id: string; tags: string[] }> = [];
+    for (const r of rows) {
+      const tags = await tagMediaItem(c.env, r.id, user.id);
+      items.push({ id: r.id, tags });
+    }
+    return c.json({ processed: items.length, items }, 200);
   })
   .openapi(downloadRoute, async (c) => {
     const user = c.get("user");
@@ -261,6 +467,36 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       })),
     );
     return c.json({ items, nextCursor: null }, 200);
+  })
+  .openapi(emptyTrashRoute, async (c) => {
+    const user = c.get("user");
+    const db = getDb(c.env.DB);
+    const trashItems = await db
+      .select()
+      .from(media)
+      .where(and(eq(media.userId, user.id), isNotNull(media.deletedAt)));
+
+    if (trashItems.length === 0) {
+      return c.json({ ok: true as const, deletedCount: 0 }, 200);
+    }
+
+    const keys = trashItems.flatMap((m) => [m.r2KeyThumb, m.r2KeyOriginal]);
+    for (let i = 0; i < keys.length; i += 1000) {
+      await c.env.BUCKET.delete(keys.slice(i, i + 1000));
+    }
+
+    const ids = trashItems.map((m) => m.id);
+    for (let i = 0; i < ids.length; i += 500) {
+      await db.delete(media).where(inArray(media.id, ids.slice(i, i + 500)));
+    }
+
+    for (const m of trashItems) {
+      if (m.status === "ready") {
+        await removeStorageUsage(db, m.userId, m.fileSize + m.thumbSize);
+      }
+    }
+
+    return c.json({ ok: true as const, deletedCount: trashItems.length }, 200);
   })
   .openapi(statsRoute, async (c) => {
     const user = c.get("user");

@@ -38,7 +38,6 @@ export function useHybridGallery(filter: TimelineFilter = "all") {
     }
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: libTick re-dispara el re-listado cuando cambia la biblioteca (escaneo / Liberar espacio).
   useEffect(() => {
     void refreshLocal();
   }, [refreshLocal, libTick]);

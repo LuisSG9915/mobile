@@ -41,6 +41,10 @@
     //   "EMAIL_FROM": "Photos <no-reply@tudominio.com>"
     // Sin RESEND_API_KEY el enlace de reset solo se escribe en los logs.
   },
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
   "triggers": {
     "crons": ["0 3 * * *"]
   },

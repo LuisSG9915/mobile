@@ -156,20 +156,24 @@ callbackURL={redirectTo}`; ese GET valida y hace 302 a `callbackURL?token=…` o
 - `AUTH_LIMITER` necesita `wrangler deploy` para existir en prod.
 - Recuperación de cuenta en prod necesita `wrangler secret put RESEND_API_KEY`
   y un `EMAIL_FROM` con dominio verificado en Resend.
-- `uso.txt` (raíz, gitignored) contiene credenciales en claro: rotar la
-  contraseña y borrar el archivo.
-- D1 local desactualizada: `pnpm --filter @photos/api db:migrate:local`.
+- `uso.txt` (raíz): eliminado y credenciales desacopladas.
+- D1 local: migraciones aplicadas (`0001` y `0002` al día vía `db:migrate:local`).
 
 ## No hecho a propósito (alcance aprobado: urgentes + robustez)
 
-- CI en `.github/workflows` (directorio vacío hoy).
 - Dedup global entre usuarios: la auditoría midió ~50 MB de ahorro — no
   justifica rediseñar las claves `users/{id}/…`.
 - Verificación de email al registro: la infraestructura de correo ya existe
   (`email.ts`), pero `requireEmailVerification` bloquearía el sign-in de los
   usuarios ya registrados en prod con `emailVerified=false`. Activarla exige
   primero marcar verificados los usuarios existentes o un período de gracia.
-- `hasLocalCopy` queda `true` tras liberar la copia local (la fila `done`
-  persiste).
-- `ADMIN_EMAIL` duplicado entre `packages/shared/src/constants.ts` y
-  `vars` de wrangler (pueden divergir).
+
+## Resuelto en el plan de hardening / mejora
+
+- CI automatizado en `.github/workflows/ci.yml` (lint, typecheck, tests api+mobile, selftest pipeline).
+- `hasLocalCopy` y `getSyncedLocal`: resuelto eliminando las filas de la cola (`removeQueueItems`) al confirmar el borrado en MediaLibrary.
+- `ADMIN_EMAIL` desacoplado del bundle público cliente vía `process.env.EXPO_PUBLIC_ADMIN_EMAIL`.
+- WebP en Safari: resuelto con transcodificación WASM (`@jsquash/webp`).
+- Escaneo incremental en MediaLibrary: resuelto con filtro `createdAfter` (ventana 24 h) y soporte `forceScan`.
+- Borrado en lote en Cron de D1 (`inArray`) y eliminación de OOM en sweep de R2.
+

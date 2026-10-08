@@ -9,8 +9,8 @@ export type BackupPassOptions = { forceScan?: boolean };
  * En web no hay biblioteca que escanear (scanLibrary es no-op): solo procesa.
  * `forceScan` existe por paridad de firma con el runner nativo.
  */
-export async function runBackupPass(_opts: BackupPassOptions = {}): Promise<void> {
-  await scanLibrary();
+export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void> {
+  await scanLibrary(opts);
   useQueueEvents.getState().emit();
   await processQueue();
   useQueueEvents.getState().emit();

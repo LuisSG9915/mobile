@@ -9,14 +9,18 @@ export function Button({
   label,
   onPress,
   variant = "primary",
+  size = "default",
   loading = false,
   disabled = false,
+  className,
 }: {
   label: string;
   onPress: () => void;
   variant?: "primary" | "ghost" | "danger";
+  size?: "default" | "sm";
   loading?: boolean;
   disabled?: boolean;
+  className?: string;
 }) {
   const bg =
     variant === "primary"
@@ -28,17 +32,22 @@ export function Button({
     variant === "primary" || variant === "danger"
       ? "text-white"
       : "text-neutral-900 dark:text-white";
+  const sizeClasses =
+    size === "sm" ? "px-3 py-2 min-h-[38px] rounded-xl" : "px-5 py-4 min-h-[52px] rounded-2xl";
+  const textSize = size === "sm" ? "text-sm" : "text-base";
   return (
     <Pressable
       accessibilityRole="button"
       disabled={disabled || loading}
       onPress={onPress}
-      className={`${bg} rounded-2xl px-5 py-4 items-center justify-center min-h-[52px] ${disabled || loading ? "opacity-50" : ""}`}
+      className={`${bg} ${sizeClasses} items-center justify-center ${disabled || loading ? "opacity-50" : ""} ${className ?? ""}`}
     >
       {loading ? (
         <ActivityIndicator color="#fff" />
       ) : (
-        <Text className={`${text} font-semibold text-base`}>{label}</Text>
+        <Text className={`${text} font-semibold ${textSize}`} numberOfLines={1}>
+          {label}
+        </Text>
       )}
     </Pressable>
   );

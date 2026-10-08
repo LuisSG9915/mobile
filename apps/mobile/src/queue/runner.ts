@@ -20,7 +20,7 @@ const SCAN_MIN_INTERVAL_MS = 15 * 60_000;
  */
 export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void> {
   if (opts.forceScan || Date.now() - getLastScanTs() > SCAN_MIN_INTERVAL_MS) {
-    await scanLibrary();
+    await scanLibrary({ forceScan: opts.forceScan });
   }
   useQueueEvents.getState().emit();
   await processQueue();

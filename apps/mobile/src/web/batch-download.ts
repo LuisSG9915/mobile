@@ -31,14 +31,14 @@ export async function buildZip(entries: BatchEntry[]): Promise<Blob> {
   return downloadZip(files).blob();
 }
 
-/** Genera el ZIP del lote y dispara su descarga como fotos-exportadas.zip. */
-export async function downloadBatch(entries: BatchEntry[]): Promise<void> {
+/** Genera el ZIP del lote y dispara su descarga (por defecto fotos-exportadas.zip). */
+export async function downloadBatch(entries: BatchEntry[], zipName = ZIP_NAME): Promise<void> {
   const blob = await buildZip(entries);
   const href = URL.createObjectURL(blob);
   try {
     const a = document.createElement("a");
     a.href = href;
-    a.download = ZIP_NAME;
+    a.download = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
     document.body.appendChild(a);
     a.click();
     a.remove();

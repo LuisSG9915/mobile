@@ -10,10 +10,14 @@ import type { QueueItem } from "../queue/types";
 
 const mocks = vi.hoisted(() => ({
   getQueueItems: vi.fn<() => QueueItem[]>(() => []),
+  removeQueueItems: vi.fn<(ids: string[]) => Promise<void>>(() => Promise.resolve()),
   deleteAssetsAsync: vi.fn<(ids: string[]) => Promise<boolean>>(() => Promise.resolve(true)),
 }));
 
-vi.mock("../queue/db", () => ({ getQueueItems: mocks.getQueueItems }));
+vi.mock("../queue/db", () => ({
+  getQueueItems: mocks.getQueueItems,
+  removeQueueItems: mocks.removeQueueItems,
+}));
 vi.mock("expo-media-library/legacy", () => ({ deleteAssetsAsync: mocks.deleteAssetsAsync }));
 
 const SHA = "a".repeat(64);
@@ -42,6 +46,7 @@ let fs: NativeFreeSpace;
 
 beforeEach(async () => {
   mocks.getQueueItems.mockReset().mockReturnValue([]);
+  mocks.removeQueueItems.mockReset().mockResolvedValue();
   mocks.deleteAssetsAsync.mockReset().mockResolvedValue(true);
   vi.resetModules();
   // @ts-expect-error -- ruta con extensión para saltar la resolución *.web.ts
@@ -74,12 +79,14 @@ describe("freeSyncedSpace", () => {
     ]);
     expect(await fs.freeSyncedSpace()).toBe(3);
     expect(mocks.deleteAssetsAsync).toHaveBeenCalledWith(["A1", "A2", "A3"]);
+    expect(mocks.removeQueueItems).toHaveBeenCalledWith(["A1", "A2", "A3"]);
   });
 
   it("devuelve 0 si el usuario cancela el diálogo del sistema", async () => {
     mocks.getQueueItems.mockReturnValue([item()]);
     mocks.deleteAssetsAsync.mockResolvedValue(false);
     expect(await fs.freeSyncedSpace()).toBe(0);
+    expect(mocks.removeQueueItems).not.toHaveBeenCalled();
   });
 
   it("devuelve 0 sin nada que liberar y no toca MediaLibrary", async () => {
@@ -88,6 +95,33 @@ describe("freeSyncedSpace", () => {
     ]);
     expect(await fs.freeSyncedSpace()).toBe(0);
     expect(mocks.deleteAssetsAsync).not.toHaveBeenCalled();
+    expect(mocks.removeQueueItems).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteLocalCopy", () => {
+  it("elimina la copia local y purga el item de la cola", async () => {
+    mocks.getQueueItems.mockReturnValue([item({ asset_id: "A1", remote_id: "r1" })]);
+    const ok = await fs.deleteLocalCopy("r1");
+    expect(ok).toBe(true);
+    expect(mocks.deleteAssetsAsync).toHaveBeenCalledWith(["A1"]);
+    expect(mocks.removeQueueItems).toHaveBeenCalledWith(["A1"]);
+  });
+
+  it("devuelve false si el elemento no existe en la cola", async () => {
+    mocks.getQueueItems.mockReturnValue([]);
+    const ok = await fs.deleteLocalCopy("r1");
+    expect(ok).toBe(false);
+    expect(mocks.deleteAssetsAsync).not.toHaveBeenCalled();
+    expect(mocks.removeQueueItems).not.toHaveBeenCalled();
+  });
+
+  it("devuelve false si el usuario cancela la eliminación", async () => {
+    mocks.getQueueItems.mockReturnValue([item({ asset_id: "A1", remote_id: "r1" })]);
+    mocks.deleteAssetsAsync.mockResolvedValue(false);
+    const ok = await fs.deleteLocalCopy("r1");
+    expect(ok).toBe(false);
+    expect(mocks.removeQueueItems).not.toHaveBeenCalled();
   });
 });
 

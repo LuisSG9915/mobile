@@ -64,11 +64,13 @@
     "title": "Safari no puede generar miniaturas WebP en canvas",
     "area": "mobile-web",
     "severity": "media",
-    "status": "abierto",
-    "evidence": "canvas.toBlob('image/webp') devuelve PNG en Safari; thumb.ts rechaza con 'Este navegador no puede generar miniaturas WebP.' y la subida queda fallida. Sin verificar en Safari real.",
-    "proposal": "Verificar en Safari (WebKit). Si falla: generar WebP por WASM (p. ej. sharp-wasm) o aceptar PNG→transcodificar en el Worker.",
+    "status": "resuelto",
+    "evidence": "Resuelto: canvasToBlob ahora detecta si el navegador devuelve PNG en vez de WebP (comportamiento estándar de Safari/WebKit). En ese caso, activa automáticamente un fallback que codifica el ImageData vía WebAssembly (@jsquash/webp) inicializado con webp_enc.wasm (servido estáticamente en public/ y con fallback a CDN), produciendo miniaturas WebP garantizadas sin requerir cambios en el backend.",
+    "proposal": "Generar WebP por WASM (@jsquash/webp) cuando canvas.toBlob no genera image/webp.",
     "effort": "M",
-    "relatedTests": []
+    "relatedTests": [
+      "activa fallback WASM y genera WebP cuando canvas.toBlob devuelve PNG (comportamiento Safari)"
+    ]
   },
   {
     "id": "H-007",
@@ -218,8 +220,8 @@
     "title": "Botón \"Restaurar\" en Papelera se corta en dos líneas (\"Restaura/r\")",
     "area": "mobile-native",
     "severity": "baja",
-    "status": "abierto",
-    "evidence": "N-10 Android: en la fila de la Papelera el botón Restaurar se renderiza cortado (ancho insuficiente). Cosmético; la acción funciona.",
+    "status": "resuelto",
+    "evidence": "N-10 Android: en la fila de la Papelera el botón Restaurar se renderizaba cortado. Resuelto agregando variante compacta size=\"sm\" a Button con padding/font ajustado y numberOfLines=1.",
     "proposal": "Dar minWidth/flex al botón o reducir padding del label.",
     "effort": "XS",
     "relatedTests": []

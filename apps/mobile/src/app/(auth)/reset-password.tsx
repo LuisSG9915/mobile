@@ -32,13 +32,18 @@ export default function ResetPassword() {
       return;
     }
     setLoading(true);
-    const res = await resetPassword({ newPassword: password, token: token ?? "" });
-    setLoading(false);
-    if (res.error) {
-      setError(res.error.code === "INVALID_TOKEN" ? t.auth.resetInvalid : t.auth.genericError);
-      return;
+    try {
+      const res = await resetPassword({ newPassword: password, token: token ?? "" });
+      if (res?.error) {
+        setError(res.error.code === "INVALID_TOKEN" ? t.auth.resetInvalid : t.auth.genericError);
+        return;
+      }
+      setDone(true);
+    } catch {
+      setError(t.auth.genericError);
+    } finally {
+      setLoading(false);
     }
-    setDone(true);
   };
 
   const body = invalidLink ? (

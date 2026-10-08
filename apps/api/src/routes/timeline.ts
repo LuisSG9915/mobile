@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   errorSchema,
+  memoriesResponseSchema,
   TIMELINE_MAX_LIMIT,
   timelineFilterSchema,
   timelineMonthsResponseSchema,
@@ -12,6 +13,30 @@ import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { presignGet } from "../lib/s3";
+
+const memoriesRoute = createRoute({
+  method: "get",
+  path: "/timeline/memories",
+  tags: ["timeline"],
+  summary: "Recuerdos del día en años anteriores (En este día)",
+  description:
+    "Devuelve fotos y videos tomados en la misma fecha (mes y día) en años anteriores, agrupados por años atrás ('Hace 1 año', 'Hace 2 años', etc.).",
+  request: {
+    query: z.object({
+      monthDay: z
+        .string()
+        .regex(/^\d{2}-\d{2}$/, "Formato MM-DD")
+        .optional(),
+    }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: memoriesResponseSchema } },
+      description: "Grupos de recuerdos",
+    },
+    401: { content: { "application/json": { schema: errorSchema } }, description: "Sin sesión" },
+  },
+});
 
 const timelineRoute = createRoute({
   method: "get",
@@ -57,6 +82,74 @@ const monthsRoute = createRoute({
 });
 
 export const timelineApp = new OpenAPIHono<AppEnv>()
+  .openapi(memoriesRoute, async (c) => {
+    const user = c.get("user");
+    const { monthDay } = c.req.valid("query");
+    const now = new Date();
+    const currentYear = now.getUTCFullYear();
+    const defaultMMDD = `${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
+    const targetMMDD = monthDay ?? defaultMMDD;
+
+    const db = getDb(c.env.DB);
+    const pattern = `%-${targetMMDD}`;
+    const rows = await db
+      .select()
+      .from(media)
+      .where(
+        and(
+          eq(media.userId, user.id),
+          eq(media.status, "ready"),
+          isNull(media.deletedAt),
+          sql`${media.dateGroup} LIKE ${pattern}`,
+          sql`substr(${media.dateGroup}, 1, 4) < ${currentYear.toString()}`,
+        ),
+      )
+      .orderBy(desc(media.takenAt), desc(media.id));
+
+    const groupsMap = new Map<number, typeof rows>();
+    for (const row of rows) {
+      const year = parseInt(row.dateGroup.slice(0, 4), 10);
+      if (!Number.isNaN(year) && year < currentYear) {
+        const list = groupsMap.get(year) ?? [];
+        list.push(row);
+        groupsMap.set(year, list);
+      }
+    }
+
+    const memories = await Promise.all(
+      Array.from(groupsMap.entries())
+        .sort((a, b) => b[0] - a[0])
+        .map(async ([year, itemsInYear]) => {
+          const yearsAgo = currentYear - year;
+          const title = yearsAgo === 1 ? "Hace 1 año" : `Hace ${yearsAgo} años`;
+          const date = `${year}-${targetMMDD}`;
+          const items = await Promise.all(
+            itemsInYear.map(async (m) => ({
+              id: m.id,
+              sha256: m.sha256,
+              mediaType: m.mediaType,
+              takenAt: m.takenAt,
+              dateGroup: m.dateGroup,
+              width: m.width,
+              height: m.height,
+              durationMs: m.durationMs,
+              isFavorite: m.isFavorite,
+              thumbhash: m.thumbhash,
+              thumbUrl: await presignGet(c.env, m.r2KeyThumb),
+            })),
+          );
+          return {
+            id: `memory-${year}-${targetMMDD}`,
+            title,
+            yearsAgo,
+            date,
+            items,
+          };
+        }),
+    );
+
+    return c.json({ memories }, 200);
+  })
   .openapi(monthsRoute, async (c) => {
     const user = c.get("user");
     const db = getDb(c.env.DB);

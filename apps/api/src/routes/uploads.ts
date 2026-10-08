@@ -11,6 +11,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
+import { tagMediaItem } from "../lib/ai";
 import { originalKey, thumbKey } from "../lib/keys";
 import { presignPut } from "../lib/s3";
 import { addStorageUsage, getUsageBytes } from "../lib/storage-stats";
@@ -185,6 +186,13 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
       dateGroup: dateGroupOf(body.takenAt),
       latitude: body.latitude ?? null,
       longitude: body.longitude ?? null,
+      cameraMake: body.cameraMake ?? null,
+      cameraModel: body.cameraModel ?? null,
+      lensModel: body.lensModel ?? null,
+      focalLength: body.focalLength ?? null,
+      fNumber: body.fNumber ?? null,
+      iso: body.iso ?? null,
+      exposureTime: body.exposureTime ?? null,
       width: body.width,
       height: body.height,
       durationMs: body.durationMs ?? null,
@@ -288,5 +296,14 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
     // Los bytes cuentan para la cuota solo cuando la subida queda confirmada.
     // Se descuentan al purgar la papelera (cron), no al mover a papelera.
     await addStorageUsage(db, user.id, row.fileSize + row.thumbSize);
+
+    // Análisis visual y etiquetado con IA en segundo plano (no retrasa la respuesta al usuario)
+    if (c.env.AI) {
+      const backgroundTag = tagMediaItem(c.env, row.id, user.id).catch((err) => {
+        console.warn("auto_tag_upload_error", row.id, err);
+      });
+      c.executionCtx?.waitUntil?.(backgroundTag);
+    }
+
     return c.json({ id: row.id, status: "ready" } as const, 200);
   });

@@ -41,6 +41,13 @@ export const uploadInitSchema = z.object({
   height: z.number().int().positive(),
   durationMs: z.number().int().positive().nullable().optional(),
   thumbhash: z.string().min(1).max(512),
+  cameraMake: z.string().trim().max(100).nullable().optional(),
+  cameraModel: z.string().trim().max(100).nullable().optional(),
+  lensModel: z.string().trim().max(100).nullable().optional(),
+  focalLength: z.number().nullable().optional(),
+  fNumber: z.number().nullable().optional(),
+  iso: z.number().int().nullable().optional(),
+  exposureTime: z.string().trim().max(50).nullable().optional(),
 });
 
 export const presignedTargetSchema = z.object({
@@ -107,6 +114,11 @@ export const trashResponseSchema = z.object({
   nextCursor: z.null(),
 });
 
+export const emptyTrashResponseSchema = z.object({
+  ok: z.literal(true),
+  deletedCount: z.number(),
+});
+
 export const timelineMonthSchema = z.object({
   /** Mes YYYY-MM (UTC) derivado de date_group. */
   month: z.string(),
@@ -115,6 +127,18 @@ export const timelineMonthSchema = z.object({
 
 export const timelineMonthsResponseSchema = z.object({
   months: z.array(timelineMonthSchema),
+});
+
+export const memoryGroupSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  yearsAgo: z.number(),
+  date: z.string(),
+  items: z.array(timelineItemSchema),
+});
+
+export const memoriesResponseSchema = z.object({
+  memories: z.array(memoryGroupSchema),
 });
 
 export const favoriteResponseSchema = z.object({
@@ -130,10 +154,36 @@ export const mediaDetailSchema = timelineItemSchema.extend({
   fileSize: z.number(),
   latitude: z.number().nullable(),
   longitude: z.number().nullable(),
+  cameraMake: z.string().nullable().default(null),
+  cameraModel: z.string().nullable().default(null),
+  lensModel: z.string().nullable().default(null),
+  focalLength: z.number().nullable().default(null),
+  fNumber: z.number().nullable().default(null),
+  iso: z.number().nullable().default(null),
+  exposureTime: z.string().nullable().default(null),
+  caption: z.string().nullable().default(null),
+  tags: z.array(z.string()).default([]),
   createdAt: z.number(),
   deletedAt: z.number().nullable(),
   originalUrl: z.string(),
 });
+
+export const updateMediaSchema = z.object({
+  caption: z.string().trim().max(1000).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(50)).max(30).optional(),
+});
+
+export const autoTagResponseSchema = z.object({
+  id: z.string(),
+  tags: z.array(z.string()),
+});
+export type AutoTagResponse = z.infer<typeof autoTagResponseSchema>;
+
+export const autoTagBatchResponseSchema = z.object({
+  processed: z.number(),
+  items: z.array(autoTagResponseSchema),
+});
+export type AutoTagBatchResponse = z.infer<typeof autoTagBatchResponseSchema>;
 
 export const statsSchema = z.object({
   count: z.number(),
@@ -178,6 +228,135 @@ export const adminStorageResponseSchema = z.object({
   userCount: z.number(),
 });
 
+// ---------- álbumes ----------
+
+export const createAlbumSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1, "El título no puede estar vacío")
+    .max(100, "Máximo 100 caracteres"),
+  mediaIds: z.array(z.string()).optional(),
+});
+
+export const updateAlbumSchema = z.object({
+  title: z.string().trim().min(1).max(100).optional(),
+  coverMediaId: z.string().nullable().optional(),
+});
+
+export const addAlbumMediaSchema = z.object({
+  mediaIds: z.array(z.string()).min(1, "Debes seleccionar al menos un elemento").max(500),
+});
+
+export const albumItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  coverMediaId: z.string().nullable(),
+  coverThumbUrl: z.string().nullable(),
+  coverThumbhash: z.string().nullable(),
+  mediaCount: z.number(),
+  isShared: z.boolean(),
+  shareToken: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+export const albumListResponseSchema = z.object({
+  albums: z.array(albumItemSchema),
+});
+
+export const albumDetailResponseSchema = albumItemSchema.extend({
+  items: z.array(timelineItemSchema),
+});
+
+export const shareAlbumResponseSchema = z.object({
+  shareToken: z.string(),
+  shareUrl: z.string(),
+});
+
+export const publicAlbumItemSchema = z.object({
+  id: z.string(),
+  mediaType: mediaTypeSchema,
+  width: z.number(),
+  height: z.number(),
+  takenAt: z.number(),
+  durationMs: z.number().nullable(),
+  thumbhash: z.string(),
+  thumbUrl: z.string(),
+  originalUrl: z.string(),
+});
+
+export const publicAlbumResponseSchema = z.object({
+  title: z.string(),
+  mediaCount: z.number(),
+  createdAt: z.number(),
+  items: z.array(publicAlbumItemSchema),
+});
+
+// ---------- búsqueda y filtros avanzados ----------
+
+export const searchFilterSchema = z.enum(["all", "photos", "videos", "favorites"]);
+
+export const searchQuerySchema = z.object({
+  q: z.string().trim().optional(),
+  tag: z.string().trim().optional(),
+  filter: searchFilterSchema.optional().default("all"),
+  dateFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD")
+    .optional(),
+  dateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD")
+    .optional(),
+  minBytes: z.coerce.number().int().nonnegative().optional(),
+  maxBytes: z.coerce.number().int().nonnegative().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(60),
+});
+
+export const searchResponseSchema = z.object({
+  items: z.array(timelineItemSchema),
+  nextCursor: z.string().nullable(),
+  totalMatches: z.number(),
+});
+
+export const tagCountSchema = z.object({
+  tag: z.string(),
+  count: z.number(),
+});
+
+export const tagsResponseSchema = z.object({
+  tags: z.array(tagCountSchema),
+});
+
+// ---------- ubicaciones y mapa ----------
+
+export const locationItemSchema = z.object({
+  id: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  thumbUrl: z.string(),
+  thumbhash: z.string(),
+  mediaType: mediaTypeSchema,
+  takenAt: z.number(),
+  dateGroup: z.string(),
+  caption: z.string().nullable().default(null),
+});
+
+export const locationsQuerySchema = z.object({
+  minLat: z.coerce.number().optional(),
+  maxLat: z.coerce.number().optional(),
+  minLng: z.coerce.number().optional(),
+  maxLng: z.coerce.number().optional(),
+  filter: searchFilterSchema.optional().default("all"),
+});
+
+export const locationsResponseSchema = z.object({
+  items: z.array(locationItemSchema),
+  totalWithGps: z.number(),
+});
+
 // ---------- tipos ----------
 
 export type SyncStatus = z.infer<typeof syncStatusSchema>;
@@ -190,13 +369,34 @@ export type TimelineItem = z.infer<typeof timelineItemSchema>;
 export type TimelineResponse = z.infer<typeof timelineResponseSchema>;
 export type TimelineMonth = z.infer<typeof timelineMonthSchema>;
 export type TimelineMonthsResponse = z.infer<typeof timelineMonthsResponseSchema>;
+export type MemoryGroup = z.infer<typeof memoryGroupSchema>;
+export type MemoriesResponse = z.infer<typeof memoriesResponseSchema>;
 export type FavoriteResponse = z.infer<typeof favoriteResponseSchema>;
 export type TrashItem = z.infer<typeof trashItemSchema>;
 export type TrashResponse = z.infer<typeof trashResponseSchema>;
+export type EmptyTrashResponse = z.infer<typeof emptyTrashResponseSchema>;
 export type MediaDetail = z.infer<typeof mediaDetailSchema>;
+export type UpdateMediaInput = z.infer<typeof updateMediaSchema>;
 export type Stats = z.infer<typeof statsSchema>;
 export type StorageResponse = z.infer<typeof storageResponseSchema>;
 export type DownloadResponse = z.infer<typeof downloadResponseSchema>;
 export type AdminStorageRow = z.infer<typeof adminStorageRowSchema>;
 export type AdminStorageResponse = z.infer<typeof adminStorageResponseSchema>;
+export type CreateAlbumInput = z.infer<typeof createAlbumSchema>;
+export type UpdateAlbumInput = z.infer<typeof updateAlbumSchema>;
+export type AddAlbumMediaInput = z.infer<typeof addAlbumMediaSchema>;
+export type AlbumItem = z.infer<typeof albumItemSchema>;
+export type AlbumListResponse = z.infer<typeof albumListResponseSchema>;
+export type AlbumDetailResponse = z.infer<typeof albumDetailResponseSchema>;
+export type ShareAlbumResponse = z.infer<typeof shareAlbumResponseSchema>;
+export type PublicAlbumItem = z.infer<typeof publicAlbumItemSchema>;
+export type PublicAlbumResponse = z.infer<typeof publicAlbumResponseSchema>;
+export type SearchFilter = z.infer<typeof searchFilterSchema>;
+export type SearchQuery = z.infer<typeof searchQuerySchema>;
+export type SearchResponse = z.infer<typeof searchResponseSchema>;
+export type TagCount = z.infer<typeof tagCountSchema>;
+export type TagsResponse = z.infer<typeof tagsResponseSchema>;
+export type LocationItem = z.infer<typeof locationItemSchema>;
+export type LocationsQuery = z.infer<typeof locationsQuerySchema>;
+export type LocationsResponse = z.infer<typeof locationsResponseSchema>;
 export type ApiError = z.infer<typeof errorSchema>;

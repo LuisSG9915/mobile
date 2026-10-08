@@ -1,5 +1,5 @@
 import * as MediaLibrary from "expo-media-library/legacy";
-import { getQueueItems } from "../queue/db";
+import { getQueueItems, removeQueueItems } from "../queue/db";
 import { useLibraryEvents, useQueueEvents } from "./events";
 
 /**
@@ -45,6 +45,7 @@ export async function deleteLocalCopy(remoteId: string): Promise<boolean> {
   if (!item) return false;
   const ok = await MediaLibrary.deleteAssetsAsync([item.asset_id]);
   if (!ok) return false;
+  await removeQueueItems([item.asset_id]);
   useLibraryEvents.getState().emit();
   useQueueEvents.getState().emit();
   return true;
@@ -60,6 +61,7 @@ export async function freeSyncedSpace(): Promise<number> {
   if (!assetIds.length) return 0;
   const ok = await MediaLibrary.deleteAssetsAsync(assetIds);
   if (!ok) return 0;
+  await removeQueueItems(assetIds);
   // La biblioteca cambió (assets borrados): re-listar la galería y refrescar
   // las estadísticas de la pestaña Respaldo.
   useLibraryEvents.getState().emit();
