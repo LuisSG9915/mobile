@@ -181,6 +181,11 @@ export const t = {
   },
   albums: {
     title: "Álbumes",
+    filterByAlbum: "Seleccionar álbum",
+    allAlbums: "Todos los álbumes",
+    cloudAlbums: "Álbumes en la nube",
+    deviceAlbums: "Álbumes del dispositivo",
+    noAlbumsFound: "No se encontraron álbumes",
     createTitle: "Nuevo álbum",
     createPrompt: "Nombre del álbum",
     createAction: "Crear",

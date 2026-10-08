@@ -209,3 +209,4 @@ export function ProgressRing({
 }
 
 export { PhotoEditorModal } from "./PhotoEditorModal";
+export { SelectAlbumsModal } from "./SelectAlbumsModal";

@@ -55,13 +55,22 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
         continue;
       }
       // creationTime llega en unidad variable según el asset (segundos o
-      // milisegundos) y 0 cuando falta EXIF/DATE_TAKEN — normalizar a ms.
+      // milisegundos) y 0 cuando falta EXIF/DATE_TAKEN — usar modificationTime
+      // si falta, o fallback estable determinista (nunca Date.now()).
+      const rawTime =
+        a.creationTime > 0
+          ? a.creationTime
+          : (a.modificationTime ?? 0) > 0
+            ? a.modificationTime
+            : 0;
+      let stableFallback = 1577836800000;
+      if (!rawTime && a.id) {
+        let hash = 0;
+        for (let i = 0; i < a.id.length; i++) hash = (hash * 31 + a.id.charCodeAt(i)) >>> 0;
+        stableFallback += hash % 86400000;
+      }
       const creationTime =
-        a.creationTime <= 0
-          ? Date.now()
-          : a.creationTime < 1e12
-            ? a.creationTime * 1000
-            : a.creationTime;
+        rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableFallback;
       batch.push({
         id: a.id,
         uri: a.uri,

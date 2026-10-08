@@ -275,4 +275,33 @@ describe("buildGalleryRows", () => {
     );
     expect(rows.filter((r) => r.type === "header")).toHaveLength(1);
   });
+
+  it("conserva albumId de assets locales y de cola", () => {
+    const photos = mergeGallery({
+      localAssets: [
+        makeLocal({ id: "loc1", albumId: "camera-album" }),
+        makeLocal({ id: "loc2", albumId: "whatsapp-album" }),
+      ],
+      queueItems: [makeQueue({ asset_id: "loc1", state: "queued" })],
+      remoteItems: [],
+    });
+    const p1 = photos.find((p) => p.assetId === "loc1");
+    const p2 = photos.find((p) => p.assetId === "loc2");
+    expect(p1?.albumId).toBe("camera-album");
+    expect(p2?.albumId).toBe("whatsapp-album");
+  });
+
+  it("mantiene fecha determinista estable para items sin creationTime", () => {
+    const p1 = mergeGallery({
+      localAssets: [makeLocal({ id: "no-date", creationTime: 100 })],
+      queueItems: [],
+      remoteItems: [],
+    });
+    const p2 = mergeGallery({
+      localAssets: [makeLocal({ id: "no-date", creationTime: 100 })],
+      queueItems: [],
+      remoteItems: [],
+    });
+    expect(p1[0].takenAt).toBe(p2[0].takenAt);
+  });
 });

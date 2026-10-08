@@ -48,7 +48,8 @@ export function FastScrubber({ geometry, rows, onScrub }: Props) {
   const pan = useMemo(
     () =>
       Gesture.Pan()
-        .minDistance(0)
+        .minDistance(6)
+        .activeOffsetX([-10, 10])
         .onBegin((e) => runOnJS(scrub)(e.y))
         .onUpdate((e) => runOnJS(scrub)(e.y))
         .onFinalize(() => runOnJS(endScrub)()),
@@ -58,7 +59,7 @@ export function FastScrubber({ geometry, rows, onScrub }: Props) {
   return (
     <GestureDetector gesture={pan}>
       <View
-        className="absolute right-0 top-0 bottom-0 w-7 justify-center"
+        className="absolute right-0 top-0 bottom-0 w-5 justify-center"
         onLayout={(e) => setTrackH(e.nativeEvent.layout.height)}
       >
         {/* Pista visual sutil siempre visible para descubrir el gesto. */}

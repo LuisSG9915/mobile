@@ -6,6 +6,7 @@ import {
   Calendar,
   Check,
   Download,
+  Folder,
   FolderPlus,
   Heart,
   MapPin,
@@ -39,8 +40,8 @@ import { formatDuration } from "../../lib/format";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { useSettings } from "../../lib/store";
-import { useHybridGallery } from "../../lib/use-hybrid-gallery";
-import { EmptyState, SyncBadge } from "../../ui";
+import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
+import { EmptyState, SelectAlbumsModal, SyncBadge } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { FastScrubber } from "../../ui/FastScrubber";
 import { MemoriesBar } from "../../ui/MemoriesBar";
@@ -159,9 +160,11 @@ export default function GalleryScreen() {
   const timelineFilter = useSettings((s) => s.timelineFilter);
   const setTimelineFilter = useSettings((s) => s.setTimelineFilter);
   const cell = width / columns;
+  const [albumFilter, setAlbumFilter] = useState<AlbumFilter | null>(null);
+  const [albumModalOpen, setAlbumModalOpen] = useState(false);
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.
-  const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter);
+  const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter, albumFilter);
 
   const listRef = useRef<FlashListRef<GalleryRow>>(null);
   const gridRef = useRef<View>(null);
@@ -287,8 +290,21 @@ export default function GalleryScreen() {
     (photo: HybridPhoto) => {
       if (selectedRef.current) {
         togglePhoto(photo.key);
-      } else if (photo.remoteId) {
-        router.push(`/media/${photo.remoteId}`);
+      } else {
+        router.push({
+          pathname: "/media/[id]",
+          params: {
+            id: photo.remoteId ?? photo.key,
+            localUri: photo.localUri ?? "",
+            mediaType: photo.mediaType,
+            syncStatus: photo.syncStatus,
+            takenAt: String(photo.takenAt),
+            width: String(photo.width),
+            height: String(photo.height),
+            durationMs: photo.durationMs != null ? String(photo.durationMs) : "",
+            thumbhash: photo.thumbhash ?? "",
+          },
+        });
       }
     },
     [togglePhoto],
@@ -435,6 +451,14 @@ export default function GalleryScreen() {
             ))}
           </ScrollView>
           <Pressable
+            onPress={() => setAlbumModalOpen(true)}
+            accessibilityLabel={t.albums.filterByAlbum}
+            hitSlop={8}
+            className="pl-2"
+          >
+            <Folder size={20} color={albumFilter ? "#4f46e5" : "#737373"} />
+          </Pressable>
+          <Pressable
             onPress={() => setJumpOpen(true)}
             accessibilityLabel={t.gallery.jumpToMonth}
             hitSlop={8}
@@ -444,13 +468,32 @@ export default function GalleryScreen() {
           </Pressable>
         </View>
       )}
-      {selected || timelineFilter !== "all" ? null : <MemoriesBar />}
+      {albumFilter ? (
+        <View className="flex-row items-center justify-between mx-4 mb-2 px-3 py-1.5 rounded-xl bg-accent/10 border border-accent/20">
+          <View className="flex-row items-center gap-2 flex-1 mr-2">
+            <Folder size={15} color="#4f46e5" />
+            <Text className="text-xs font-semibold text-accent" numberOfLines={1}>
+              Álbum: {albumFilter.title}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setAlbumFilter(null)}
+            hitSlop={8}
+            accessibilityLabel="Quitar filtro de álbum"
+          >
+            <X size={15} color="#4f46e5" />
+          </Pressable>
+        </View>
+      ) : null}
+      {selected || timelineFilter !== "all" || albumFilter ? null : <MemoriesBar />}
       {isEmpty ? (
         <EmptyState
-          title={t.gallery.emptyTitle}
-          body={t.gallery.emptyBody}
-          actionLabel={t.gallery.emptyAction}
-          action={() => router.push("/(tabs)/backup")}
+          title={albumFilter ? "Álbum sin fotos" : t.gallery.emptyTitle}
+          body={
+            albumFilter ? "Este álbum no tiene fotos o videos disponibles." : t.gallery.emptyBody
+          }
+          actionLabel={albumFilter ? "Ver todas las fotos" : t.gallery.emptyAction}
+          action={albumFilter ? () => setAlbumFilter(null) : () => router.push("/(tabs)/backup")}
         />
       ) : (
         <GestureDetector gesture={pinch}>
@@ -477,6 +520,8 @@ export default function GalleryScreen() {
               overrideItemLayout={(layout, item) => {
                 if (item.type === "header") layout.span = columns;
               }}
+              drawDistance={Math.round(width * 2)}
+              removeClippedSubviews={Platform.OS !== "web"}
               onScroll={(e) => {
                 scrollY.current = e.nativeEvent.contentOffset.y;
               }}
@@ -574,6 +619,13 @@ export default function GalleryScreen() {
         mediaIds={remoteSel.map((p) => p.remoteId as string)}
         onClose={() => setAddToAlbumOpen(false)}
         onSuccess={() => setSelected(null)}
+      />
+
+      <SelectAlbumsModal
+        visible={albumModalOpen}
+        activeFilter={albumFilter}
+        onSelect={setAlbumFilter}
+        onClose={() => setAlbumModalOpen(false)}
       />
     </SafeAreaView>
   );

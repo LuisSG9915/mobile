@@ -230,7 +230,20 @@ function MediaPage({
 }
 
 export default function MediaViewer() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    localUri?: string;
+    mediaType?: "photo" | "video";
+    syncStatus?: string;
+    takenAt?: string;
+    width?: string;
+    height?: string;
+    durationMs?: string;
+    thumbhash?: string;
+  }>();
+  const id = params.id;
+  const isLocalItem = !id || id.startsWith("l-") || id.startsWith("q-") || Boolean(params.localUri);
+
   const { width } = useWindowDimensions();
   const qc = useQueryClient();
   const [showInfo, setShowInfo] = useState(false);
@@ -253,10 +266,47 @@ export default function MediaViewer() {
   const detail = useQuery({
     queryKey: ["media", activeId],
     queryFn: () => api.mediaDetail(activeId),
-    enabled: !!activeId,
+    enabled: Boolean(activeId && !activeId.startsWith("l-") && !activeId.startsWith("q-")),
     staleTime: 60_000,
   });
-  const d = detail.data;
+
+  const localMedia = useMemo(() => {
+    if (!params.localUri) return null;
+    const uri = params.localUri;
+    const ext =
+      uri.split(".").pop()?.toLowerCase() || (params.mediaType === "video" ? "mp4" : "jpg");
+    return {
+      id: id ?? "local",
+      originalUrl: uri,
+      thumbUrl: uri,
+      thumbhash: params.thumbhash || "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+      mediaType: (params.mediaType as "photo" | "video") || "photo",
+      width: Number(params.width) || 1920,
+      height: Number(params.height) || 1080,
+      durationMs: params.durationMs ? Number(params.durationMs) : null,
+      takenAt: Number(params.takenAt) || Date.now(),
+      createdAt: Number(params.takenAt) || Date.now(),
+      fileSize: 0,
+      ext,
+      mimeType: params.mediaType === "video" ? "video/mp4" : "image/jpeg",
+      isFavorite: false,
+      caption: null,
+      tags: [] as string[],
+      syncStatus: params.syncStatus || "LOCAL_ONLY",
+      cameraModel: null,
+      cameraMake: null,
+      lensModel: null,
+      focalLength: null,
+      fNumber: null,
+      iso: null,
+      exposureTime: null,
+      latitude: null,
+      longitude: null,
+      locationName: null,
+    };
+  }, [params, id]);
+
+  const d = detail.data ?? localMedia;
 
   const [captionInput, setCaptionInput] = useState("");
   const [newTagInput, setNewTagInput] = useState("");
@@ -349,6 +399,13 @@ export default function MediaViewer() {
   };
 
   const onDeletePress = () => {
+    if (isLocalItem) {
+      Alert.alert(t.viewer.deleteTitle, "¿Deseas cerrar la visualización de este elemento local?", [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Cerrar", style: "destructive", onPress: () => router.back() },
+      ]);
+      return;
+    }
     // Web no tiene copia local que borrar: directo a la papelera (con deshacer).
     if (Platform.OS === "web") {
       del.mutate(activeId);
@@ -366,7 +423,7 @@ export default function MediaViewer() {
     Alert.alert(t.viewer.deleteTitle, undefined, buttons);
   };
 
-  const showSpinner = detail.isPending && !carousel;
+  const showSpinner = detail.isPending && !carousel && !isLocalItem;
   const onDismiss = () => router.back();
 
   const heartScale = useSharedValue(0);
@@ -389,19 +446,26 @@ export default function MediaViewer() {
 
   const handleDoubleTap = () => {
     triggerHeartAnimation();
-    if (!isFav) {
+    if (!isFav && !isLocalItem) {
       fav.mutate(activeId);
     }
   };
 
   return (
     <SafeAreaView className="flex-1 bg-black" edges={["top", "bottom"]}>
-      <View className="flex-row justify-between px-4 py-2 z-10">
-        <Pressable onPress={() => router.back()} accessibilityLabel="cerrar" hitSlop={12}>
-          <X color="#fff" size={26} />
-        </Pressable>
+      <View className="flex-row items-center justify-between px-4 py-2 z-10">
+        <View className="flex-row items-center gap-3">
+          <Pressable onPress={() => router.back()} accessibilityLabel="cerrar" hitSlop={12}>
+            <X color="#fff" size={26} />
+          </Pressable>
+          {isLocalItem ? (
+            <View className="bg-neutral-800/90 border border-neutral-700/60 px-2.5 py-1 rounded-full">
+              <Text className="text-neutral-300 text-xs font-medium">Sin sincronizar</Text>
+            </View>
+          ) : null}
+        </View>
         <View className="flex-row gap-5">
-          {d?.mediaType === "photo" ? (
+          {d?.mediaType === "photo" && !isLocalItem ? (
             <Pressable
               onPress={() => setEditorOpen(true)}
               accessibilityLabel={t.editor.title}
@@ -410,26 +474,30 @@ export default function MediaViewer() {
               <Crop color="#fff" size={24} />
             </Pressable>
           ) : null}
-          <Pressable
-            onPress={() => fav.mutate(activeId)}
-            disabled={fav.isPending}
-            accessibilityLabel={t.viewer.favorite}
-            hitSlop={12}
-          >
-            <Heart color="#fff" size={24} fill={isFav ? "#f43f5e" : "none"} />
-          </Pressable>
-          <Pressable
-            onPress={() => void onDownload()}
-            disabled={downloading}
-            accessibilityLabel={t.viewer.download}
-            hitSlop={12}
-          >
-            {downloading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Download color="#fff" size={24} />
-            )}
-          </Pressable>
+          {!isLocalItem ? (
+            <Pressable
+              onPress={() => fav.mutate(activeId)}
+              disabled={fav.isPending}
+              accessibilityLabel={t.viewer.favorite}
+              hitSlop={12}
+            >
+              <Heart color="#fff" size={24} fill={isFav ? "#f43f5e" : "none"} />
+            </Pressable>
+          ) : null}
+          {!isLocalItem ? (
+            <Pressable
+              onPress={() => void onDownload()}
+              disabled={downloading}
+              accessibilityLabel={t.viewer.download}
+              hitSlop={12}
+            >
+              {downloading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Download color="#fff" size={24} />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => setShowInfo(true)}
             accessibilityLabel={t.viewer.info}
@@ -437,13 +505,15 @@ export default function MediaViewer() {
           >
             <Info color="#fff" size={24} />
           </Pressable>
-          <Pressable
-            onPress={() => setAddToAlbumOpen(true)}
-            accessibilityLabel={t.albums.addToAlbum}
-            hitSlop={12}
-          >
-            <FolderPlus color="#fff" size={24} />
-          </Pressable>
+          {!isLocalItem ? (
+            <Pressable
+              onPress={() => setAddToAlbumOpen(true)}
+              accessibilityLabel={t.albums.addToAlbum}
+              hitSlop={12}
+            >
+              <FolderPlus color="#fff" size={24} />
+            </Pressable>
+          ) : null}
           <Pressable onPress={onDeletePress} accessibilityLabel={t.viewer.deleteTitle} hitSlop={12}>
             <Trash2 color="#fff" size={24} />
           </Pressable>
@@ -540,138 +610,148 @@ export default function MediaViewer() {
           </Text>
           {d ? (
             <ScrollView className="gap-3 max-h-[480px]">
-              {/* Sección de Pie de foto / Descripción */}
-              <View className="py-2 border-b border-neutral-100 dark:border-neutral-800 gap-1.5">
-                <Text className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-                  {t.viewer.caption}
-                </Text>
-                <View className="flex-row items-center gap-2">
-                  <TextInput
-                    className="flex-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-900 dark:text-white"
-                    placeholder={t.viewer.captionPlaceholder}
-                    placeholderTextColor="#737373"
-                    value={captionInput}
-                    onChangeText={setCaptionInput}
-                    maxLength={500}
-                  />
-                  {captionInput !== (d.caption ?? "") ? (
-                    <Button
-                      label={t.viewer.saveCaption}
-                      size="sm"
-                      loading={updateMeta.isPending}
-                      onPress={() => updateMeta.mutate({ caption: captionInput.trim() || null })}
-                    />
-                  ) : null}
-                </View>
-              </View>
-
-              {/* Sección de Etiquetas */}
-              <View className="py-2 border-b border-neutral-100 dark:border-neutral-800 gap-2">
-                <View className="flex-row items-center justify-between">
+              {/* Sección de Pie de foto / Descripción solo para remotos */}
+              {!isLocalItem ? (
+                <View className="py-2 border-b border-neutral-100 dark:border-neutral-800 gap-1.5">
                   <Text className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-                    {t.viewer.tags}
+                    {t.viewer.caption}
                   </Text>
-                  <View className="flex-row items-center gap-3">
-                    <Pressable
-                      onPress={() => autoTagMutation.mutate()}
-                      disabled={autoTagMutation.isPending}
-                      hitSlop={8}
-                      className="flex-row items-center gap-1 active:opacity-70"
-                    >
-                      <Sparkles size={13} color="#6366f1" />
-                      <Text className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
-                        {autoTagMutation.isPending ? t.viewer.autoTagging : t.viewer.autoTag}
-                      </Text>
-                    </Pressable>
-                    {!showAddTag ? (
-                      <Pressable
-                        onPress={() => setShowAddTag(true)}
-                        hitSlop={8}
-                        className="flex-row items-center gap-1"
-                      >
-                        <Plus size={14} color="#4f46e5" />
-                        <Text className="text-xs font-medium text-accent">{t.viewer.addTag}</Text>
-                      </Pressable>
+                  <View className="flex-row items-center gap-2">
+                    <TextInput
+                      className="flex-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl px-3 py-2 text-sm text-neutral-900 dark:text-white"
+                      placeholder={t.viewer.captionPlaceholder}
+                      placeholderTextColor="#737373"
+                      value={captionInput}
+                      onChangeText={setCaptionInput}
+                      maxLength={500}
+                    />
+                    {captionInput !== (d.caption ?? "") ? (
+                      <Button
+                        label={t.viewer.saveCaption}
+                        size="sm"
+                        loading={updateMeta.isPending}
+                        onPress={() => updateMeta.mutate({ caption: captionInput.trim() || null })}
+                      />
                     ) : null}
                   </View>
                 </View>
+              ) : null}
 
-                {showAddTag ? (
-                  <View className="flex-row items-center gap-2">
-                    <TextInput
-                      className="flex-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl px-3 py-1.5 text-xs text-neutral-900 dark:text-white"
-                      placeholder={t.viewer.tagPlaceholder}
-                      placeholderTextColor="#737373"
-                      value={newTagInput}
-                      onChangeText={setNewTagInput}
-                      autoFocus
-                    />
-                    <Button
-                      label="+"
-                      size="sm"
-                      loading={updateMeta.isPending}
-                      onPress={() => {
-                        const trimmed = newTagInput.trim().toLowerCase();
-                        if (trimmed && !d.tags.includes(trimmed)) {
-                          updateMeta.mutate(
-                            { tags: [...d.tags, trimmed] },
-                            {
-                              onSuccess: () => {
-                                setNewTagInput("");
-                                setShowAddTag(false);
-                              },
-                            },
-                          );
-                        } else {
-                          setShowAddTag(false);
-                        }
-                      }}
-                    />
-                    <Pressable
-                      onPress={() => {
-                        setShowAddTag(false);
-                        setNewTagInput("");
-                      }}
-                    >
-                      <X size={18} color="#737373" />
-                    </Pressable>
-                  </View>
-                ) : null}
-
-                <View className="flex-row flex-wrap gap-1.5">
-                  {d.tags.length === 0 ? (
-                    <Text className="text-xs text-neutral-400">Sin etiquetas</Text>
-                  ) : (
-                    d.tags.map((tag) => (
-                      <View
-                        key={tag}
-                        className="flex-row items-center gap-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 px-2.5 py-1 rounded-lg"
+              {/* Sección de Etiquetas solo para remotos */}
+              {!isLocalItem ? (
+                <View className="py-2 border-b border-neutral-100 dark:border-neutral-800 gap-2">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+                      {t.viewer.tags}
+                    </Text>
+                    <View className="flex-row items-center gap-3">
+                      <Pressable
+                        onPress={() => autoTagMutation.mutate()}
+                        disabled={autoTagMutation.isPending}
+                        hitSlop={8}
+                        className="flex-row items-center gap-1 active:opacity-70"
                       >
-                        <Text className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                          #{tag}
+                        <Sparkles size={13} color="#6366f1" />
+                        <Text className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                          {autoTagMutation.isPending ? t.viewer.autoTagging : t.viewer.autoTag}
                         </Text>
+                      </Pressable>
+                      {!showAddTag ? (
                         <Pressable
-                          onPress={() =>
-                            updateMeta.mutate({ tags: d.tags.filter((t) => t !== tag) })
-                          }
-                          hitSlop={6}
+                          onPress={() => setShowAddTag(true)}
+                          hitSlop={8}
+                          className="flex-row items-center gap-1"
                         >
-                          <X size={12} color="#737373" />
+                          <Plus size={14} color="#4f46e5" />
+                          <Text className="text-xs font-medium text-accent">{t.viewer.addTag}</Text>
                         </Pressable>
-                      </View>
-                    ))
-                  )}
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {showAddTag ? (
+                    <View className="flex-row items-center gap-2">
+                      <TextInput
+                        className="flex-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl px-3 py-1.5 text-xs text-neutral-900 dark:text-white"
+                        placeholder={t.viewer.tagPlaceholder}
+                        placeholderTextColor="#737373"
+                        value={newTagInput}
+                        onChangeText={setNewTagInput}
+                        autoFocus
+                      />
+                      <Button
+                        label="+"
+                        size="sm"
+                        loading={updateMeta.isPending}
+                        onPress={() => {
+                          const trimmed = newTagInput.trim().toLowerCase();
+                          if (trimmed && !d.tags.includes(trimmed)) {
+                            updateMeta.mutate(
+                              { tags: [...d.tags, trimmed] },
+                              {
+                                onSuccess: () => {
+                                  setNewTagInput("");
+                                  setShowAddTag(false);
+                                },
+                              },
+                            );
+                          } else {
+                            setShowAddTag(false);
+                          }
+                        }}
+                      />
+                      <Pressable
+                        onPress={() => {
+                          setShowAddTag(false);
+                          setNewTagInput("");
+                        }}
+                      >
+                        <X size={18} color="#737373" />
+                      </Pressable>
+                    </View>
+                  ) : null}
+
+                  <View className="flex-row flex-wrap gap-1.5">
+                    {d.tags.length === 0 ? (
+                      <Text className="text-xs text-neutral-400">Sin etiquetas</Text>
+                    ) : (
+                      d.tags.map((tag) => (
+                        <View
+                          key={tag}
+                          className="flex-row items-center gap-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 px-2.5 py-1 rounded-lg"
+                        >
+                          <Text className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                            #{tag}
+                          </Text>
+                          <Pressable
+                            onPress={() =>
+                              updateMeta.mutate({ tags: d.tags.filter((t) => t !== tag) })
+                            }
+                            hitSlop={6}
+                          >
+                            <X size={12} color="#737373" />
+                          </Pressable>
+                        </View>
+                      ))
+                    )}
+                  </View>
                 </View>
-              </View>
+              ) : null}
 
               <InfoRow label={t.viewer.date} value={formatDateTime(d.takenAt)} />
-              <InfoRow label={t.viewer.size} value={formatBytes(d.fileSize)} />
+              {d.fileSize > 0 ? (
+                <InfoRow label={t.viewer.size} value={formatBytes(d.fileSize)} />
+              ) : null}
               <InfoRow label={t.viewer.dimensions} value={`${d.width} × ${d.height}`} />
               {d.durationMs != null ? (
                 <InfoRow label={t.viewer.duration} value={formatDuration(d.durationMs) ?? "—"} />
               ) : null}
               <InfoRow label={t.viewer.type} value={d.mediaType === "video" ? "Video" : "Foto"} />
               <InfoRow label={t.viewer.file} value={`.${d.ext} · ${d.mimeType}`} />
+              <InfoRow
+                label="Estado"
+                value={isLocalItem ? "Sin sincronizar (dispositivo)" : "Sincronizado en la nube"}
+              />
 
               {/* Ficha técnica EXIF / Detalles de la cámara */}
               {d.cameraModel ||

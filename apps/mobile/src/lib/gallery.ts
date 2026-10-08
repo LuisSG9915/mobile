@@ -18,6 +18,7 @@ export type LocalAsset = {
   width: number;
   height: number;
   durationMs?: number | null;
+  albumId?: string | null;
 };
 
 export type HybridPhoto = {
@@ -39,6 +40,7 @@ export type HybridPhoto = {
   thumbhash: string | null;
   remoteId: string | null;
   assetId: string | null;
+  albumId?: string | null;
   queueItem: QueueItem | null;
   remote: TimelineItem | null;
 };
@@ -102,7 +104,13 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
 
     const status = queueStateToSyncStatus(q.state);
     const base = {
-      takenAt: remote?.takenAt ?? (q.created_at > 0 ? q.created_at : Date.now()),
+      takenAt:
+        remote?.takenAt ??
+        (q.created_at > 0
+          ? q.created_at
+          : local?.creationTime && local.creationTime > 0
+            ? local.creationTime
+            : 1577836800000),
       mediaType: remote?.mediaType ?? q.media_type,
       width: remote?.width ?? local?.width ?? 1,
       height: remote?.height ?? local?.height ?? 1,
@@ -111,6 +119,7 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
       thumbhash: remote?.thumbhash ?? null,
       remoteId: remote?.id ?? q.remote_id,
       assetId: q.asset_id,
+      albumId: local?.albumId ?? null,
       queueItem: q,
       remote,
     };
@@ -155,6 +164,7 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
       thumbhash: null,
       remoteId: null,
       assetId: a.id,
+      albumId: a.albumId ?? null,
       queueItem: null,
       remote: null,
     });
@@ -176,6 +186,7 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
       thumbhash: r.thumbhash,
       remoteId: r.id,
       assetId: null,
+      albumId: null,
       queueItem: null,
       remote: r,
     });
