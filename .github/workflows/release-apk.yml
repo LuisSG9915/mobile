@@ -76,5 +76,5 @@ jobs:
           gh release create "${{ steps.tag.outputs.name }}" \
             --title "Photos ${{ steps.tag.outputs.name }}" \
             --notes "APK de Android (build EAS ${{ steps.build.outputs.build_version }}). Instalación directa o vía Obtainium: https://github.com/${{ github.repository }}/releases" \
-            "photos-${{ steps.tag.outputs.name }}.apk"
+            "apps/mobile/photos-${{ steps.tag.outputs.name }}.apk"
         working-directory: .
