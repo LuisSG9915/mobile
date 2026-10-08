@@ -29,61 +29,80 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
   const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
   if (!perm.granted) return { added: 0, skipped: 0 };
 
-  const includeVideos = useSettings.getState().includeVideos;
+  const settings = useSettings.getState();
+  const includeVideos = settings.includeVideos;
+  const syncedAlbumIds = settings.syncedAlbumIds ?? null;
+
+  // Si syncedAlbumIds es un arreglo vacío, no hay álbumes seleccionados para sincronizar
+  if (Array.isArray(syncedAlbumIds) && syncedAlbumIds.length === 0) {
+    return { added: 0, skipped: 0 };
+  }
 
   const lastScan = opts.forceScan ? 0 : getLastScanTs();
   const createdAfter = lastScan > 0 ? Math.max(0, lastScan - SCAN_SAFETY_MARGIN_MS) : undefined;
 
-  let after: string | undefined;
   let added = 0;
   let skipped = 0;
-  do {
-    const page = await MediaLibrary.getAssetsAsync({
-      first: 200,
-      after,
-      mediaType: includeVideos
-        ? [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video]
-        : [MediaLibrary.MediaType.photo],
-      sortBy: [[MediaLibrary.SortBy.creationTime, false]],
-      ...(createdAfter !== undefined ? { createdAfter } : {}),
-    });
-    const batch: EnqueueInput[] = [];
-    for (const a of page.assets) {
-      const ext = (a.filename?.split(".").pop() ?? "").toLowerCase();
-      if (ext && !(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
-        skipped++;
-        continue;
-      }
-      // creationTime llega en unidad variable según el asset (segundos o
-      // milisegundos) y 0 cuando falta EXIF/DATE_TAKEN — usar modificationTime
-      // si falta, o fallback estable determinista (nunca Date.now()).
-      const rawTime =
-        a.creationTime > 0
-          ? a.creationTime
-          : (a.modificationTime ?? 0) > 0
-            ? a.modificationTime
-            : 0;
-      let stableFallback = 1577836800000;
-      if (!rawTime && a.id) {
-        let hash = 0;
-        for (let i = 0; i < a.id.length; i++) hash = (hash * 31 + a.id.charCodeAt(i)) >>> 0;
-        stableFallback += hash % 86400000;
-      }
-      const creationTime =
-        rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableFallback;
-      batch.push({
-        id: a.id,
-        uri: a.uri,
-        filename: a.filename,
-        mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "photo",
-        creationTime,
+
+  async function scanAlbum(albumId?: string) {
+    let after: string | undefined;
+    do {
+      const page = await MediaLibrary.getAssetsAsync({
+        first: 200,
+        after,
+        mediaType: includeVideos
+          ? [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video]
+          : [MediaLibrary.MediaType.photo],
+        sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+        ...(createdAfter !== undefined ? { createdAfter } : {}),
+        ...(albumId !== undefined ? { album: albumId } : {}),
       });
-      added++;
+      const batch: EnqueueInput[] = [];
+      for (const a of page.assets) {
+        const ext = (a.filename?.split(".").pop() ?? "").toLowerCase();
+        if (ext && !(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
+          skipped++;
+          continue;
+        }
+        // creationTime llega en unidad variable según el asset (segundos o
+        // milisegundos) y 0 cuando falta EXIF/DATE_TAKEN — usar modificationTime
+        // si falta, o fallback estable determinista (nunca Date.now()).
+        const rawTime =
+          a.creationTime > 0
+            ? a.creationTime
+            : (a.modificationTime ?? 0) > 0
+              ? a.modificationTime
+              : 0;
+        let stableFallback = 1577836800000;
+        if (!rawTime && a.id) {
+          let hash = 0;
+          for (let i = 0; i < a.id.length; i++) hash = (hash * 31 + a.id.charCodeAt(i)) >>> 0;
+          stableFallback += hash % 86400000;
+        }
+        const creationTime =
+          rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableFallback;
+        batch.push({
+          id: a.id,
+          uri: a.uri,
+          filename: a.filename,
+          mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "photo",
+          creationTime,
+        });
+        added++;
+      }
+      // Una transacción por página: ~200 INSERT OR IGNORE amortizados.
+      await enqueueAssetsBatch(batch);
+      after = page.hasNextPage ? page.endCursor : undefined;
+    } while (after);
+  }
+
+  if (syncedAlbumIds === null) {
+    await scanAlbum();
+  } else {
+    for (const albId of syncedAlbumIds) {
+      await scanAlbum(albId);
     }
-    // Una transacción por página: ~200 INSERT OR IGNORE amortizados.
-    await enqueueAssetsBatch(batch);
-    after = page.hasNextPage ? page.endCursor : undefined;
-  } while (after);
+  }
 
   setLastScanTs(Date.now());
   // La biblioteca se re-listó: la galería híbrida refresca sus assets locales.

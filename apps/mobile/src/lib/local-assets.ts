@@ -5,6 +5,7 @@ export type DeviceAlbum = {
   id: string;
   title: string;
   assetCount: number;
+  coverUri?: string | null;
 };
 
 function stableTimestampFromId(id: string): number {
@@ -17,20 +18,38 @@ function stableTimestampFromId(id: string): number {
 }
 
 /**
- * Obtiene la lista de álbumes locales del dispositivo.
+ * Obtiene la lista de álbumes locales del dispositivo con su miniatura de portada.
  */
 export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
   try {
     const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
     if (!perm.granted) return [];
     const albums = await MediaLibrary.getAlbumsAsync({ includeSmartAlbums: true });
-    return albums
-      .filter((alb) => alb.assetCount > 0)
-      .map((alb) => ({
-        id: alb.id,
-        title: alb.title,
-        assetCount: alb.assetCount,
-      }));
+    const valid = albums.filter((alb) => alb.assetCount > 0);
+    const withCovers = await Promise.all(
+      valid.map(async (alb) => {
+        let coverUri: string | null = null;
+        try {
+          const sample = await MediaLibrary.getAssetsAsync({
+            album: alb.id,
+            first: 1,
+            sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+          });
+          if (sample.assets.length > 0) {
+            coverUri = sample.assets[0].uri;
+          }
+        } catch {
+          // Si falla obtener muestra, el álbum se muestra con icono de carpeta
+        }
+        return {
+          id: alb.id,
+          title: alb.title,
+          assetCount: alb.assetCount,
+          coverUri,
+        };
+      }),
+    );
+    return withCovers;
   } catch {
     return [];
   }
@@ -80,7 +99,7 @@ export async function listLocalAssets(
         height: a.height,
         // MediaLibrary devuelve duración en segundos.
         durationMs: isVideo ? Math.round(a.duration * 1000) : null,
-        albumId: a.albumId ?? null,
+        albumId: a.albumId ?? albumId ?? null,
       });
     }
     after = page.hasNextPage && out.length < limit ? page.endCursor : undefined;

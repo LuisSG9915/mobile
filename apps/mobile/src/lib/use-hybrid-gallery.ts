@@ -73,14 +73,35 @@ export function useHybridGallery(
       albumFilter?.type === "remote"
         ? []
         : albumFilter?.type === "local"
-          ? localAssets.filter((a) => !a.albumId || a.albumId === albumFilter.albumId)
+          ? localAssets.filter((a) => a.albumId === albumFilter.albumId)
           : localAssets;
 
-    const merged = mergeGallery({
+    const allQueue = getQueueItems();
+    let effectiveQueue = allQueue;
+
+    if (albumFilter?.type === "local") {
+      const localIdSet = new Set(effectiveLocal.map((a) => a.id));
+      effectiveQueue = allQueue.filter((q) => localIdSet.has(q.asset_id));
+    } else if (albumFilter?.type === "remote") {
+      const remoteIdSet = new Set(remoteItems.map((r) => r.id));
+      const remoteShaSet = new Set(remoteItems.map((r) => r.sha256).filter(Boolean));
+      effectiveQueue = allQueue.filter(
+        (q) =>
+          (q.remote_id && remoteIdSet.has(q.remote_id)) || (q.sha256 && remoteShaSet.has(q.sha256)),
+      );
+    }
+
+    let merged = mergeGallery({
       localAssets: effectiveLocal,
-      queueItems: getQueueItems(),
+      queueItems: effectiveQueue,
       remoteItems,
     });
+
+    if (albumFilter?.type === "local") {
+      // Al filtrar por álbum local, los remotos huérfanos del timeline general ('r-*')
+      // no pertenecen a este álbum del dispositivo y deben excluirse.
+      merged = merged.filter((p) => !p.key.startsWith("r-"));
+    }
     // Los locales/en-cola no conocen favoritos: bajo ese filtro solo quedan
     // los remotos marcados (y las filas de cola enlazadas a ellos).
     if (filter === "favorites") return merged.filter((p) => p.remote?.isFavorite === true);

@@ -28,9 +28,11 @@ vi.mock("../lib/events", () => ({
   },
 }));
 
+let mockSettings = { includeVideos: true, syncedAlbumIds: null as string[] | null };
+
 vi.mock("../lib/store", () => ({
   useSettings: {
-    getState: () => ({ includeVideos: true }),
+    getState: () => mockSettings,
   },
 }));
 
@@ -44,6 +46,7 @@ async function importNativeScanner() {
 describe("scanLibrary (nativo incremental / delta)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSettings = { includeVideos: true, syncedAlbumIds: null };
     mockLastScanTs = 0;
     mockGetPermissionsAsync.mockResolvedValue({ granted: true });
     mockGetAssetsAsync.mockResolvedValue({
@@ -129,5 +132,30 @@ describe("scanLibrary (nativo incremental / delta)", () => {
         creationTime: 1700000000 * 1000,
       },
     ]);
+  });
+
+  it("si syncedAlbumIds es un arreglo vacío, no escanea nada y retorna { added: 0, skipped: 0 }", async () => {
+    mockSettings = { includeVideos: true, syncedAlbumIds: [] };
+    const { scanLibrary } = await importNativeScanner();
+    const result = await scanLibrary();
+
+    expect(result).toEqual({ added: 0, skipped: 0 });
+    expect(mockGetAssetsAsync).not.toHaveBeenCalled();
+  });
+
+  it("si syncedAlbumIds tiene álbumes configurados, escanea únicamente esos álbumes", async () => {
+    mockSettings = { includeVideos: true, syncedAlbumIds: ["alb-camara", "alb-favoritos"] };
+    const { scanLibrary } = await importNativeScanner();
+    await scanLibrary();
+
+    expect(mockGetAssetsAsync).toHaveBeenCalledTimes(2);
+    expect(mockGetAssetsAsync).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ album: "alb-camara" }),
+    );
+    expect(mockGetAssetsAsync).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ album: "alb-favoritos" }),
+    );
   });
 });

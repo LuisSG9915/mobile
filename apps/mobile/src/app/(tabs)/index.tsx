@@ -40,7 +40,7 @@ import { formatDuration } from "../../lib/format";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { useSettings } from "../../lib/store";
-import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
+import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { EmptyState, SelectAlbumsModal, SyncBadge } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { FastScrubber } from "../../ui/FastScrubber";
@@ -159,8 +159,9 @@ export default function GalleryScreen() {
   const setGridColumns = useSettings((s) => s.setGridColumns);
   const timelineFilter = useSettings((s) => s.timelineFilter);
   const setTimelineFilter = useSettings((s) => s.setTimelineFilter);
+  const albumFilter = useSettings((s) => s.albumFilter);
+  const setAlbumFilter = useSettings((s) => s.setAlbumFilter);
   const cell = width / columns;
-  const [albumFilter, setAlbumFilter] = useState<AlbumFilter | null>(null);
   const [albumModalOpen, setAlbumModalOpen] = useState(false);
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.

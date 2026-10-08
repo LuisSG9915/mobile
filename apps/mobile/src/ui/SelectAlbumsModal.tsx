@@ -142,8 +142,16 @@ export function SelectAlbumsModal({ visible, activeFilter, onSelect, onClose }: 
                     }`}
                   >
                     <View className="flex-row items-center gap-3 flex-1">
-                      <View className="w-10 h-10 rounded-xl bg-neutral-200 dark:bg-neutral-800 items-center justify-center">
-                        <Folder size={20} color="#737373" />
+                      <View className="w-10 h-10 rounded-xl bg-neutral-200 dark:bg-neutral-800 overflow-hidden items-center justify-center">
+                        {local.coverUri ? (
+                          <Image
+                            source={{ uri: local.coverUri }}
+                            style={{ width: "100%", height: "100%" }}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <Folder size={20} color="#737373" />
+                        )}
                       </View>
                       <View className="flex-1">
                         <Text

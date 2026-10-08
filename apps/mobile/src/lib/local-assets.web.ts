@@ -4,6 +4,7 @@ export type DeviceAlbum = {
   id: string;
   title: string;
   assetCount: number;
+  coverUri?: string | null;
 };
 
 export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
