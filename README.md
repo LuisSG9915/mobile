@@ -50,14 +50,28 @@ Estado actual: 46 tests API + 116 tests mobile, todos verdes sin llamadas extern
 
 ## Distribución
 
-APK público para GitHub Releases / Obtainium / repo F-Droid propio:
+El APK se publica en **GitHub Releases** (ver [releases](../../releases)). Dos formas de instalarlo:
+
+- **Directo**: descargar `photos-*.apk` del último release e instalarlo.
+- **Obtainium** (recomendado, FOSS): instalar [Obtainium](https://github.com/ImranR98/Obtainium) y añadir la URL `https://github.com/LuisSG9915/mobile` — detecta y auto-actualiza desde los releases.
+
+### Publicar un release
+
+Automático vía workflow (`.github/workflows/release-apk.yml`): compila en EAS, descarga el APK y crea el release. Requiere el secret `EXPO_TOKEN` en el repo (expo.dev → Account Settings → Access Tokens).
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0   # o Actions → "Release APK" → Run
+```
+
+Manual:
 
 ```bash
 cd apps/mobile
-npx eas-cli build -p android --profile release-apk
+npx eas-cli build -p android --profile release-apk   # descargar el APK al terminar
+gh release create v1.0.0 photos-*.apk --title "Photos v1.0.0"
 ```
 
-El profile `release-apk` firma con el keystore gestionado por EAS y hornea `EXPO_PUBLIC_API_URL` apuntando al API de producción.
+El profile `release-apk` firma con el keystore gestionado por EAS (misma firma entre releases → actualizaciones sin reinstalar) y hornea `EXPO_PUBLIC_API_URL` apuntando al API de producción.
 
 ## Licencia
 

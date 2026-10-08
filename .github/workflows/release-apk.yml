@@ -1,0 +1,80 @@
+name: Release APK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag de la release (ej: v1.0.0). Vacío = v<appVersion>-b<versionCode>'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: EAS build → GitHub Release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Expo/EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build APK on EAS
+        id: build
+        run: |
+          eas build --platform android --profile release-apk --non-interactive --json > eas-build.json
+          cat eas-build.json
+          echo "apk_url=$(jq -r '.[0].artifacts.applicationArchiveUrl' eas-build.json)" >> "$GITHUB_OUTPUT"
+          echo "app_version=$(jq -r '.[0].appVersion' eas-build.json)" >> "$GITHUB_OUTPUT"
+          echo "build_version=$(jq -r '.[0].appBuildVersion' eas-build.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=v${{ steps.build.outputs.app_version }}-b${{ steps.build.outputs.build_version }}" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: .
+
+      - name: Download APK
+        run: curl -L -o photos-${{ steps.tag.outputs.name }}.apk "${{ steps.build.outputs.apk_url }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.tag.outputs.name }}" \
+            --title "Photos ${{ steps.tag.outputs.name }}" \
+            --notes "APK de Android (build EAS ${{ steps.build.outputs.build_version }}). Instalación directa o vía Obtainium: https://github.com/${{ github.repository }}/releases" \
+            "photos-${{ steps.tag.outputs.name }}.apk"
+        working-directory: .
