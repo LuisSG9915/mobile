@@ -356,3 +356,31 @@ export async function removeQueueItems(assetIds: string[]): Promise<void> {
     }
   });
 }
+
+/**
+ * Poda los elementos de la cola que no pertenezcan al conjunto de asset_ids permitidos.
+ * Se utiliza al cambiar la selección de álbumes sincronizados para que la cola
+ * no conserve fotos de álbumes excluidos.
+ */
+export async function pruneQueueExcept(allowedAssetIds: Set<string>): Promise<void> {
+  const db = getQueueDb();
+  const all = db.getAllSync<{ asset_id: string }>("SELECT asset_id FROM queue WHERE user_id IS ?", [
+    activeUserId,
+  ]);
+  const toDelete = all.filter((row) => !allowedAssetIds.has(row.asset_id)).map((r) => r.asset_id);
+  if (toDelete.length > 0) {
+    db.withTransactionSync(() => {
+      for (const id of toDelete) {
+        db.runSync("DELETE FROM queue WHERE user_id IS ? AND asset_id = ?", [activeUserId, id]);
+      }
+    });
+  }
+}
+
+/**
+ * Elimina todos los elementos de la cola para el usuario activo.
+ * Usado cuando syncedAlbumIds es vacío (ningún álbum seleccionado).
+ */
+export async function clearQueue(): Promise<void> {
+  getQueueDb().runSync("DELETE FROM queue WHERE user_id IS ?", [activeUserId]);
+}

@@ -132,3 +132,43 @@ describe("hasLocalCopy", () => {
     expect(fs.hasLocalCopy("rX")).toBe(false);
   });
 });
+
+describe("deleteLocalAssets", () => {
+  it("elimina assets locales por su id y limpia la cola", async () => {
+    mocks.deleteAssetsAsync.mockResolvedValue(true);
+    const count = await fs.deleteLocalAssets(["A1", "A2"]);
+    expect(count).toBe(2);
+    expect(mocks.deleteAssetsAsync).toHaveBeenCalledWith(["A1", "A2"]);
+    expect(mocks.removeQueueItems).toHaveBeenCalledWith(["A1", "A2"]);
+  });
+
+  it("devuelve 0 si la lista está vacía", async () => {
+    const count = await fs.deleteLocalAssets([]);
+    expect(count).toBe(0);
+    expect(mocks.deleteAssetsAsync).not.toHaveBeenCalled();
+    expect(mocks.removeQueueItems).not.toHaveBeenCalled();
+  });
+
+  it("devuelve 0 si el usuario cancela la eliminación", async () => {
+    mocks.deleteAssetsAsync.mockResolvedValue(false);
+    const count = await fs.deleteLocalAssets(["A1"]);
+    expect(count).toBe(0);
+    expect(mocks.removeQueueItems).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteLocalAsset", () => {
+  it("elimina un solo asset por su id", async () => {
+    mocks.deleteAssetsAsync.mockResolvedValue(true);
+    const ok = await fs.deleteLocalAsset("A1");
+    expect(ok).toBe(true);
+    expect(mocks.deleteAssetsAsync).toHaveBeenCalledWith(["A1"]);
+    expect(mocks.removeQueueItems).toHaveBeenCalledWith(["A1"]);
+  });
+
+  it("devuelve false si la eliminación falla o se cancela", async () => {
+    mocks.deleteAssetsAsync.mockResolvedValue(false);
+    const ok = await fs.deleteLocalAsset("A1");
+    expect(ok).toBe(false);
+  });
+});

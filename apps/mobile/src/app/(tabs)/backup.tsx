@@ -1,4 +1,5 @@
-import { CloudOff, HardDrive, RotateCcw } from "lucide-react-native";
+import { router } from "expo-router";
+import { CloudOff, Folder, HardDrive, RotateCcw } from "lucide-react-native";
 import { useState } from "react";
 import { Alert, Platform, ScrollView, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,7 +27,7 @@ const isWeb = Platform.OS === "web";
 
 export default function BackupScreen() {
   useQueueEvents((s) => s.tick); // re-render ante cambios de la cola
-  const { wifiOnly, includeVideos, setWifiOnly, setIncludeVideos } = useSettings();
+  const { wifiOnly, includeVideos, setWifiOnly, setIncludeVideos, syncedAlbumIds } = useSettings();
   const [scanning, setScanning] = useState(false);
   const [pickWarning, setPickWarning] = useState<string | null>(null);
 
@@ -39,6 +40,7 @@ export default function BackupScreen() {
   const progress = stats.total ? stats.done / stats.total : 0;
   const running = isRunning();
   const paused = isBackupPaused();
+  const noAlbumsSelected = !isWeb && Array.isArray(syncedAlbumIds) && syncedAlbumIds.length === 0;
 
   const togglePause = () => {
     if (paused) {
@@ -72,15 +74,17 @@ export default function BackupScreen() {
 
   const statusText = paused
     ? t.backup.paused
-    : !running
-      ? stats.pending > 0
-        ? wifiOnly
-          ? t.backup.waitingWifi
+    : noAlbumsSelected
+      ? "Sin álbumes seleccionados para sincronizar"
+      : !running
+        ? stats.pending > 0
+          ? wifiOnly
+            ? t.backup.waitingWifi
+            : t.backup.allDone
           : t.backup.allDone
-        : t.backup.allDone
-      : stats.pending > 0
-        ? t.backup.uploading(`${stats.pending} pendientes`)
-        : t.backup.allDone;
+        : stats.pending > 0
+          ? t.backup.uploading(`${stats.pending} pendientes`)
+          : t.backup.allDone;
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top"]}>
@@ -92,7 +96,11 @@ export default function BackupScreen() {
         <Card className="items-center gap-4 py-6">
           <ProgressRing progress={progress} />
           <Text className="text-lg font-semibold text-neutral-900 dark:text-white text-center">
-            {stats.total === 0 ? t.backup.allDone : t.backup.synced(stats.done, stats.total)}
+            {noAlbumsSelected
+              ? "Sin álbumes en respaldo"
+              : stats.total === 0
+                ? t.backup.allDone
+                : t.backup.synced(stats.done, stats.total)}
           </Text>
           <Text className="text-sm text-neutral-500 text-center">{statusText}</Text>
           {sync.status === "syncing" && sync.totalBytes > 0 ? (
@@ -126,6 +134,38 @@ export default function BackupScreen() {
             </View>
           ) : null}
         </Card>
+
+        {!isWeb ? (
+          <Card className="flex-row items-center justify-between py-3.5">
+            <View className="flex-row items-center gap-3 flex-1 mr-2">
+              <Folder size={18} color="#4f46e5" />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
+                  {syncedAlbumIds === null
+                    ? "Respaldando todos los álbumes"
+                    : syncedAlbumIds.length === 0
+                      ? "Sin álbumes seleccionados"
+                      : `Respaldando ${syncedAlbumIds.length} ${
+                          syncedAlbumIds.length === 1 ? "álbum" : "álbumes"
+                        }`}
+                </Text>
+                <Text className="text-xs text-neutral-500 mt-0.5">
+                  {syncedAlbumIds === null
+                    ? "Se sincroniza todo el carrete del dispositivo"
+                    : syncedAlbumIds.length === 0
+                      ? "Toca en Configurar para elegir qué álbumes respaldar"
+                      : "Solo los álbumes marcados con flag"}
+                </Text>
+              </View>
+            </View>
+            <Button
+              label="Configurar"
+              variant="ghost"
+              size="sm"
+              onPress={() => router.push("/(tabs)/albums")}
+            />
+          </Card>
+        ) : null}
 
         <Card className="gap-4">
           {!isWeb ? (

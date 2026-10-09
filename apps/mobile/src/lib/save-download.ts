@@ -10,6 +10,13 @@ export async function saveDownload(url: string, filename: string): Promise<void>
   const target = `${FileSystem.cacheDirectory}${filename}`;
   const { uri } = await FileSystem.downloadAsync(url, target);
   try {
+    const perm = await MediaLibrary.getPermissionsAsync();
+    if (!perm.granted) {
+      const requested = await MediaLibrary.requestPermissionsAsync();
+      if (!requested.granted) {
+        throw new Error("Permiso denegado para guardar en la galería");
+      }
+    }
     await MediaLibrary.saveToLibraryAsync(uri);
   } finally {
     await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});

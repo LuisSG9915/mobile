@@ -16,10 +16,20 @@ vi.mock("expo-media-library/legacy", () => ({
   getAssetsAsync: (...args: unknown[]) => mockGetAssetsAsync(...args),
 }));
 
+const mockClearQueue = vi.fn();
+const mockPruneQueueExcept = vi.fn();
+const mockCancelQueue = vi.fn();
+
 vi.mock("./db", () => ({
   getLastScanTs: () => mockLastScanTs,
   setLastScanTs: (ts: number) => mockSetLastScanTs(ts),
   enqueueAssetsBatch: (batch: unknown[]) => mockEnqueueAssetsBatch(batch),
+  clearQueue: () => mockClearQueue(),
+  pruneQueueExcept: (set: Set<string>) => mockPruneQueueExcept(set),
+}));
+
+vi.mock("./processor", () => ({
+  cancelQueue: () => mockCancelQueue(),
 }));
 
 vi.mock("../lib/events", () => ({
@@ -134,19 +144,21 @@ describe("scanLibrary (nativo incremental / delta)", () => {
     ]);
   });
 
-  it("si syncedAlbumIds es un arreglo vacío, no escanea nada y retorna { added: 0, skipped: 0 }", async () => {
+  it("si syncedAlbumIds es un arreglo vacío, no escanea nada, cancela la cola, la limpia y retorna { added: 0, skipped: 0 }", async () => {
     mockSettings = { includeVideos: true, syncedAlbumIds: [] };
     const { scanLibrary } = await importNativeScanner();
     const result = await scanLibrary();
 
     expect(result).toEqual({ added: 0, skipped: 0 });
     expect(mockGetAssetsAsync).not.toHaveBeenCalled();
+    expect(mockCancelQueue).toHaveBeenCalled();
+    expect(mockClearQueue).toHaveBeenCalled();
   });
 
-  it("si syncedAlbumIds tiene álbumes configurados, escanea únicamente esos álbumes", async () => {
+  it("si syncedAlbumIds tiene álbumes configurados, escanea únicamente esos álbumes y poda si forceScan", async () => {
     mockSettings = { includeVideos: true, syncedAlbumIds: ["alb-camara", "alb-favoritos"] };
     const { scanLibrary } = await importNativeScanner();
-    await scanLibrary();
+    await scanLibrary({ forceScan: true });
 
     expect(mockGetAssetsAsync).toHaveBeenCalledTimes(2);
     expect(mockGetAssetsAsync).toHaveBeenNthCalledWith(
@@ -157,5 +169,6 @@ describe("scanLibrary (nativo incremental / delta)", () => {
       2,
       expect.objectContaining({ album: "alb-favoritos" }),
     );
+    expect(mockPruneQueueExcept).toHaveBeenCalled();
   });
 });

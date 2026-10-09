@@ -198,6 +198,25 @@ describe("mutadores async sobre SQLite", () => {
       expect.arrayContaining(["done", "r1", 10, "a", "u1"]),
     );
   });
+
+  it("pruneQueueExcept elimina filas que no pertenecen al conjunto permitido", async () => {
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    sqliteDb.getAllSync.mockReturnValueOnce([{ asset_id: "a" }, { asset_id: "b" }]);
+    await db.pruneQueueExcept(new Set(["a"]));
+    expect(sqliteDb.withTransactionSync).toHaveBeenCalled();
+    expect(sqliteDb.runSync).toHaveBeenCalledWith(
+      "DELETE FROM queue WHERE user_id IS ? AND asset_id = ?",
+      ["u1", "b"],
+    );
+  });
+
+  it("clearQueue elimina todas las filas del usuario", async () => {
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    await db.clearQueue();
+    expect(sqliteDb.runSync).toHaveBeenCalledWith("DELETE FROM queue WHERE user_id IS ?", ["u1"]);
+  });
 });
 
 describe("getters síncronos con scoping", () => {

@@ -295,7 +295,19 @@ export default function SearchScreen() {
             renderItem={({ item }: { item: TimelineItem }) => (
               <Pressable
                 style={{ width: itemSize, height: itemSize, margin: gap / 2 }}
-                onPress={() => router.push({ pathname: "/media/[id]", params: { id: item.id } })}
+                onPress={() =>
+                  router.push({
+                    pathname: "/media/[id]",
+                    params: {
+                      id: item.id,
+                      mediaType: item.mediaType,
+                      durationMs: item.durationMs != null ? String(item.durationMs) : "",
+                      width: String(item.width),
+                      height: String(item.height),
+                      thumbhash: item.thumbhash,
+                    },
+                  })
+                }
                 className="bg-neutral-200 dark:bg-neutral-900 overflow-hidden"
                 accessibilityRole="button"
               >

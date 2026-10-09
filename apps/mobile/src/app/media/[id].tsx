@@ -51,7 +51,7 @@ import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
-import { deleteLocalCopy, hasLocalCopy } from "../../lib/free-space";
+import { deleteLocalAsset, hasLocalCopy } from "../../lib/free-space";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
@@ -274,6 +274,7 @@ export type CarouselItem = {
   syncStatus: string;
   localUri?: string | null;
   remoteId?: string | null;
+  assetId?: string | null;
 };
 
 function ThumbPage({ item }: { item: CarouselItem | TimelineItem }) {
@@ -322,7 +323,11 @@ function MediaPage({
   if (item.mediaType === "video") {
     // El player solo existe en la página activa (es pesado); las demás
     // páginas de video muestran su miniatura.
-    return active && originalUrl ? <VideoPage uri={originalUrl} /> : <ThumbPage item={item} />;
+    return active && originalUrl && !originalUrl.includes("/thumbs/") ? (
+      <VideoPage uri={originalUrl} />
+    ) : (
+      <ThumbPage item={item} />
+    );
   }
   return originalUrl ? (
     <ZoomableImage
@@ -342,6 +347,7 @@ export default function MediaViewer() {
     id: string;
     albumId?: string;
     localUri?: string;
+    assetId?: string;
     mediaType?: "photo" | "video";
     syncStatus?: string;
     takenAt?: string;
@@ -387,7 +393,7 @@ export default function MediaViewer() {
       return photos.map((p) => ({
         id: p.remoteId ?? p.key,
         key: p.key,
-        originalUrl: p.localUri ?? p.thumbUrl,
+        originalUrl: p.localUri ?? null,
         thumbUrl: p.thumbUrl ?? p.localUri ?? "",
         thumbhash: p.thumbhash || "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
         mediaType: p.mediaType,
@@ -402,6 +408,8 @@ export default function MediaViewer() {
         syncStatus: p.syncStatus,
         localUri: p.localUri,
         remoteId: p.remoteId,
+        assetId:
+          p.assetId ?? (p.key.startsWith("l-") || p.key.startsWith("q-") ? p.key.slice(2) : null),
       }));
     }
     if (params.albumId && albumDetailQuery.data?.items) {
@@ -411,6 +419,7 @@ export default function MediaViewer() {
         syncStatus: "SYNCED" as const,
         localUri: null,
         remoteId: it.id,
+        assetId: null,
       }));
     }
     return (timeline.data?.pages.flatMap((p) => p.items) ?? []).map((it) => ({
@@ -419,6 +428,7 @@ export default function MediaViewer() {
       syncStatus: "SYNCED" as const,
       localUri: null,
       remoteId: it.id,
+      assetId: null,
     }));
   }, [photos, params.albumId, albumDetailQuery.data, timeline.data]);
 
@@ -450,6 +460,23 @@ export default function MediaViewer() {
       ? items[activeIndex]
       : null;
   const activeId = activeItem?.id ?? id;
+
+  const activeRemoteId =
+    activeItem?.remoteId ??
+    (!activeId.startsWith("l-") && !activeId.startsWith("q-") ? activeId : null);
+
+  const activeAssetId =
+    activeItem?.assetId ??
+    params.assetId ??
+    (activeId.startsWith("l-") || activeId.startsWith("q-") ? activeId.slice(2) : null);
+
+  const hasLocal = Boolean(
+    activeAssetId ||
+      activeItem?.localUri ||
+      params.localUri ||
+      (activeRemoteId && hasLocalCopy(activeRemoteId)),
+  );
+  const isPureLocal = !activeRemoteId;
 
   const canGoPrev = isWeb && items.length > 1 && currentWebIndex > 0;
   const canGoNext = isWeb && items.length > 1 && currentWebIndex < items.length - 1;
@@ -570,7 +597,7 @@ export default function MediaViewer() {
     (activeItem
       ? {
           id: activeItem.id,
-          originalUrl: activeItem.thumbUrl,
+          originalUrl: activeItem.localUri || activeItem.originalUrl || activeItem.thumbUrl,
           thumbUrl: activeItem.thumbUrl,
           thumbhash: activeItem.thumbhash,
           mediaType: activeItem.mediaType,
@@ -601,11 +628,15 @@ export default function MediaViewer() {
     localMedia;
 
   const currentOriginalUrl =
-    activeItem?.localUri ||
-    activeItem?.originalUrl ||
     (isLocalItem ? localMedia?.originalUrl : undefined) ||
+    activeItem?.localUri ||
     detail.data?.originalUrl ||
-    d?.originalUrl;
+    (d?.originalUrl && !d.originalUrl.includes("/thumbs/") ? d.originalUrl : undefined) ||
+    (activeItem?.originalUrl && !activeItem.originalUrl.includes("/thumbs/")
+      ? activeItem.originalUrl
+      : undefined) ||
+    d?.thumbUrl ||
+    activeItem?.thumbUrl;
   const currentThumbUrl =
     activeItem?.thumbUrl ||
     activeItem?.localUri ||
@@ -615,10 +646,14 @@ export default function MediaViewer() {
   const currentThumbhash =
     activeItem?.thumbhash || (isLocalItem ? localMedia?.thumbhash : undefined) || d?.thumbhash;
   const currentMediaType =
-    activeItem?.mediaType ??
+    (detail.data?.mediaType as "photo" | "video" | undefined) ??
+    (activeItem?.mediaType as "photo" | "video" | undefined) ??
     (isLocalItem ? localMedia?.mediaType : undefined) ??
-    d?.mediaType ??
-    params.mediaType ??
+    (d?.mediaType as "photo" | "video" | undefined) ??
+    (params.mediaType as "photo" | "video" | undefined) ??
+    (params.durationMs ? "video" : undefined) ??
+    (activeItem?.durationMs ? "video" : undefined) ??
+    (detail.data?.durationMs ? "video" : undefined) ??
     "photo";
 
   const [captionInput, setCaptionInput] = useState("");
@@ -705,38 +740,86 @@ export default function MediaViewer() {
     }
   };
 
-  const onDeleteLocal = async () => {
-    const ok = await deleteLocalCopy(activeId);
-    if (ok) toast.success(t.viewer.deleteLocalDone);
-    else toast(t.viewer.deleteLocalNone);
-  };
-
   const onDeletePress = () => {
-    if (isLocalItem) {
-      Alert.alert(t.viewer.deleteTitle, "¿Deseas cerrar la visualización de este elemento local?", [
+    // Caso 1: Elemento puramente local (no respaldado aún en la nube)
+    if (isPureLocal) {
+      const targetAssetId = activeAssetId ?? activeId.replace(/^[lq]-/, "");
+      const doDeleteLocal = async () => {
+        try {
+          const ok = await deleteLocalAsset(targetAssetId);
+          if (ok) {
+            toast.success(t.viewer.deleteLocalDeviceDone);
+            router.back();
+          } else {
+            toast.error(t.viewer.deleteLocalDeviceError);
+          }
+        } catch {
+          toast.error(t.viewer.deleteLocalDeviceError);
+        }
+      };
+
+      if (Platform.OS === "web") {
+        if (window.confirm(t.viewer.deleteLocalConfirm)) {
+          void doDeleteLocal();
+        }
+        return;
+      }
+
+      Alert.alert(t.viewer.deleteTitle, t.viewer.deleteLocalConfirm, [
         { text: "Cancelar", style: "cancel" },
-        { text: "Cerrar", style: "destructive", onPress: () => router.back() },
+        {
+          text: t.viewer.deleteLocalAction,
+          style: "destructive",
+          onPress: () => void doDeleteLocal(),
+        },
       ]);
       return;
     }
-    // Web no tiene copia local que borrar: directo a la papelera (con deshacer).
+
+    // Caso 2: Web (sin cámara local que borrar; directo a papelera con deshacer)
     if (Platform.OS === "web") {
-      del.mutate(activeId);
+      if (activeRemoteId) {
+        if (activeAssetId) {
+          void deleteLocalAsset(activeAssetId).catch(() => {});
+        }
+        del.mutate(activeRemoteId);
+      }
       return;
     }
+
+    // Caso 3: Nativo con copia remota
     const buttons: AlertButton[] = [{ text: "Cancelar", style: "cancel" }];
-    if (hasLocalCopy(activeId)) {
-      buttons.push({ text: t.viewer.deleteLocal, onPress: () => void onDeleteLocal() });
+    if (hasLocal && activeAssetId) {
+      buttons.push({
+        text: t.viewer.deleteLocal,
+        onPress: async () => {
+          const ok = await deleteLocalAsset(activeAssetId);
+          if (ok) toast.success(t.viewer.deleteLocalDone);
+          else toast(t.viewer.deleteLocalNone);
+        },
+      });
     }
     buttons.push({
       text: t.viewer.moveToTrash,
       style: "destructive",
-      onPress: () => del.mutate(activeId),
+      onPress: async () => {
+        if (hasLocal && activeAssetId) {
+          await deleteLocalAsset(activeAssetId).catch(() => {});
+        }
+        if (activeRemoteId) {
+          del.mutate(activeRemoteId);
+        }
+      },
     });
-    Alert.alert(t.viewer.deleteTitle, undefined, buttons);
+
+    Alert.alert(
+      t.viewer.deleteTitle,
+      hasLocal ? t.viewer.deleteSyncedPrompt : t.viewer.moveToTrashConfirm,
+      buttons,
+    );
   };
 
-  const showSpinner = detail.isPending && !carousel && !isLocalItem;
+  const showSpinner = detail.isPending && !carousel && !isPureLocal;
   const onDismiss = () => router.back();
 
   const heartScale = useSharedValue(0);
@@ -877,7 +960,7 @@ export default function MediaViewer() {
 
             {/* Renderizado de video o imagen */}
             {currentMediaType === "video" ? (
-              currentOriginalUrl ? (
+              currentOriginalUrl && !currentOriginalUrl.includes("/thumbs/") ? (
                 <WebVideoPlayer uri={currentOriginalUrl} />
               ) : (
                 <View className="flex-1 w-full h-full items-center justify-center relative">
@@ -1306,7 +1389,14 @@ export default function MediaViewer() {
           onClose={() => setShareOpen(false)}
           media={{
             id: d.id,
-            uri: currentOriginalUrl || d.originalUrl,
+            uri:
+              (isLocalItem ? localMedia?.originalUrl : undefined) ||
+              activeItem?.localUri ||
+              detail.data?.originalUrl ||
+              (currentOriginalUrl && !currentOriginalUrl.includes("/thumbs/")
+                ? currentOriginalUrl
+                : undefined) ||
+              d.originalUrl,
             thumbUrl: currentThumbUrl || d.thumbUrl,
             thumbhash: currentThumbhash || d.thumbhash,
             mediaType: currentMediaType,

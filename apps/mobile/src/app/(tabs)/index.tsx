@@ -39,6 +39,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { downloadMany } from "../../lib/download-many";
 import { formatDuration } from "../../lib/format";
+import { deleteLocalAssets } from "../../lib/free-space";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { useSettings } from "../../lib/store";
@@ -235,9 +236,20 @@ export default function GalleryScreen() {
     [rows],
   );
   const geometry = useMemo(() => buildGridGeometry(rows, columns, cell), [rows, columns, cell]);
-  const remoteSel = useMemo(
-    () => photos.filter((p) => selected?.has(p.key) && p.remoteId),
+  const selectedPhotos = useMemo(
+    () => photos.filter((p) => selected?.has(p.key)),
     [photos, selected],
+  );
+  const remoteSel = useMemo(
+    () => selectedPhotos.filter((p) => Boolean(p.remoteId)),
+    [selectedPhotos],
+  );
+  const localSel = useMemo(
+    () =>
+      selectedPhotos.filter((p) =>
+        Boolean(p.assetId || p.key.startsWith("l-") || p.key.startsWith("q-")),
+      ),
+    [selectedPhotos],
   );
 
   // ---- gestos ----
@@ -310,6 +322,11 @@ export default function GalleryScreen() {
             id: photo.remoteId ?? photo.key,
             albumId: albumFilter?.type === "remote" ? albumFilter.albumId : undefined,
             localUri: photo.localUri ?? "",
+            assetId:
+              photo.assetId ??
+              (photo.key.startsWith("l-") || photo.key.startsWith("q-")
+                ? photo.key.slice(2)
+                : undefined),
             mediaType: photo.mediaType,
             syncStatus: photo.syncStatus,
             takenAt: String(photo.takenAt),
@@ -321,7 +338,7 @@ export default function GalleryScreen() {
         });
       }
     },
-    [togglePhoto],
+    [togglePhoto, albumFilter],
   );
 
   // ---- acciones de la barra contextual ----
@@ -341,15 +358,103 @@ export default function GalleryScreen() {
   };
 
   const deleteSelected = () => {
-    if (busyAction || !remoteSel.length) return;
-    const n = remoteSel.length;
-    const ids = remoteSel.map((p) => p.remoteId as string);
-    const run = async () => {
+    if (busyAction || !selectedPhotos.length) return;
+
+    const localAssetIds = Array.from(
+      new Set(
+        localSel
+          .map(
+            (p) =>
+              p.assetId ??
+              (p.key.startsWith("l-") || p.key.startsWith("q-") ? p.key.slice(2) : null),
+          )
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const remoteIds = Array.from(
+      new Set(remoteSel.map((p) => p.remoteId).filter((id): id is string => Boolean(id))),
+    );
+
+    // Caso 1: Solo locales (ninguno tiene remoteId)
+    if (remoteIds.length === 0) {
+      const n = localAssetIds.length || selectedPhotos.length;
+      const runDeleteLocal = async () => {
+        setBusyAction(true);
+        try {
+          const count = await deleteLocalAssets(localAssetIds);
+          if (count > 0) {
+            toast.success(t.gallery.deletedLocalN(count));
+          } else {
+            toast.error(t.viewer.deleteLocalDeviceError);
+          }
+          setSelected(null);
+          void refreshLocal();
+        } catch {
+          toast.error(t.auth.genericError);
+        } finally {
+          setBusyAction(false);
+        }
+      };
+
+      if (isWeb) {
+        if (window.confirm(t.gallery.deleteLocalConfirm(n))) void runDeleteLocal();
+        return;
+      }
+
+      Alert.alert(t.gallery.deleteAction, t.gallery.deleteLocalConfirm(n), [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: t.gallery.deleteLocalAction,
+          style: "destructive",
+          onPress: () => void runDeleteLocal(),
+        },
+      ]);
+      return;
+    }
+
+    // Caso 2: Solo remotos (ninguno tiene copia local)
+    if (localAssetIds.length === 0) {
+      const n = remoteIds.length;
+      const runDeleteRemote = async () => {
+        setBusyAction(true);
+        try {
+          await Promise.all(remoteIds.map((id) => api.deleteMedia(id)));
+          toast.success(t.gallery.deletedN(n));
+          setSelected(null);
+          void query.refetch();
+        } catch {
+          toast.error(t.auth.genericError);
+        } finally {
+          setBusyAction(false);
+        }
+      };
+
+      if (isWeb) {
+        if (window.confirm(t.gallery.deleteConfirm(n))) void runDeleteRemote();
+        return;
+      }
+
+      Alert.alert(t.gallery.deleteAction, t.gallery.deleteConfirm(n), [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: t.gallery.deleteAction,
+          style: "destructive",
+          onPress: () => void runDeleteRemote(),
+        },
+      ]);
+      return;
+    }
+
+    // Caso 3: Mixto o elementos sincronizados (tienen tanto remoto como local)
+    const runDeleteLocalOnly = async () => {
       setBusyAction(true);
       try {
-        await Promise.all(ids.map((id) => api.deleteMedia(id)));
-        toast.success(t.gallery.deletedN(n));
+        const count = await deleteLocalAssets(localAssetIds);
+        if (count > 0) {
+          toast.success(t.gallery.deletedLocalN(count));
+        }
         setSelected(null);
+        void refreshLocal();
         void query.refetch();
       } catch {
         toast.error(t.auth.genericError);
@@ -357,13 +462,38 @@ export default function GalleryScreen() {
         setBusyAction(false);
       }
     };
+
+    const runDeleteAll = async () => {
+      setBusyAction(true);
+      try {
+        if (localAssetIds.length > 0) {
+          await deleteLocalAssets(localAssetIds).catch(() => {});
+        }
+        if (remoteIds.length > 0) {
+          await Promise.all(remoteIds.map((id) => api.deleteMedia(id)));
+        }
+        toast.success(t.gallery.deletedN(selectedPhotos.length));
+        setSelected(null);
+        void refreshLocal();
+        void query.refetch();
+      } catch {
+        toast.error(t.auth.genericError);
+      } finally {
+        setBusyAction(false);
+      }
+    };
+
     if (isWeb) {
-      if (window.confirm(t.gallery.deleteConfirm(n))) void run();
+      if (window.confirm(t.gallery.deleteConfirm(selectedPhotos.length))) {
+        void runDeleteAll();
+      }
       return;
     }
-    Alert.alert(t.gallery.deleteAction, t.gallery.deleteConfirm(n), [
+
+    Alert.alert(t.gallery.deleteAction, t.gallery.deleteMixedConfirm(selectedPhotos.length), [
       { text: "Cancelar", style: "cancel" },
-      { text: t.gallery.deleteAction, style: "destructive", onPress: () => void run() },
+      { text: t.gallery.deleteLocalAction, onPress: () => void runDeleteLocalOnly() },
+      { text: t.gallery.deleteAction, style: "destructive", onPress: () => void runDeleteAll() },
     ]);
   };
 
@@ -403,9 +533,9 @@ export default function GalleryScreen() {
             onPress={deleteSelected}
             accessibilityLabel={t.gallery.deleteAction}
             hitSlop={8}
-            disabled={!remoteSel.length || busyAction}
+            disabled={!selected?.size || busyAction}
           >
-            <Trash2 size={20} color={remoteSel.length ? "#dc2626" : "#d4d4d4"} />
+            <Trash2 size={20} color={selected?.size ? "#dc2626" : "#d4d4d4"} />
           </Pressable>
         </View>
       ) : (

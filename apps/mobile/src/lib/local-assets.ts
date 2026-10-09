@@ -25,7 +25,16 @@ export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
     const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
     if (!perm.granted) return [];
     const albums = await MediaLibrary.getAlbumsAsync({ includeSmartAlbums: true });
-    const valid = albums.filter((alb) => alb.assetCount > 0);
+    // En iOS, el smart album "Recents"/"Recientes" contiene toda la biblioteca del dispositivo
+    // (el carrete completo), lo cual duplica la opción general de todos los álbumes y confunde la selección.
+    const valid = albums.filter(
+      (alb) =>
+        alb.assetCount > 0 &&
+        !(
+          alb.type === "smartAlbum" &&
+          (alb.title?.toLowerCase() === "recents" || alb.title?.toLowerCase() === "recientes")
+        ),
+    );
     const withCovers = await Promise.all(
       valid.map(async (alb) => {
         let coverUri: string | null = null;

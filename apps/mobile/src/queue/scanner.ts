@@ -2,7 +2,15 @@ import { ALLOWED_EXTENSIONS } from "@photos/shared";
 import * as MediaLibrary from "expo-media-library/legacy";
 import { useLibraryEvents } from "../lib/events";
 import { useSettings } from "../lib/store";
-import { type EnqueueInput, enqueueAssetsBatch, getLastScanTs, setLastScanTs } from "./db";
+import {
+  clearQueue,
+  type EnqueueInput,
+  enqueueAssetsBatch,
+  getLastScanTs,
+  pruneQueueExcept,
+  setLastScanTs,
+} from "./db";
+import { cancelQueue } from "./processor";
 import type { ScanOptions, ScanResult } from "./types";
 
 export type { ScanOptions, ScanResult } from "./types";
@@ -33,8 +41,13 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
   const includeVideos = settings.includeVideos;
   const syncedAlbumIds = settings.syncedAlbumIds ?? null;
 
-  // Si syncedAlbumIds es un arreglo vacío, no hay álbumes seleccionados para sincronizar
+  // Si syncedAlbumIds es un arreglo vacío, no hay álbumes seleccionados para sincronizar:
+  // vaciamos la cola y cancelamos subidas en curso.
   if (Array.isArray(syncedAlbumIds) && syncedAlbumIds.length === 0) {
+    cancelQueue();
+    await clearQueue();
+    setLastScanTs(Date.now());
+    useLibraryEvents.getState().emit();
     return { added: 0, skipped: 0 };
   }
 
@@ -43,6 +56,7 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
 
   let added = 0;
   let skipped = 0;
+  const allowedAssetIds = new Set<string>();
 
   async function scanAlbum(albumId?: string) {
     let after: string | undefined;
@@ -59,6 +73,9 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
       });
       const batch: EnqueueInput[] = [];
       for (const a of page.assets) {
+        if (albumId !== undefined) {
+          allowedAssetIds.add(a.id);
+        }
         const ext = (a.filename?.split(".").pop() ?? "").toLowerCase();
         if (ext && !(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
           skipped++;
@@ -101,6 +118,11 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
   } else {
     for (const albId of syncedAlbumIds) {
       await scanAlbum(albId);
+    }
+    // Si fue un escaneo forzado o completo, depurar los elementos de la cola que no pertenecen
+    // a los álbumes seleccionados
+    if (opts.forceScan || lastScan === 0) {
+      await pruneQueueExcept(allowedAssetIds);
     }
   }
 

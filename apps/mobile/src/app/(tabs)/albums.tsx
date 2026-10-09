@@ -30,6 +30,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { type DeviceAlbum, listLocalAlbums } from "../../lib/local-assets";
 import { useSettings } from "../../lib/store";
+import { cancelQueue } from "../../queue/processor";
 import { scanLibrary } from "../../queue/scanner";
 import { Button } from "../../ui";
 
@@ -98,10 +99,11 @@ export default function AlbumsScreen() {
     toggleAlbumSync(album.id, allLocalIds);
     if (!currentlySynced) {
       toast.success(`"${album.title}" incluido en el carrusel y respaldo`);
-      void scanLibrary({ forceScan: true });
     } else {
       toast.info(`"${album.title}" excluido del carrusel y respaldo`);
     }
+    cancelQueue();
+    void scanLibrary({ forceScan: true });
   };
 
   const handleSelectAll = () => {
@@ -113,6 +115,8 @@ export default function AlbumsScreen() {
   const handleDeselectAll = () => {
     syncNoAlbums();
     toast.info("Todos los álbumes excluidos del carrusel y respaldo");
+    cancelQueue();
+    void scanLibrary({ forceScan: true });
   };
 
   const handleOpenLocalAlbum = (album: DeviceAlbum) => {

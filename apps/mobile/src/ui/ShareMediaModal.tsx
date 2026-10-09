@@ -14,6 +14,7 @@ import { useState } from "react";
 import { Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { api } from "../api/client";
 import { t } from "../i18n/es";
 import {
   optimizePhotoForShare,
@@ -50,7 +51,11 @@ type PresetCard = {
 };
 
 export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProps) {
-  const isVideo = media.mediaType === "video";
+  const isVideo =
+    media.mediaType === "video" ||
+    Boolean(media.durationMs && media.durationMs > 0) ||
+    /\.(mp4|mov|m4v)(\?.*)?$/i.test(media.uri) ||
+    media.uri.includes("video/mp4");
   const [selectedPreset, setSelectedPreset] = useState<SharePreset>("stories");
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -113,15 +118,37 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
         },
       ];
 
+  const resolveMediaSource = async (): Promise<{ uri: string; filename: string }> => {
+    // Si es un elemento remoto con ID de servidor (no local), pedir la URL de descarga prefirmada
+    if (!media.isLocal && media.id && !media.id.startsWith("l-") && !media.id.startsWith("q-")) {
+      try {
+        const dl = await api.downloadMedia(media.id);
+        if (dl?.url) {
+          return { uri: dl.url, filename: dl.filename };
+        }
+      } catch (err) {
+        console.warn("api.downloadMedia no disponible, usando media.uri:", err);
+      }
+    }
+    const ext = isVideo ? "mp4" : "jpg";
+    const prefix = isVideo ? "video_original" : "original";
+    return {
+      uri: media.uri,
+      filename: `${prefix}_${media.id.slice(0, 8)}.${ext}`,
+    };
+  };
+
   const handleSaveToGallery = async () => {
     setProcessing(true);
     setProgress(null);
     try {
+      const source = await resolveMediaSource();
+
       if (isVideo) {
         if (selectedPreset === "original") {
           await saveOptimizedVideoToGallery(
-            media.uri,
-            `video_original_${media.id.slice(0, 8)}.mp4`,
+            source.uri,
+            source.filename || `video_original_${media.id.slice(0, 8)}.mp4`,
           );
           toast.success(t.shareModal.savedToGallery);
           onClose();
@@ -130,7 +157,7 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
 
         setProgress(0);
         const optimized = await optimizeVideoForShare({
-          uri: media.uri,
+          uri: source.uri,
           preset: selectedPreset === "whatsapp_hd" ? "whatsapp_hd" : "stories",
           onProgress: (p) => setProgress(Math.round(p * 100)),
         });
@@ -142,7 +169,10 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
       }
 
       if (selectedPreset === "original") {
-        await saveOptimizedToGallery(media.uri, `original_${media.id.slice(0, 8)}.jpg`);
+        await saveOptimizedToGallery(
+          source.uri,
+          source.filename || `original_${media.id.slice(0, 8)}.jpg`,
+        );
         toast.success(t.shareModal.savedToGallery);
         onClose();
         return;
@@ -150,7 +180,7 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
 
       toast.info(t.shareModal.sharing);
       const optimized = await optimizePhotoForShare({
-        uri: media.uri,
+        uri: source.uri,
         width: media.width,
         height: media.height,
         preset: selectedPreset,
@@ -172,16 +202,18 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
     setProcessing(true);
     setProgress(null);
     try {
+      const source = await resolveMediaSource();
+
       if (isVideo) {
         if (selectedPreset === "original") {
-          await shareOptimizedMedia(media.uri, "Video original", "video/mp4");
+          await shareOptimizedMedia(source.uri, "Video original", "video/mp4");
           onClose();
           return;
         }
 
         setProgress(0);
         const optimized = await optimizeVideoForShare({
-          uri: media.uri,
+          uri: source.uri,
           preset: selectedPreset === "whatsapp_hd" ? "whatsapp_hd" : "stories",
           onProgress: (p) => setProgress(Math.round(p * 100)),
         });
@@ -197,14 +229,14 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
       }
 
       if (selectedPreset === "original") {
-        await shareOptimizedMedia(media.uri, "Foto original", "image/jpeg");
+        await shareOptimizedMedia(source.uri, "Foto original", "image/jpeg");
         onClose();
         return;
       }
 
       toast.info(t.shareModal.sharing);
       const optimized = await optimizePhotoForShare({
-        uri: media.uri,
+        uri: source.uri,
         width: media.width,
         height: media.height,
         preset: selectedPreset,

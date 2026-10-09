@@ -453,6 +453,42 @@ describe("contexto y epoch", () => {
   });
 });
 
+describe("pruneQueueExcept y clearQueue (web)", () => {
+  it("pruneQueueExcept elimina filas que no están en el conjunto permitido", async () => {
+    await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
+    await db.enqueueAsset({ id: "b", uri: "b", mediaType: "photo", creationTime: 200 });
+    expect(db.getQueueStats().total).toBe(2);
+
+    await db.pruneQueueExcept(new Set(["a"]));
+    expect(db.getQueueStats().total).toBe(1);
+    expect(db.getNextPending()?.asset_id).toBe("a");
+  });
+
+  it("clearQueue vacía completamente la cola en memoria y en IndexedDB", async () => {
+    await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
+    expect(db.getQueueStats().total).toBe(1);
+
+    await db.clearQueue();
+    expect(db.getQueueStats().total).toBe(0);
+    expect(db.getNextPending()).toBeNull();
+  });
+});
+
+describe("removeQueueItems (web)", () => {
+  it("elimina items de la memoria y de IndexedDB (items y files)", async () => {
+    await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
+    await db.enqueueAsset({ id: "b", uri: "b", mediaType: "photo", creationTime: 200 });
+    expect(db.getQueueStats().total).toBe(2);
+
+    await db.removeQueueItems(["a"]);
+    expect(db.getQueueStats().total).toBe(1);
+    expect(db.getNextPending()?.asset_id).toBe("b");
+
+    const items = await store.loadItems("u1");
+    expect(items.map((i) => i.asset_id)).toEqual(["b"]);
+  });
+});
+
 describe("getQueueDb", () => {
   it("lanza porque SQLite no está disponible en web", () => {
     expect(() => db.getQueueDb()).toThrow("SQLite no está disponible en web.");

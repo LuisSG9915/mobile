@@ -14,15 +14,21 @@ export type OptimizedVideoResult = {
 };
 
 /**
- * En entorno Web devuelve el archivo original o una copia para descarga.
+ * En entorno Web devuelve el archivo original preparado para descarga con el nombre del preset.
  */
 export async function optimizeVideoForShare(
   options: OptimizeVideoOptions,
 ): Promise<OptimizedVideoResult> {
-  const { uri } = options;
+  const { uri, preset } = options;
+  const prefix =
+    preset === "whatsapp_hd"
+      ? "whatsapp_720p"
+      : preset === "stories"
+        ? "historia_1080p"
+        : "video_original";
   return {
     uri,
-    filename: `video_opt_${Date.now()}.mp4`,
+    filename: `${prefix}_${Date.now()}.mp4`,
   };
 }
 

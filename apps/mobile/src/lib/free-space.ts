@@ -34,6 +34,31 @@ export function hasLocalCopy(remoteId: string): boolean {
 }
 
 /**
+ * Elimina uno o más assets locales del dispositivo (por su asset_id de MediaLibrary).
+ * También purga los items de la cola si estaban registrados.
+ * Devuelve cuántos assets se eliminaron (0 si el usuario cancela o falla).
+ */
+export async function deleteLocalAssets(assetIds: string[]): Promise<number> {
+  const uniqueIds = Array.from(new Set(assetIds.filter(Boolean)));
+  if (!uniqueIds.length) return 0;
+  const ok = await MediaLibrary.deleteAssetsAsync(uniqueIds);
+  if (!ok) return 0;
+  await removeQueueItems(uniqueIds);
+  useLibraryEvents.getState().emit();
+  useQueueEvents.getState().emit();
+  return uniqueIds.length;
+}
+
+/**
+ * Elimina un asset local específico del dispositivo por su asset_id.
+ * Devuelve true si se eliminó con éxito, false en caso contrario.
+ */
+export async function deleteLocalAsset(assetId: string): Promise<boolean> {
+  const count = await deleteLocalAssets([assetId]);
+  return count > 0;
+}
+
+/**
  * Elimina solo la copia local de un elemento ya respaldado; la remota se
  * conserva y la galería lo refleja como REMOTE_ONLY. Devuelve false si no
  * había copia local o el usuario canceló el diálogo del sistema.
@@ -43,12 +68,7 @@ export async function deleteLocalCopy(remoteId: string): Promise<boolean> {
     (i) => i.remote_id === remoteId && (i.state === "done" || i.state === "duplicate"),
   );
   if (!item) return false;
-  const ok = await MediaLibrary.deleteAssetsAsync([item.asset_id]);
-  if (!ok) return false;
-  await removeQueueItems([item.asset_id]);
-  useLibraryEvents.getState().emit();
-  useQueueEvents.getState().emit();
-  return true;
+  return deleteLocalAsset(item.asset_id);
 }
 
 /**
@@ -59,12 +79,5 @@ export async function deleteLocalCopy(remoteId: string): Promise<boolean> {
 export async function freeSyncedSpace(): Promise<number> {
   const { assetIds } = getSyncedLocal();
   if (!assetIds.length) return 0;
-  const ok = await MediaLibrary.deleteAssetsAsync(assetIds);
-  if (!ok) return 0;
-  await removeQueueItems(assetIds);
-  // La biblioteca cambió (assets borrados): re-listar la galería y refrescar
-  // las estadísticas de la pestaña Respaldo.
-  useLibraryEvents.getState().emit();
-  useQueueEvents.getState().emit();
-  return assetIds.length;
+  return deleteLocalAssets(assetIds);
 }

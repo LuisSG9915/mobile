@@ -19,6 +19,7 @@ export type OptimizedVideoResult = {
 
 /**
  * Optimiza un video usando aceleración por hardware del teléfono (MediaCodec / VideoToolbox).
+ * Si la compresión falla, realiza fallback automático a la fuente para no bloquear al usuario.
  */
 export async function optimizeVideoForShare(
   options: OptimizeVideoOptions,
@@ -57,23 +58,31 @@ export async function optimizeVideoForShare(
       filenamePrefix = "whatsapp_720p";
     }
 
-    const compressedUri = await Video.compress(
-      localSourceUri,
-      {
-        compressionMethod: "manual",
-        maxSize,
-        bitrate,
-        minimumFileSizeForCompress: 2,
-      },
-      (progress) => {
-        onProgress?.(progress);
-      },
-    );
+    try {
+      const compressedUri = await Video.compress(
+        localSourceUri,
+        {
+          compressionMethod: "manual",
+          maxSize,
+          bitrate,
+          minimumFileSizeForCompress: 2,
+        },
+        (progress) => {
+          onProgress?.(progress);
+        },
+      );
 
-    return {
-      uri: compressedUri,
-      filename: `${filenamePrefix}_${Date.now()}.mp4`,
-    };
+      return {
+        uri: compressedUri,
+        filename: `${filenamePrefix}_${Date.now()}.mp4`,
+      };
+    } catch (compressErr) {
+      console.warn("Fallo al comprimir video, usando archivo fuente:", compressErr);
+      return {
+        uri: localSourceUri,
+        filename: `${filenamePrefix}_${Date.now()}.mp4`,
+      };
+    }
   } finally {
     if (tempDownloadUri && Platform.OS !== "web") {
       await FileSystem.deleteAsync(tempDownloadUri, { idempotent: true }).catch(() => {});
@@ -100,6 +109,13 @@ export async function saveOptimizedVideoToGallery(uri: string, filename: string)
   }
 
   try {
+    const perm = await MediaLibrary.getPermissionsAsync();
+    if (!perm.granted) {
+      const requested = await MediaLibrary.requestPermissionsAsync();
+      if (!requested.granted) {
+        throw new Error("Permiso denegado para guardar en la galería");
+      }
+    }
     await MediaLibrary.saveToLibraryAsync(localUri);
   } finally {
     if (tempUri) {

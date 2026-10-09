@@ -117,6 +117,13 @@ export async function saveOptimizedToGallery(uri: string, filename: string): Pro
   }
 
   try {
+    const perm = await MediaLibrary.getPermissionsAsync();
+    if (!perm.granted) {
+      const requested = await MediaLibrary.requestPermissionsAsync();
+      if (!requested.granted) {
+        throw new Error("Permiso denegado para guardar en la galería");
+      }
+    }
     await MediaLibrary.saveToLibraryAsync(localUri);
   } finally {
     if (tempUri) {
@@ -131,14 +138,17 @@ export async function saveOptimizedToGallery(uri: string, filename: string): Pro
 export async function shareOptimizedMedia(
   uri: string,
   title: string,
-  message?: string,
+  messageOrMime?: string,
 ): Promise<void> {
   if (Platform.OS === "web") {
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({
           title,
-          text: message || title,
+          text:
+            messageOrMime?.startsWith("video/") || messageOrMime?.startsWith("image/")
+              ? title
+              : messageOrMime || title,
           url: uri.startsWith("http") ? uri : undefined,
         });
         return;
@@ -157,7 +167,10 @@ export async function shareOptimizedMedia(
   let tempUri: string | null = null;
 
   if (uri.startsWith("http://") || uri.startsWith("https://")) {
-    const isVideo = uri.includes(".mp4");
+    const isVideo =
+      messageOrMime === "video/mp4" ||
+      uri.toLowerCase().includes(".mp4") ||
+      uri.toLowerCase().includes(".mov");
     const ext = isVideo ? "mp4" : "jpg";
     tempUri = `${FileSystem.cacheDirectory}share_stream_${Date.now()}.${ext}`;
     const dl = await FileSystem.downloadAsync(uri, tempUri);
@@ -167,7 +180,8 @@ export async function shareOptimizedMedia(
   try {
     const isAvailable = await Sharing.isAvailableAsync();
     if (isAvailable) {
-      const isVideo = localUri.endsWith(".mp4");
+      const isVideo =
+        localUri.endsWith(".mp4") || localUri.endsWith(".mov") || messageOrMime === "video/mp4";
       await Sharing.shareAsync(localUri, {
         dialogTitle: title,
         mimeType: isVideo ? "video/mp4" : "image/jpeg",

@@ -49,7 +49,17 @@ function MemoryModal({ group, onClose }: MemoryModalProps) {
             <Pressable
               onPress={() => {
                 onClose();
-                router.push(`/media/${item.id}`);
+                router.push({
+                  pathname: "/media/[id]",
+                  params: {
+                    id: item.id,
+                    mediaType: item.mediaType,
+                    durationMs: item.durationMs != null ? String(item.durationMs) : "",
+                    width: String(item.width),
+                    height: String(item.height),
+                    thumbhash: item.thumbhash,
+                  },
+                });
               }}
               style={{ flex: 1 / 3, aspectRatio: 1, padding: 2 }}
             >

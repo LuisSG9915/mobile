@@ -297,6 +297,21 @@ export async function deleteFile(userId: string, assetId: string): Promise<void>
   });
 }
 
+/** Borra múltiples items y sus archivos asociados en UNA transacción (items+files+accounts). */
+export async function deleteItems(userId: string, assetIds: string[]): Promise<void> {
+  if (!assetIds.length) return;
+  await inWriteTx(["items", "files", "accounts"], async (tx) => {
+    const ctx = requireContext(userId);
+    await checkAccountEpoch(tx, ctx);
+    const itemsStore = tx.objectStore("items");
+    const filesStore = tx.objectStore("files");
+    for (const assetId of assetIds) {
+      itemsStore.delete([userId, assetId]);
+      filesStore.delete([userId, assetId]);
+    }
+  });
+}
+
 /**
  * Borra items, files y la cuenta de un usuario en UNA transacción. No valida
  * contexto: sirve para limpiar restos de cualquier usuario (logout, etc.).

@@ -129,13 +129,15 @@ export default function MapScreen() {
         // Envolver longitud (X) y acotar latitud (Y)
         const wrappedTx = ((tx % maxCoord) + maxCoord) % maxCoord;
         if (ty >= 0 && ty < maxCoord) {
+          const subdomains = ["a", "b", "c", "d"];
+          const s = subdomains[Math.abs(wrappedTx + ty) % 4];
           result.push({
             key: `${zoom}-${tx}-${ty}`,
             tx: wrappedTx,
             ty,
             left: tx * TILE_SIZE - (centerPx.x - width / 2),
             top: ty * TILE_SIZE - (centerPx.y - height / 2),
-            url: `https://tile.openstreetmap.org/${zoom}/${wrappedTx}/${ty}.png`,
+            url: `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${wrappedTx}/${ty}.png`,
           });
         }
       }
@@ -339,6 +341,12 @@ export default function MapScreen() {
               />
             </View>
           ) : null}
+          {/* Atribución de mapas */}
+          <View className="absolute bottom-2 left-3 bg-white/70 dark:bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm pointer-events-none">
+            <Text className="text-[9px] text-neutral-600 dark:text-neutral-400">
+              © CARTO · © OpenStreetMap
+            </Text>
+          </View>
         </View>
       </GestureDetector>
 
@@ -346,7 +354,16 @@ export default function MapScreen() {
       {selectedPin ? (
         <View className="absolute bottom-6 left-4 right-4 z-30 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md rounded-3xl p-3.5 shadow-2xl border border-neutral-200 dark:border-neutral-800 flex-row items-center gap-3">
           <Pressable
-            onPress={() => router.push({ pathname: "/media/[id]", params: { id: selectedPin.id } })}
+            onPress={() =>
+              router.push({
+                pathname: "/media/[id]",
+                params: {
+                  id: selectedPin.id,
+                  mediaType: selectedPin.mediaType,
+                  thumbhash: selectedPin.thumbhash,
+                },
+              })
+            }
             className="w-20 h-20 rounded-2xl overflow-hidden bg-neutral-200 dark:bg-neutral-800"
           >
             <Image

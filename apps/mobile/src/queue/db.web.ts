@@ -436,7 +436,44 @@ export async function removeQueueItems(assetIds: string[]): Promise<void> {
   await mutation(async (c) => {
     for (const id of assetIds) {
       queue.delete(id);
-      await store.deleteFile(c.userId, id).catch(() => {});
+    }
+    await store.deleteItems(c.userId, assetIds).catch(() => {});
+  });
+}
+
+/**
+ * Poda los elementos de la cola que no pertenezcan al conjunto de asset_ids permitidos (paridad con db.ts).
+ */
+export async function pruneQueueExcept(allowedAssetIds: Set<string>): Promise<void> {
+  const ctx = store.getActiveContext();
+  if (!ctx) return;
+  await mutation(async (c) => {
+    const toDelete: string[] = [];
+    for (const id of queue.keys()) {
+      if (!allowedAssetIds.has(id)) {
+        toDelete.push(id);
+      }
+    }
+    for (const id of toDelete) {
+      queue.delete(id);
+    }
+    if (toDelete.length > 0) {
+      await store.deleteItems(c.userId, toDelete).catch(() => {});
+    }
+  });
+}
+
+/**
+ * Elimina todos los elementos de la cola para el usuario activo (paridad con db.ts).
+ */
+export async function clearQueue(): Promise<void> {
+  const ctx = store.getActiveContext();
+  if (!ctx) return;
+  await mutation(async (c) => {
+    const allIds = [...queue.keys()];
+    queue.clear();
+    if (allIds.length > 0) {
+      await store.deleteItems(c.userId, allIds).catch(() => {});
     }
   });
 }

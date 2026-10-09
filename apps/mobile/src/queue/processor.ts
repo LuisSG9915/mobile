@@ -258,6 +258,9 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
       const net = await canUploadNow();
       if (!net.ok) break;
 
+      const synced = useSettings.getState().syncedAlbumIds;
+      if (Array.isArray(synced) && synced.length === 0) break;
+
       const item = getNextPending();
       if (!item) break;
 
