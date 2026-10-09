@@ -18,6 +18,7 @@ export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
 export async function listLocalAssets(
   _limit = 2000,
   _albumId?: string | null,
+  _syncedAlbumIds?: string[] | null,
 ): Promise<LocalAsset[]> {
   return [];
 }

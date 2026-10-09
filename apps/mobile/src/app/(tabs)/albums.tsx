@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import {
   Cloud,
   CloudOff,
+  Flag,
   Folder,
   FolderPlus,
   Plus,
@@ -92,28 +93,26 @@ export default function AlbumsScreen() {
     return localAlbums.filter((a) => syncedAlbumIds.includes(a.id)).length;
   }, [localAlbums, syncedAlbumIds]);
 
-  const allAreSynced = localAlbums.length > 0 && syncedCount === localAlbums.length;
-
   const handleToggleSync = (album: DeviceAlbum) => {
     const currentlySynced = isAlbumSynced(album.id);
     toggleAlbumSync(album.id, allLocalIds);
     if (!currentlySynced) {
-      toast.success(t.albums.syncEnabledToast(album.title));
+      toast.success(`"${album.title}" incluido en el carrusel y respaldo`);
       void scanLibrary({ forceScan: true });
     } else {
-      toast.info(t.albums.syncDisabledToast(album.title));
+      toast.info(`"${album.title}" excluido del carrusel y respaldo`);
     }
   };
 
-  const handleToggleAllSync = () => {
-    if (allAreSynced) {
-      syncNoAlbums();
-      toast.info(t.albums.syncNoneAction);
-    } else {
-      syncAllAlbums();
-      toast.success(t.albums.syncAllAction);
-      void scanLibrary({ forceScan: true });
-    }
+  const handleSelectAll = () => {
+    syncAllAlbums();
+    toast.success("Todos los álbumes incluidos en el carrusel y respaldo");
+    void scanLibrary({ forceScan: true });
+  };
+
+  const handleDeselectAll = () => {
+    syncNoAlbums();
+    toast.info("Todos los álbumes excluidos del carrusel y respaldo");
   };
 
   const handleOpenLocalAlbum = (album: DeviceAlbum) => {
@@ -335,23 +334,34 @@ export default function AlbumsScreen() {
               </View>
 
               {!isWeb && localAlbums.length > 0 ? (
-                <Pressable
-                  onPress={handleToggleAllSync}
-                  className="px-2.5 py-1 rounded-lg bg-neutral-200 dark:bg-neutral-800"
-                  accessibilityRole="button"
-                >
-                  <Text className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {allAreSynced ? t.albums.syncNoneAction : t.albums.syncAllAction}
-                  </Text>
-                </Pressable>
+                <View className="flex-row items-center gap-2">
+                  <Pressable
+                    onPress={handleSelectAll}
+                    className="px-2.5 py-1 rounded-lg bg-neutral-200 dark:bg-neutral-800"
+                    accessibilityRole="button"
+                  >
+                    <Text className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                      Todos
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleDeselectAll}
+                    className="px-2.5 py-1 rounded-lg bg-neutral-200 dark:bg-neutral-800"
+                    accessibilityRole="button"
+                  >
+                    <Text className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                      Ninguno
+                    </Text>
+                  </Pressable>
+                </View>
               ) : null}
             </View>
 
-            {/* Subtítulo informativo del estado de sincronización */}
+            {/* Subtítulo informativo del estado de sincronización y carrusel */}
             {!isWeb && localAlbums.length > 0 ? (
               <Text className="text-xs text-neutral-500">
-                {t.albums.syncedAlbumsCount(syncedCount, localAlbums.length)} • Toca la nube para
-                activar o pausar el respaldo
+                🚩 {syncedCount} de {localAlbums.length} álbumes con flag • Solo estos álbumes se
+                muestran en el carrusel y se respaldan
               </Text>
             ) : null}
 
@@ -380,15 +390,19 @@ export default function AlbumsScreen() {
                     <Pressable
                       key={item.id}
                       style={{ width: itemWidth }}
-                      className="gap-2"
+                      className={`gap-2 ${synced ? "opacity-100" : "opacity-60"}`}
                       onPress={() => handleOpenLocalAlbum(item)}
                       accessibilityRole="button"
-                      accessibilityLabel={`${item.title}, ${synced ? "respaldándose" : "pausado"}`}
+                      accessibilityLabel={`${item.title}, ${synced ? "en carrusel y sincronizándose" : "excluido"}`}
                     >
                       {/* Portada del álbum local */}
                       <View
                         style={{ width: itemWidth, height: itemWidth }}
-                        className="rounded-2xl overflow-hidden bg-neutral-200 dark:bg-neutral-800 items-center justify-center border border-neutral-200/60 dark:border-neutral-800"
+                        className={`rounded-2xl overflow-hidden bg-neutral-200 dark:bg-neutral-800 items-center justify-center border ${
+                          synced
+                            ? "border-2 border-accent shadow-md shadow-accent/20"
+                            : "border-neutral-200/60 dark:border-neutral-800"
+                        }`}
                       >
                         {item.coverUri ? (
                           <Image
@@ -401,32 +415,30 @@ export default function AlbumsScreen() {
                           <Folder size={40} color="#a3a3a3" />
                         )}
 
-                        {/* Botón interactivo de Sincronización en la portada */}
+                        {/* Botón interactivo de Flag en la portada */}
                         <Pressable
                           onPress={(e) => {
                             e.stopPropagation();
                             handleToggleSync(item);
                           }}
-                          hitSlop={6}
+                          hitSlop={8}
                           accessibilityLabel={
-                            synced ? t.albums.syncStatusActive : t.albums.syncStatusPaused
+                            synced ? "En carrusel y sincronizando" : "No sincronizar"
                           }
                           className={`absolute top-2 right-2 rounded-full px-2.5 py-1 flex-row items-center gap-1 shadow-md ${
-                            synced ? "bg-emerald-600/90" : "bg-black/75"
+                            synced ? "bg-accent" : "bg-black/80"
                           }`}
                         >
                           {synced ? (
                             <>
-                              <Cloud size={12} color="#fff" />
-                              <Text className="text-white text-[10px] font-bold">
-                                {t.albums.syncStatusActive}
-                              </Text>
+                              <Flag size={11} color="#fff" fill="#fff" />
+                              <Text className="text-white text-[10px] font-bold">En carrusel</Text>
                             </>
                           ) : (
                             <>
-                              <CloudOff size={12} color="#fca5a5" />
+                              <CloudOff size={11} color="#fca5a5" />
                               <Text className="text-neutral-300 text-[10px] font-semibold">
-                                {t.albums.syncStatusPaused}
+                                Excluido
                               </Text>
                             </>
                           )}

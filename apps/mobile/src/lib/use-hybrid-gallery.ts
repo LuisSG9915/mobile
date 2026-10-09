@@ -12,6 +12,7 @@ import {
   mergeGallery,
 } from "./gallery";
 import { listLocalAssets } from "./local-assets";
+import { useSettings } from "./store";
 import { useTimeline } from "./timeline";
 
 export type AlbumFilter =
@@ -24,7 +25,8 @@ export type AlbumFilter =
  * la cola de respaldo y el timeline remoto paginado del API en una lista
  * única de HybridPhoto con su syncStatus resuelto.
  *
- * Permite filtrar por tipo de medio (filter) y por álbum específico (albumFilter).
+ * Permite filtrar por tipo de medio (filter) y por álbum específico (albumFilter),
+ * y respeta los álbumes seleccionados con flag (syncedAlbumIds).
  */
 export function useHybridGallery(
   filter: TimelineFilter = "all",
@@ -35,16 +37,17 @@ export function useHybridGallery(
   // biblioteca cambia de verdad (escaneo o "Liberar espacio"), no ante cada
   // tick de la cola — el listado completo es demasiado caro para cada badge.
   const libTick = useLibraryEvents((s) => s.tick);
+  const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
   const [localAssets, setLocalAssets] = useState<LocalAsset[]>([]);
 
   const refreshLocal = useCallback(async () => {
     try {
       const albId = albumFilter?.type === "local" ? albumFilter.albumId : undefined;
-      setLocalAssets(await listLocalAssets(2000, albId));
+      setLocalAssets(await listLocalAssets(2000, albId, syncedAlbumIds));
     } catch {
       // Sin permisos o error de MediaLibrary: galería solo remota/cola.
     }
-  }, [albumFilter]);
+  }, [albumFilter, syncedAlbumIds]);
 
   useEffect(() => {
     void refreshLocal();
@@ -74,12 +77,14 @@ export function useHybridGallery(
         ? []
         : albumFilter?.type === "local"
           ? localAssets.filter((a) => a.albumId === albumFilter.albumId)
-          : localAssets;
+          : syncedAlbumIds !== null
+            ? localAssets.filter((a) => a.albumId && syncedAlbumIds.includes(a.albumId))
+            : localAssets;
 
     const allQueue = getQueueItems();
     let effectiveQueue = allQueue;
 
-    if (albumFilter?.type === "local") {
+    if (albumFilter?.type === "local" || (albumFilter === null && syncedAlbumIds !== null)) {
       const localIdSet = new Set(effectiveLocal.map((a) => a.id));
       effectiveQueue = allQueue.filter((q) => localIdSet.has(q.asset_id));
     } else if (albumFilter?.type === "remote") {
@@ -110,7 +115,7 @@ export function useHybridGallery(
     if (filter === "screenshots") return merged.filter((p) => p.remote?.isScreenshot === true);
     if (filter === "documents") return merged.filter((p) => p.remote?.isDocument === true);
     return merged;
-  }, [query.data, remoteAlbumQuery.data, localAssets, tick, filter, albumFilter]);
+  }, [query.data, remoteAlbumQuery.data, localAssets, tick, filter, albumFilter, syncedAlbumIds]);
 
   const rows = useMemo<GalleryRow[]>(() => buildGalleryRows(photos), [photos]);
 

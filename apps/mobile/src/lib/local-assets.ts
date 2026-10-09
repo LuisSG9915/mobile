@@ -63,46 +63,70 @@ export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
 export async function listLocalAssets(
   limit = 2000,
   albumId?: string | null,
+  syncedAlbumIds?: string[] | null,
 ): Promise<LocalAsset[]> {
   // Sin granularPermissions, Android chequea TODAS las declaradas (ver scanner).
   const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
   if (!perm.granted) return [];
 
   const out: LocalAsset[] = [];
-  let after: string | undefined;
-  do {
-    const page = await MediaLibrary.getAssetsAsync({
-      first: Math.min(200, limit - out.length),
-      after,
-      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-      sortBy: [[MediaLibrary.SortBy.creationTime, false]],
-      ...(albumId ? { album: albumId } : {}),
-    });
-    for (const a of page.assets) {
-      // creationTime llega en unidad variable (s o ms) y 0 sin EXIF.
-      // Usar modificationTime si creationTime falta; de lo contrario fallback estable (nunca Date.now()).
-      const rawTime =
-        a.creationTime > 0
-          ? a.creationTime
-          : (a.modificationTime ?? 0) > 0
-            ? a.modificationTime
-            : 0;
-      const creationTime =
-        rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableTimestampFromId(a.id);
-      const isVideo = a.mediaType === MediaLibrary.MediaType.video;
-      out.push({
-        id: a.id,
-        uri: a.uri,
-        mediaType: isVideo ? "video" : "photo",
-        creationTime,
-        width: a.width,
-        height: a.height,
-        // MediaLibrary devuelve duración en segundos.
-        durationMs: isVideo ? Math.round(a.duration * 1000) : null,
-        albumId: a.albumId ?? albumId ?? null,
+
+  async function scanSource(sourceAlbumId?: string) {
+    let after: string | undefined;
+    do {
+      const page = await MediaLibrary.getAssetsAsync({
+        first: Math.min(200, limit - out.length),
+        after,
+        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+        ...(sourceAlbumId ? { album: sourceAlbumId } : {}),
       });
+      for (const a of page.assets) {
+        // creationTime llega en unidad variable (s o ms) y 0 sin EXIF.
+        // Usar modificationTime si creationTime falta; de lo contrario fallback estable (nunca Date.now()).
+        const rawTime =
+          a.creationTime > 0
+            ? a.creationTime
+            : (a.modificationTime ?? 0) > 0
+              ? a.modificationTime
+              : 0;
+        const creationTime =
+          rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableTimestampFromId(a.id);
+        const isVideo = a.mediaType === MediaLibrary.MediaType.video;
+        out.push({
+          id: a.id,
+          uri: a.uri,
+          mediaType: isVideo ? "video" : "photo",
+          creationTime,
+          width: a.width,
+          height: a.height,
+          // MediaLibrary devuelve duración en segundos.
+          durationMs: isVideo ? Math.round(a.duration * 1000) : null,
+          albumId: a.albumId ?? sourceAlbumId ?? null,
+        });
+        if (out.length >= limit) break;
+      }
+      after = page.hasNextPage && out.length < limit ? page.endCursor : undefined;
+    } while (after && out.length < limit);
+  }
+
+  if (albumId) {
+    // Consulta de un álbum específico solicitado
+    await scanSource(albumId);
+  } else if (syncedAlbumIds !== null && syncedAlbumIds !== undefined) {
+    // Solo consultar los álbumes seleccionados con flag
+    if (syncedAlbumIds.length === 0) {
+      return [];
     }
-    after = page.hasNextPage && out.length < limit ? page.endCursor : undefined;
-  } while (after);
+    for (const alb of syncedAlbumIds) {
+      if (out.length >= limit) break;
+      await scanSource(alb);
+    }
+    out.sort((a, b) => b.creationTime - a.creationTime);
+  } else {
+    // Consulta general de toda la biblioteca
+    await scanSource();
+  }
+
   return out;
 }

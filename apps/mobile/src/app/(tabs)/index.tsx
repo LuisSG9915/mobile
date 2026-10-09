@@ -6,6 +6,7 @@ import {
   Calendar,
   Check,
   Download,
+  Flag,
   Folder,
   FolderPlus,
   Heart,
@@ -162,6 +163,7 @@ export default function GalleryScreen() {
   const setTimelineFilter = useSettings((s) => s.setTimelineFilter);
   const albumFilter = useSettings((s) => s.albumFilter);
   const setAlbumFilter = useSettings((s) => s.setAlbumFilter);
+  const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
   const cell = width / columns;
   const [albumModalOpen, setAlbumModalOpen] = useState(false);
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
@@ -494,6 +496,27 @@ export default function GalleryScreen() {
             accessibilityLabel="Quitar filtro de álbum"
           >
             <X size={15} color="#4f46e5" />
+          </Pressable>
+        </View>
+      ) : syncedAlbumIds !== null ? (
+        <View className="flex-row items-center justify-between mx-4 mb-2 px-3 py-1.5 rounded-xl bg-neutral-200/60 dark:bg-neutral-800/60 border border-neutral-300/40 dark:border-neutral-700/40">
+          <View className="flex-row items-center gap-2 flex-1 mr-2">
+            <Flag size={13} color="#4f46e5" fill="#4f46e5" />
+            <Text
+              className="text-xs font-medium text-neutral-700 dark:text-neutral-300"
+              numberOfLines={1}
+            >
+              {syncedAlbumIds.length === 1
+                ? "Mostrando 1 álbum con flag"
+                : `Mostrando ${syncedAlbumIds.length} álbumes con flag`}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => router.push("/(tabs)/albums")}
+            hitSlop={8}
+            accessibilityLabel="Configurar álbumes"
+          >
+            <Text className="text-xs font-semibold text-accent">Configurar</Text>
           </Pressable>
         </View>
       ) : null}

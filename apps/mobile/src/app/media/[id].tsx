@@ -54,7 +54,7 @@ import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import { deleteLocalCopy, hasLocalCopy } from "../../lib/free-space";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
-import { useTimeline } from "../../lib/timeline";
+import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { Button, PhotoEditorModal, ShareMediaModal } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 
@@ -256,11 +256,31 @@ function WebImageViewer({
   );
 }
 
-function ThumbPage({ item }: { item: TimelineItem }) {
+export type CarouselItem = {
+  id: string;
+  key: string;
+  originalUrl?: string | null;
+  thumbUrl: string;
+  thumbhash: string;
+  mediaType: "photo" | "video";
+  width: number;
+  height: number;
+  durationMs?: number | null;
+  takenAt: number;
+  dateGroup?: string;
+  isFavorite: boolean;
+  isScreenshot?: boolean;
+  isDocument?: boolean;
+  syncStatus: string;
+  localUri?: string | null;
+  remoteId?: string | null;
+};
+
+function ThumbPage({ item }: { item: CarouselItem | TimelineItem }) {
   return (
     <Image
       source={{ uri: item.thumbUrl }}
-      placeholder={{ thumbhash: item.thumbhash }}
+      placeholder={item.thumbhash ? { thumbhash: item.thumbhash } : undefined}
       contentFit="contain"
       style={{ flex: 1, width: "100%", height: "100%" }}
       transition={150}
@@ -280,21 +300,24 @@ function MediaPage({
   onDismiss,
   onDoubleTap,
 }: {
-  item: TimelineItem;
+  item: CarouselItem;
   active: boolean;
   near: boolean;
   onDismiss?: () => void;
   onDoubleTap?: () => void;
 }) {
+  const remoteId =
+    item.remoteId ?? (!item.id.startsWith("l-") && !item.id.startsWith("q-") ? item.id : null);
   const detail = useQuery({
-    queryKey: ["media", item.id],
-    queryFn: () => api.mediaDetail(item.id),
-    enabled: near,
+    queryKey: ["media", remoteId],
+    queryFn: () => (remoteId ? api.mediaDetail(remoteId) : null),
+    enabled: Boolean(near && remoteId),
     // Las URLs prefirmadas duran PRESIGN_TTL_SECONDS (15 min); reutilizar un
     // minuto evita refetch al ir y volver entre fotos.
     staleTime: 60_000,
   });
-  const originalUrl = detail.data?.originalUrl;
+  const originalUrl =
+    item.localUri || detail.data?.originalUrl || item.originalUrl || item.thumbUrl;
 
   if (item.mediaType === "video") {
     // El player solo existe en la página activa (es pesado); las demás
@@ -340,7 +363,17 @@ export default function MediaViewer() {
 
   // El carrusel respeta el filtro activo de la galería (favoritos incluidos) o el álbum si viene de uno.
   const filter = useSettings((s) => s.timelineFilter);
-  const timeline = useTimeline(filter);
+  const albumFilter = useSettings((s) => s.albumFilter);
+
+  const activeAlbumFilter = useMemo<AlbumFilter | null>(() => {
+    if (params.albumId) {
+      if (albumFilter && albumFilter.albumId === params.albumId) return albumFilter;
+      return { type: "local", albumId: params.albumId, title: "" };
+    }
+    return albumFilter;
+  }, [params.albumId, albumFilter]);
+
+  const { photos, query: timeline } = useHybridGallery(filter, activeAlbumFilter);
 
   const albumDetailQuery = useQuery({
     queryKey: ["album", params.albumId],
@@ -349,16 +382,51 @@ export default function MediaViewer() {
     staleTime: 60_000,
   });
 
-  const items = useMemo(() => {
-    if (params.albumId && albumDetailQuery.data?.items) {
-      return albumDetailQuery.data.items;
+  const items = useMemo<CarouselItem[]>(() => {
+    if (photos.length > 0) {
+      return photos.map((p) => ({
+        id: p.remoteId ?? p.key,
+        key: p.key,
+        originalUrl: p.localUri ?? p.thumbUrl,
+        thumbUrl: p.thumbUrl ?? p.localUri ?? "",
+        thumbhash: p.thumbhash || "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+        mediaType: p.mediaType,
+        width: p.width,
+        height: p.height,
+        durationMs: p.durationMs,
+        takenAt: p.takenAt,
+        dateGroup: new Date(p.takenAt).toISOString().slice(0, 10),
+        isFavorite: p.remote?.isFavorite ?? false,
+        isScreenshot: p.remote?.isScreenshot ?? false,
+        isDocument: p.remote?.isDocument ?? false,
+        syncStatus: p.syncStatus,
+        localUri: p.localUri,
+        remoteId: p.remoteId,
+      }));
     }
-    return timeline.data?.pages.flatMap((p) => p.items) ?? [];
-  }, [params.albumId, albumDetailQuery.data, timeline.data]);
+    if (params.albumId && albumDetailQuery.data?.items) {
+      return albumDetailQuery.data.items.map((it) => ({
+        ...it,
+        key: it.id,
+        syncStatus: "SYNCED" as const,
+        localUri: null,
+        remoteId: it.id,
+      }));
+    }
+    return (timeline.data?.pages.flatMap((p) => p.items) ?? []).map((it) => ({
+      ...it,
+      key: it.id,
+      syncStatus: "SYNCED" as const,
+      localUri: null,
+      remoteId: it.id,
+    }));
+  }, [photos, params.albumId, albumDetailQuery.data, timeline.data]);
 
-  // Carrusel solo cuando el timeline/álbum ya resolvió y contiene el id pedido
-  const foundIndex = items.findIndex((i) => i.id === id);
-  const carousel = !timeline.isPending && foundIndex >= 0;
+  // Carrusel solo cuando el timeline/galería ya resolvió y contiene el id pedido
+  const foundIndex = items.findIndex(
+    (i) => i.id === id || i.key === id || (i.remoteId && i.remoteId === id),
+  );
+  const carousel = foundIndex >= 0;
 
   // Índice web cuando se visualiza en navegador
   const [webIndex, setWebIndex] = useState<number | null>(null);
@@ -533,16 +601,22 @@ export default function MediaViewer() {
     localMedia;
 
   const currentOriginalUrl =
-    (isLocalItem ? localMedia?.originalUrl : undefined) ??
-    detail.data?.originalUrl ??
+    activeItem?.localUri ||
+    activeItem?.originalUrl ||
+    (isLocalItem ? localMedia?.originalUrl : undefined) ||
+    detail.data?.originalUrl ||
     d?.originalUrl;
   const currentThumbUrl =
-    (isLocalItem ? localMedia?.thumbUrl : undefined) ?? activeItem?.thumbUrl ?? d?.thumbUrl ?? "";
+    activeItem?.thumbUrl ||
+    activeItem?.localUri ||
+    (isLocalItem ? localMedia?.thumbUrl : undefined) ||
+    d?.thumbUrl ||
+    "";
   const currentThumbhash =
-    (isLocalItem ? localMedia?.thumbhash : undefined) ?? activeItem?.thumbhash ?? d?.thumbhash;
+    activeItem?.thumbhash || (isLocalItem ? localMedia?.thumbhash : undefined) || d?.thumbhash;
   const currentMediaType =
-    (isLocalItem ? localMedia?.mediaType : undefined) ??
     activeItem?.mediaType ??
+    (isLocalItem ? localMedia?.mediaType : undefined) ??
     d?.mediaType ??
     params.mediaType ??
     "photo";
