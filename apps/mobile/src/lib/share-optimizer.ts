@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { type Action, manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as MediaLibrary from "expo-media-library/legacy";
+import * as Sharing from "expo-sharing";
 import { Platform, Share } from "react-native";
 import { saveDownload as saveDownloadWeb } from "./save-download.web";
 import {
@@ -151,10 +152,38 @@ export async function shareOptimizedMedia(
     return;
   }
 
-  // En móvil nativo
-  await Share.share({
-    title,
-    message: message || title,
-    url: uri,
-  });
+  // En móvil nativo: Si es URL remota, descargamos temporalmente porque Sharing.shareAsync exige URI local
+  let localUri = uri;
+  let tempUri: string | null = null;
+
+  if (uri.startsWith("http://") || uri.startsWith("https://")) {
+    const isVideo = uri.includes(".mp4");
+    const ext = isVideo ? "mp4" : "jpg";
+    tempUri = `${FileSystem.cacheDirectory}share_stream_${Date.now()}.${ext}`;
+    const dl = await FileSystem.downloadAsync(uri, tempUri);
+    localUri = dl.uri;
+  }
+
+  try {
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (isAvailable) {
+      const isVideo = localUri.endsWith(".mp4");
+      await Sharing.shareAsync(localUri, {
+        dialogTitle: title,
+        mimeType: isVideo ? "video/mp4" : "image/jpeg",
+        UTI: isVideo ? "public.movie" : "public.jpeg",
+      });
+      return;
+    }
+
+    // Fallback a Share estándar si expo-sharing no estuviera disponible
+    await Share.share({
+      title,
+      url: localUri,
+    });
+  } finally {
+    if (tempUri) {
+      await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+    }
+  }
 }

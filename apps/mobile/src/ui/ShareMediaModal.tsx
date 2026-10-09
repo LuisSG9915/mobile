@@ -174,11 +174,7 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
     try {
       if (isVideo) {
         if (selectedPreset === "original") {
-          await shareOptimizedMedia(
-            media.uri,
-            "Video original",
-            "Video en calidad original intacta.",
-          );
+          await shareOptimizedMedia(media.uri, "Video original", "video/mp4");
           onClose();
           return;
         }
@@ -194,22 +190,14 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
           await saveOptimizedVideoToGallery(optimized.uri, optimized.filename).catch(() => {});
         }
 
-        await shareOptimizedMedia(
-          optimized.uri,
-          "Video optimizado",
-          "Video codificado para redes sociales sin pérdida.",
-        );
+        await shareOptimizedMedia(optimized.uri, "Video optimizado", "video/mp4");
         toast.success(t.shareModal.shared);
         onClose();
         return;
       }
 
       if (selectedPreset === "original") {
-        await shareOptimizedMedia(
-          media.uri,
-          "Compartir archivo",
-          "Compartido en calidad original.",
-        );
+        await shareOptimizedMedia(media.uri, "Foto original", "image/jpeg");
         onClose();
         return;
       }
@@ -226,11 +214,7 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
         await saveOptimizedToGallery(optimized.uri, optimized.filename).catch(() => {});
       }
 
-      await shareOptimizedMedia(
-        optimized.uri,
-        "Foto optimizada",
-        "Imagen preparada sin pérdida de calidad para redes sociales.",
-      );
+      await shareOptimizedMedia(optimized.uri, "Foto optimizada", "image/jpeg");
       toast.success(t.shareModal.shared);
       onClose();
     } catch (err) {

@@ -373,9 +373,14 @@ export default function MediaViewer() {
 
   // activeIndex = última página a la que se deslizó; antes de deslizar es la del id.
   const [scrolledIndex, setScrolledIndex] = useState<number | null>(null);
-  const activeIndex = isWeb ? currentWebIndex : (scrolledIndex ?? Math.max(0, foundIndex));
+  const activeIndex = isWeb
+    ? currentWebIndex
+    : (scrolledIndex ?? (foundIndex >= 0 ? foundIndex : 0));
 
-  const activeItem = items.length > 0 && activeIndex < items.length ? items[activeIndex] : null;
+  const activeItem =
+    carousel && items.length > 0 && activeIndex >= 0 && activeIndex < items.length
+      ? items[activeIndex]
+      : null;
   const activeId = activeItem?.id ?? id;
 
   const canGoPrev = isWeb && items.length > 1 && currentWebIndex > 0;
@@ -492,6 +497,7 @@ export default function MediaViewer() {
   }, [params, id]);
 
   const d =
+    (isLocalItem ? localMedia : null) ??
     detail.data ??
     (activeItem
       ? {
@@ -527,10 +533,19 @@ export default function MediaViewer() {
     localMedia;
 
   const currentOriginalUrl =
-    detail.data?.originalUrl ?? (isLocalItem ? localMedia?.originalUrl : undefined);
-  const currentThumbUrl = activeItem?.thumbUrl ?? d?.thumbUrl ?? "";
-  const currentThumbhash = activeItem?.thumbhash ?? d?.thumbhash;
-  const currentMediaType = activeItem?.mediaType ?? d?.mediaType ?? params.mediaType ?? "photo";
+    (isLocalItem ? localMedia?.originalUrl : undefined) ??
+    detail.data?.originalUrl ??
+    d?.originalUrl;
+  const currentThumbUrl =
+    (isLocalItem ? localMedia?.thumbUrl : undefined) ?? activeItem?.thumbUrl ?? d?.thumbUrl ?? "";
+  const currentThumbhash =
+    (isLocalItem ? localMedia?.thumbhash : undefined) ?? activeItem?.thumbhash ?? d?.thumbhash;
+  const currentMediaType =
+    (isLocalItem ? localMedia?.mediaType : undefined) ??
+    activeItem?.mediaType ??
+    d?.mediaType ??
+    params.mediaType ??
+    "photo";
 
   const [captionInput, setCaptionInput] = useState("");
   const [newTagInput, setNewTagInput] = useState("");

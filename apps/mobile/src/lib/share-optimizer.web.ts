@@ -95,13 +95,13 @@ export async function saveOptimizedToGallery(uri: string, filename: string): Pro
 export async function shareOptimizedMedia(
   uri: string,
   title: string,
-  message?: string,
+  _mimeType?: string,
 ): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.share) {
     try {
       await navigator.share({
         title,
-        text: message || title,
+        text: title,
         url: uri.startsWith("http") ? uri : undefined,
       });
       return;
