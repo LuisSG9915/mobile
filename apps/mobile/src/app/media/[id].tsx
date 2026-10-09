@@ -15,6 +15,7 @@ import {
   Info,
   MapPin,
   Plus,
+  Share2,
   Sparkles,
   Trash2,
   X,
@@ -54,7 +55,7 @@ import { deleteLocalCopy, hasLocalCopy } from "../../lib/free-space";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { useTimeline } from "../../lib/timeline";
-import { Button, PhotoEditorModal } from "../../ui";
+import { Button, PhotoEditorModal, ShareMediaModal } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 
 function ZoomableImage({
@@ -335,6 +336,7 @@ export default function MediaViewer() {
   const [showInfo, setShowInfo] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // El carrusel respeta el filtro activo de la galería (favoritos incluidos) o el álbum si viene de uno.
   const filter = useSettings((s) => s.timelineFilter);
@@ -720,6 +722,13 @@ export default function MediaViewer() {
               )}
             </Pressable>
           ) : null}
+          <Pressable
+            onPress={() => setShareOpen(true)}
+            accessibilityLabel={t.viewer.shareMedia}
+            hitSlop={12}
+          >
+            <Share2 color="#fff" size={24} />
+          </Pressable>
           <Pressable
             onPress={() => setShowInfo(true)}
             accessibilityLabel={t.viewer.info}
@@ -1198,6 +1207,24 @@ export default function MediaViewer() {
           onSaved={() => {
             void qc.invalidateQueries({ queryKey: ["timeline"] });
             void qc.invalidateQueries({ queryKey: ["media", activeId] });
+          }}
+        />
+      ) : null}
+
+      {d ? (
+        <ShareMediaModal
+          visible={shareOpen}
+          onClose={() => setShareOpen(false)}
+          media={{
+            id: d.id,
+            uri: currentOriginalUrl || d.originalUrl,
+            thumbUrl: currentThumbUrl || d.thumbUrl,
+            thumbhash: currentThumbhash || d.thumbhash,
+            mediaType: currentMediaType,
+            width: d.width || 1920,
+            height: d.height || 1080,
+            durationMs: d.durationMs,
+            isLocal: isLocalItem,
           }}
         />
       ) : null}

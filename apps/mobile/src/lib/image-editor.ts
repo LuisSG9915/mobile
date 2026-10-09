@@ -1,7 +1,7 @@
 import { type Action, manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as MediaLibrary from "expo-media-library";
 
-export type AspectRatioOption = "original" | "1:1" | "4:3" | "16:9";
+export type AspectRatioOption = "original" | "1:1" | "4:3" | "16:9" | "9:16";
 
 export type EditPhotoOptions = {
   uri: string;
@@ -43,6 +43,7 @@ export async function processAndSaveEditedPhoto(
     if (options.aspectRatio === "1:1") targetRatio = 1;
     else if (options.aspectRatio === "4:3") targetRatio = 4 / 3;
     else if (options.aspectRatio === "16:9") targetRatio = 16 / 9;
+    else if (options.aspectRatio === "9:16") targetRatio = 9 / 16;
 
     let cropWidth = currentW;
     let cropHeight = currentH;

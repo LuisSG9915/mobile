@@ -22,6 +22,7 @@ const ASPECT_RATIOS: { key: AspectRatioOption; label: string }[] = [
   { key: "1:1", label: t.editor.ratioSquare },
   { key: "4:3", label: t.editor.ratio4_3 },
   { key: "16:9", label: t.editor.ratio16_9 },
+  { key: "9:16", label: t.editor.ratio9_16 },
 ];
 
 export function PhotoEditorModal({
@@ -79,6 +80,7 @@ export function PhotoEditorModal({
   if (selectedRatio === "1:1") targetRatio = 1;
   else if (selectedRatio === "4:3") targetRatio = 4 / 3;
   else if (selectedRatio === "16:9") targetRatio = 16 / 9;
+  else if (selectedRatio === "9:16") targetRatio = 9 / 16;
 
   let boxW = previewMaxW;
   let boxH = previewMaxW / targetRatio;

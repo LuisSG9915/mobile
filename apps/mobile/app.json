@@ -47,6 +47,7 @@
       "expo-sqlite",
       "expo-background-task",
       "expo-secure-store",
+      "react-native-compressor",
       [
         "expo-media-library",
         {

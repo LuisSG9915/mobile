@@ -18,6 +18,7 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  BackHandler,
   FlatList,
   type GestureResponderEvent,
   Modal,
@@ -177,6 +178,15 @@ export default function GalleryScreen() {
   // closures (los callbacks estables no pueden capturar `selected` directo).
   const selectedRef = useRef<Set<string> | null>(null);
   selectedRef.current = selected;
+
+  useEffect(() => {
+    if (!selected) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setSelected(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [selected]);
   const [dragSelecting, setDragSelecting] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);

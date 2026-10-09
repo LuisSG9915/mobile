@@ -4,6 +4,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } fro
 import { SafeAreaView } from "react-native-safe-area-context";
 import { signIn } from "../../auth/client";
 import { t } from "../../i18n/es";
+import { useSettings } from "../../lib/store";
 import { Button, Field } from "../../ui";
 
 export default function Login() {
@@ -25,7 +26,12 @@ export default function Login() {
         );
         return;
       }
-      router.replace("/permissions");
+      const onboarded = useSettings.getState().onboarded;
+      if (Platform.OS !== "web" && !onboarded) {
+        router.replace("/permissions");
+      } else {
+        router.replace("/(tabs)");
+      }
     } catch {
       setError(t.auth.genericError);
     } finally {

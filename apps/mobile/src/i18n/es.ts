@@ -178,6 +178,7 @@ export const t = {
     iso: "ISO",
     focalLength: "Longitud focal",
     aperture: "Apertura",
+    shareMedia: "Compartir y optimizar",
   },
   albums: {
     title: "Álbumes",
@@ -273,11 +274,58 @@ export const t = {
     ratioSquare: "1:1 Cuadrado",
     ratio4_3: "4:3 Estándar",
     ratio16_9: "16:9 Panorámico",
+    ratio9_16: "9:16 Historias",
     save: "Guardar",
     saving: "Guardando foto editada…",
     saved: "Foto guardada correctamente.",
     cancel: "Cancelar",
     reset: "Restablecer",
+  },
+  shareModal: {
+    title: "Compartir y optimizar",
+    subtitle: "Selecciona el perfil según el destino para no perder calidad",
+    stories: "Historias y Estados (9:16)",
+    storiesBadge: "1080 × 1920 · sRGB",
+    storiesVideoBadge: "1080p · 9 Mbps H.264",
+    storiesDesc:
+      "Recorta y escala a resolución exacta. Evita que Meta, Instagram y WhatsApp compriman y desenfoquen tu historia.",
+    storiesVideoDesc:
+      "Codifica por hardware a 1080p vertical a 9 Mbps. El punto dulce para que Meta e Instagram no degraden el video.",
+    facebook: "Facebook / Feed (2048px)",
+    facebookBadge: "2048 px · sRGB",
+    facebookDesc:
+      "Tamaño máximo soportado por Meta para mantener alta nitidez sin remuestreo agresivo.",
+    whatsappHd: "WhatsApp HD (3000px)",
+    whatsappHdBadge: "Hasta 3000 px · JPEG HD",
+    whatsappVideoBadge: "720p HD · 4 Mbps",
+    whatsappHdDesc: "Ajustado para enviar por chats de WhatsApp usando el botón 'HD'.",
+    whatsappVideoDesc:
+      "Ajustado para enviar por chats de WhatsApp con buena fluidez y peso moderado.",
+    original: "Original sin compresión",
+    originalBadge: "100% Calidad intacta",
+    originalDesc:
+      "Archivo original sin alteraciones. En WhatsApp úsalo como 'Documento' para evitar toda compresión.",
+    publicLink: "Enlace web público",
+    publicLinkBadge: "Ver en navegador",
+    publicLinkDesc: "Copia un enlace para ver o descargar el original completo.",
+    tipsTitle: "Trucos para no perder calidad:",
+    tipsInstagram:
+      "Instagram: Perfil → Ajustes → Calidad de archivos multimedia → Activar 'Subir con la calidad más alta'.",
+    tipsWhatsappStatus:
+      "WhatsApp Estados: Envíatelo primero a ti mismo en un chat privado activando 'HD' y luego dale a 'Reenviar a mi estado'.",
+    tipsWhatsappChat:
+      "WhatsApp Chats: Toca el icono de clip 📎 y selecciona 'Documento' para 0% de pérdida.",
+    saveToGallery: "Guardar en Carrete",
+    savedToGallery: "Guardada en el carrete en calidad óptima",
+    videoSavedToGallery: "Video optimizado guardado en el carrete en calidad óptima",
+    sharing: "Optimizando…",
+    shared: "Listo",
+    linkCopied: "Enlace copiado al portapapeles",
+    error: "No se pudo optimizar el archivo.",
+    encodingProgress: (p: number) => `Codificando video por hardware: ${p}%`,
+    videoNoteTitle: "Optimización por hardware:",
+    videoNoteDesc:
+      "El video se codificará en tu propio procesador a 1080p H.264 para que Meta no lo comprima de forma destructiva.",
   },
   map: {
     title: "Mapa de fotos",

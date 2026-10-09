@@ -16,7 +16,7 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "ghost" | "danger";
+  variant?: "primary" | "ghost" | "danger" | "secondary";
   size?: "default" | "sm";
   loading?: boolean;
   disabled?: boolean;
@@ -27,9 +27,11 @@ export function Button({
       ? "bg-accent"
       : variant === "danger"
         ? "bg-red-600"
-        : "bg-transparent border border-neutral-300 dark:border-neutral-700";
+        : variant === "secondary"
+          ? "bg-neutral-800 border border-neutral-700"
+          : "bg-transparent border border-neutral-300 dark:border-neutral-700";
   const text =
-    variant === "primary" || variant === "danger"
+    variant === "primary" || variant === "danger" || variant === "secondary"
       ? "text-white"
       : "text-neutral-900 dark:text-white";
   const sizeClasses =
@@ -210,3 +212,4 @@ export function ProgressRing({
 
 export { PhotoEditorModal } from "./PhotoEditorModal";
 export { SelectAlbumsModal } from "./SelectAlbumsModal";
+export { ShareMediaModal } from "./ShareMediaModal";
