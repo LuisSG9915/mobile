@@ -52,8 +52,30 @@ export type MergeInput = {
 };
 
 export type GalleryRow =
-  | { type: "header"; key: string; label: string }
+  | { type: "header"; key: string; label: string; location?: string | null }
   | { type: "photo"; key: string; photo: HybridPhoto };
+
+/**
+ * Ciudad predominante de un grupo de fotos (normalmente un día): cuenta las
+ * `remote.city` no vacías y devuelve la más frecuente. En empate gana la
+ * primera encontrada; sin ciudades devuelve null.
+ */
+export function resolvePredominantLocation(items: HybridPhoto[]): string | null {
+  const counts = new Map<string, number>();
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const item of items) {
+    const city = item.remote?.city?.trim();
+    if (!city) continue;
+    const count = (counts.get(city) ?? 0) + 1;
+    counts.set(city, count);
+    if (count > bestCount) {
+      best = city;
+      bestCount = count;
+    }
+  }
+  return best;
+}
 
 const TERMINAL_STATES: ReadonlySet<QueueState> = new Set(["done", "duplicate"]);
 const ACTIVE_STATES: ReadonlySet<QueueState> = new Set([
@@ -198,15 +220,25 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
 
 /** Intercala encabezados de día (Hoy / Ayer / mes) sobre la lista ordenada desc. */
 export function buildGalleryRows(photos: HybridPhoto[], now = Date.now()): GalleryRow[] {
-  const rows: GalleryRow[] = [];
-  let lastSection = "";
+  const groups: { label: string; photos: HybridPhoto[] }[] = [];
   for (const photo of photos) {
-    const s = sectionLabel(photo.takenAt, now);
-    if (s !== lastSection) {
-      lastSection = s;
-      rows.push({ type: "header", key: `h-${s}`, label: s });
+    const label = sectionLabel(photo.takenAt, now);
+    const last = groups[groups.length - 1];
+    if (last?.label === label) last.photos.push(photo);
+    else groups.push({ label, photos: [photo] });
+  }
+
+  const rows: GalleryRow[] = [];
+  for (const group of groups) {
+    rows.push({
+      type: "header",
+      key: `h-${group.label}`,
+      label: group.label,
+      location: resolvePredominantLocation(group.photos),
+    });
+    for (const photo of group.photos) {
+      rows.push({ type: "photo", key: photo.key, photo });
     }
-    rows.push({ type: "photo", key: photo.key, photo });
   }
   return rows;
 }

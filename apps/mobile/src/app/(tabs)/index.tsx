@@ -7,7 +7,6 @@ import {
   Calendar,
   Check,
   Download,
-  Flag,
   Folder,
   FolderPlus,
   Heart,
@@ -26,6 +25,8 @@ import {
   FlatList,
   type GestureResponderEvent,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   RefreshControl,
@@ -35,7 +36,12 @@ import {
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../../api/client";
@@ -45,7 +51,7 @@ import { useQueueEvents } from "../../lib/events";
 import { formatDuration } from "../../lib/format";
 import { deleteLocalAssets } from "../../lib/free-space";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
-import { buildGridGeometry, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
+import { buildGridGeometry, GRID_GAP, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { hapticMedium, hapticSelection } from "../../lib/haptics";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
@@ -111,7 +117,12 @@ const PhotoCell = memo(
         onPress={() => onPress(photo)}
         onLongPress={() => onLongPress(photo)}
         delayLongPress={350}
-        style={{ width: size, height: size }}
+        style={{
+          width: size - GRID_GAP,
+          height: size - GRID_GAP,
+          marginRight: GRID_GAP,
+          marginBottom: GRID_GAP,
+        }}
         className="bg-neutral-200 dark:bg-neutral-800"
       >
         {uri ? (
@@ -257,6 +268,7 @@ export default function GalleryScreen() {
   const albumFilter = useSettings((s) => s.albumFilter);
   const setAlbumFilter = useSettings((s) => s.setAlbumFilter);
   const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
+  const setSyncedAlbumIds = useSettings((s) => s.setSyncedAlbumIds);
   const cell = width / columns;
   const [albumModalOpen, setAlbumModalOpen] = useState(false);
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
@@ -273,6 +285,36 @@ export default function GalleryScreen() {
   // closures (los callbacks estables no pueden capturar `selected` directo).
   const selectedRef = useRef<Set<string> | null>(null);
   selectedRef.current = selected;
+  const lastScrollY = useRef(0);
+  const filtersVisible = useSharedValue(1);
+  const filtersStyle = useAnimatedStyle(() => ({
+    height: filtersVisible.value * 44,
+    opacity: filtersVisible.value,
+    overflow: "hidden",
+  }));
+
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y;
+      scrollY.current = y;
+      if (selectedRef.current) {
+        filtersVisible.value = withTiming(1, { duration: 180 });
+        lastScrollY.current = y;
+        return;
+      }
+      if (y > lastScrollY.current + 10 && y > 60) {
+        filtersVisible.value = withTiming(0, { duration: 180 });
+      } else if (y < lastScrollY.current - 8 || y <= 20) {
+        filtersVisible.value = withTiming(1, { duration: 180 });
+      }
+      lastScrollY.current = y;
+    },
+    [filtersVisible],
+  );
+
+  useEffect(() => {
+    if (!selected) filtersVisible.value = withTiming(1, { duration: 180 });
+  }, [selected, filtersVisible]);
 
   useEffect(() => {
     if (!selected) return;
@@ -664,52 +706,81 @@ export default function GalleryScreen() {
         </View>
       )}
       {selected ? null : (
-        <View className="flex-row items-center px-4 pb-3">
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            className="flex-1"
-            contentContainerStyle={{ gap: 8, paddingRight: 8 }}
-          >
-            {FILTER_KEYS.map(([f, label]) => (
-              <Pressable
-                key={f}
-                onPress={() => setTimelineFilter(f)}
-                accessibilityLabel={label}
-                accessibilityRole="button"
-                className={`px-3 py-1.5 rounded-full border ${
-                  timelineFilter === f
-                    ? "bg-accent border-accent"
-                    : "border-neutral-300 dark:border-neutral-700"
-                }`}
-              >
-                <Text
-                  className={`text-sm font-medium ${
-                    timelineFilter === f ? "text-white" : "text-neutral-600 dark:text-neutral-300"
+        <Animated.View style={filtersStyle}>
+          <View className="flex-row items-center px-4 pb-3">
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="flex-1"
+              contentContainerStyle={{ gap: 8, paddingRight: 8 }}
+            >
+              {FILTER_KEYS.map(([f, label]) => (
+                <Pressable
+                  key={f}
+                  onPress={() => setTimelineFilter(f)}
+                  accessibilityLabel={label}
+                  accessibilityRole="button"
+                  className={`px-3 py-1.5 rounded-full border ${
+                    timelineFilter === f
+                      ? "bg-accent border-accent"
+                      : "border-neutral-300 dark:border-neutral-700"
                   }`}
                 >
-                  {label}
-                </Text>
+                  <Text
+                    className={`text-sm font-medium ${
+                      timelineFilter === f ? "text-white" : "text-neutral-600 dark:text-neutral-300"
+                    }`}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <View className="flex-row items-center pl-2">
+              <Pressable
+                onPress={() => setAlbumModalOpen(true)}
+                accessibilityLabel={t.albums.filterByAlbum}
+                hitSlop={8}
+                className="relative"
+              >
+                <Folder
+                  size={20}
+                  color={
+                    albumFilter || (syncedAlbumIds && syncedAlbumIds.length > 0)
+                      ? "#4f46e5"
+                      : "#737373"
+                  }
+                />
+                {syncedAlbumIds && syncedAlbumIds.length > 0 ? (
+                  <View
+                    className="absolute rounded-full bg-accent items-center justify-center px-0.5"
+                    style={{ top: -4, right: -4, minWidth: 14, height: 14 }}
+                  >
+                    <Text className="text-[9px] font-bold text-white">{syncedAlbumIds.length}</Text>
+                  </View>
+                ) : null}
               </Pressable>
-            ))}
-          </ScrollView>
-          <Pressable
-            onPress={() => setAlbumModalOpen(true)}
-            accessibilityLabel={t.albums.filterByAlbum}
-            hitSlop={8}
-            className="pl-2"
-          >
-            <Folder size={20} color={albumFilter ? "#4f46e5" : "#737373"} />
-          </Pressable>
-          <Pressable
-            onPress={() => setJumpOpen(true)}
-            accessibilityLabel={t.gallery.jumpToMonth}
-            hitSlop={8}
-            className="pl-2"
-          >
-            <Calendar size={20} color="#737373" />
-          </Pressable>
-        </View>
+              {syncedAlbumIds && syncedAlbumIds.length > 0 ? (
+                <Pressable
+                  onPress={() => setSyncedAlbumIds(null)}
+                  hitSlop={8}
+                  accessibilityLabel="Quitar filtro de álbumes"
+                  className="pl-1"
+                >
+                  <X size={12} color="#737373" />
+                </Pressable>
+              ) : null}
+            </View>
+            <Pressable
+              onPress={() => setJumpOpen(true)}
+              accessibilityLabel={t.gallery.jumpToMonth}
+              hitSlop={8}
+              className="pl-2"
+            >
+              <Calendar size={20} color="#737373" />
+            </Pressable>
+          </View>
+        </Animated.View>
       )}
       {albumFilter ? (
         <View className="flex-row items-center justify-between mx-4 mb-2 px-3 py-1.5 rounded-xl bg-accent/10 border border-accent/20">
@@ -725,27 +796,6 @@ export default function GalleryScreen() {
             accessibilityLabel="Quitar filtro de álbum"
           >
             <X size={15} color="#4f46e5" />
-          </Pressable>
-        </View>
-      ) : syncedAlbumIds !== null ? (
-        <View className="flex-row items-center justify-between mx-4 mb-2 px-3 py-1.5 rounded-xl bg-neutral-200/60 dark:bg-neutral-800/60 border border-neutral-300/40 dark:border-neutral-700/40">
-          <View className="flex-row items-center gap-2 flex-1 mr-2">
-            <Flag size={13} color="#4f46e5" fill="#4f46e5" />
-            <Text
-              className="text-xs font-medium text-neutral-700 dark:text-neutral-300"
-              numberOfLines={1}
-            >
-              {syncedAlbumIds.length === 1
-                ? "Mostrando 1 álbum con flag"
-                : `Mostrando ${syncedAlbumIds.length} álbumes con flag`}
-            </Text>
-          </View>
-          <Pressable
-            onPress={() => router.push("/(tabs)/albums")}
-            hitSlop={8}
-            accessibilityLabel="Configurar álbumes"
-          >
-            <Text className="text-xs font-semibold text-accent">Configurar</Text>
           </Pressable>
         </View>
       ) : null}
@@ -787,9 +837,7 @@ export default function GalleryScreen() {
               }}
               drawDistance={Math.round(width * 2)}
               removeClippedSubviews={Platform.OS !== "web"}
-              onScroll={(e) => {
-                scrollY.current = e.nativeEvent.contentOffset.y;
-              }}
+              onScroll={handleScroll}
               scrollEventThrottle={16}
               onEndReached={() => {
                 if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
@@ -813,9 +861,19 @@ export default function GalleryScreen() {
                       className="px-3 bg-neutral-50 dark:bg-black justify-center"
                       style={{ height: HEADER_HEIGHT }}
                     >
-                      <Text className="text-base font-bold text-neutral-900 dark:text-white">
-                        {item.label}
-                      </Text>
+                      <View className="flex-1 flex-row items-center justify-between gap-2">
+                        <Text className="text-base font-bold text-neutral-900 dark:text-white">
+                          {item.label}
+                        </Text>
+                        {item.location ? (
+                          <Text
+                            className="text-neutral-500 dark:text-neutral-400 text-xs font-medium text-right"
+                            numberOfLines={1}
+                          >
+                            {item.location}
+                          </Text>
+                        ) : null}
+                      </View>
                     </Pressable>
                   );
                 }

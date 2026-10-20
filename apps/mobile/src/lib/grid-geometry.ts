@@ -10,6 +10,8 @@ import type { GalleryRow } from "./gallery";
  * la vista debe renderizarlo con esa misma altura.
  */
 export const HEADER_HEIGHT = 40;
+/** Separación visual entre celdas; no altera el slot lógico del hit-test. */
+export const GRID_GAP = 1.5;
 
 export type GridLine =
   | { kind: "header"; top: number; height: number; rowIndex: number }

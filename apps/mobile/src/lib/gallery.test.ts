@@ -1,7 +1,13 @@
 import type { TimelineItem } from "@photos/shared";
 import { describe, expect, it } from "vitest";
 import type { QueueItem, QueueState } from "../queue/types";
-import { buildGalleryRows, type LocalAsset, mergeGallery, queueStateToSyncStatus } from "./gallery";
+import {
+  buildGalleryRows,
+  type LocalAsset,
+  mergeGallery,
+  queueStateToSyncStatus,
+  resolvePredominantLocation,
+} from "./gallery";
 
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
@@ -235,6 +241,39 @@ describe("mergeGallery", () => {
   });
 });
 
+describe("resolvePredominantLocation", () => {
+  it("devuelve la ciudad del grupo cuando solo hay una", () => {
+    const photos = mergeGallery({
+      localAssets: [],
+      queueItems: [],
+      remoteItems: [makeRemote({ id: "r1", sha256: SHA_A, city: "Xalapa" })],
+    });
+    expect(resolvePredominantLocation(photos)).toBe("Xalapa");
+  });
+
+  it("elige la ciudad más frecuente y desempata por la primera", () => {
+    const photos = mergeGallery({
+      localAssets: [],
+      queueItems: [],
+      remoteItems: [
+        makeRemote({ id: "r1", sha256: SHA_A, city: "Ciudad de México" }),
+        makeRemote({ id: "r2", sha256: SHA_B, city: "Puebla" }),
+        makeRemote({ id: "r3", sha256: "c".repeat(64), city: "Ciudad de México" }),
+      ],
+    });
+    expect(resolvePredominantLocation(photos)).toBe("Ciudad de México");
+  });
+
+  it("devuelve null si no hay ciudad remota (fotos locales)", () => {
+    const photos = mergeGallery({
+      localAssets: [makeLocal()],
+      queueItems: [],
+      remoteItems: [],
+    });
+    expect(resolvePredominantLocation(photos)).toBeNull();
+  });
+});
+
 describe("buildGalleryRows", () => {
   it("agrupa en Hoy / Ayer / mes con encabezados adhesivos", () => {
     // now fijo: miércoles 15 de octubre de 2025, mediodía.
@@ -258,6 +297,20 @@ describe("buildGalleryRows", () => {
     expect(labels).toEqual(["Hoy", "Ayer", "Septiembre de 2025"]);
     expect(rows[0].type).toBe("header");
     expect(rows.filter((r) => r.type === "photo")).toHaveLength(3);
+  });
+
+  it("asigna la ciudad predominante al header del día", () => {
+    const now = new Date(2025, 9, 15, 12).getTime();
+    const hoy = new Date(2025, 9, 15, 9).getTime();
+    const photos = mergeGallery({
+      localAssets: [],
+      queueItems: [],
+      remoteItems: [makeRemote({ takenAt: hoy, city: "Xalapa" })],
+    });
+    const rows = buildGalleryRows(photos, now);
+    const header = rows.find((r) => r.type === "header");
+    expect(header?.type).toBe("header");
+    if (header?.type === "header") expect(header.location).toBe("Xalapa");
   });
 
   it("no repite el encabezado dentro del mismo día", () => {

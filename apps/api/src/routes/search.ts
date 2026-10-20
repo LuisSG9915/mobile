@@ -175,6 +175,7 @@ export const searchApp = new OpenAPIHono<AppEnv>()
         mediaType: row.mediaType,
         takenAt: row.takenAt,
         dateGroup: row.dateGroup,
+        city: row.city ?? null,
         width: row.width,
         height: row.height,
         durationMs: row.durationMs,

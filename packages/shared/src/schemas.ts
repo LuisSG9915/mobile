@@ -100,6 +100,8 @@ export const timelineItemSchema = z.object({
   takenAt: z.number(),
   /** Grupo de fecha YYYY-MM-DD (UTC) para agrupar el timeline. */
   dateGroup: z.string(),
+  /** Ciudad predominante derivada del GPS (opcional según el endpoint). */
+  city: z.string().nullable().optional(),
   width: z.number(),
   height: z.number(),
   durationMs: z.number().nullable(),

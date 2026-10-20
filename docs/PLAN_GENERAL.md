@@ -22,3 +22,4 @@
 | **Fase 13** | `queue/progress.ts`, `app/(tabs)/index.tsx` | Zero-SQLite Polling & SmartBanner Aislado | [x] Completado | e518273 |
 | **Fase 14** | `queue/{db,processor}.*` | Batch Pre-Hash & Lookahead Pipeline | [x] Completado | e518273 |
 | **Fase 15** | `app/{_layout,search,cleaner}.tsx`, `app/media/[id].tsx` | Transparent Modal, Infinite Search & Limpieza Local | [x] Completado | e518273 |
+| **Fase 16** | `lib/gallery.ts`, `lib/grid-geometry.ts`, `app/(tabs)/index.tsx` | El Lienzo Silencioso & Contexto de Lugar | [x] Completado | pendiente |
