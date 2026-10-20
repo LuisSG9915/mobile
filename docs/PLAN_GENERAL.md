@@ -23,3 +23,4 @@
 | **Fase 14** | `queue/{db,processor}.*` | Batch Pre-Hash & Lookahead Pipeline | [x] Completado | e518273 |
 | **Fase 15** | `app/{_layout,search,cleaner}.tsx`, `app/media/[id].tsx` | Transparent Modal, Infinite Search & Limpieza Local | [x] Completado | e518273 |
 | **Fase 16** | `lib/gallery.ts`, `lib/grid-geometry.ts`, `app/(tabs)/index.tsx` | El Lienzo Silencioso & Contexto de Lugar | [x] Completado | 6f7f2c7 |
+| **Fase 17** | `lib/viewer-physics.ts`, `app/media/[id].tsx` | Visor Ergonómico & Física 2D | [x] Completado | pendiente |

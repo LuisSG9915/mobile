@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -48,7 +48,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { t } from "../../i18n/es";
@@ -58,8 +58,11 @@ import { hapticLight } from "../../lib/haptics";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
+import { computeSwipeDismissFrame, shouldTriggerSwipeDismiss } from "../../lib/viewer-physics";
 import { Button, PhotoEditorModal, ShareMediaModal } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
+
+const SWIPE_DOWN_THRESHOLD = 110;
 
 function ZoomableImage({
   uri,
@@ -81,8 +84,11 @@ function ZoomableImage({
   /** Opacidad del fondo durante el swipe-down. */
   backdropOpacity?: SharedValue<number>;
 }) {
+  const { height } = useWindowDimensions();
   const scale = useSharedValue(1);
   const saved = useSharedValue(1);
+  const dragScale = useSharedValue(1);
+  const borderRadius = useSharedValue(0);
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
   const savedTx = useSharedValue(0);
@@ -97,12 +103,16 @@ function ZoomableImage({
     ty.value = 0;
     savedTx.value = 0;
     savedTy.value = 0;
+    dragScale.value = 1;
+    borderRadius.value = 0;
     if (backdropOpacity) backdropOpacity.value = 1;
-  }, [active, scale, saved, tx, ty, savedTx, savedTy, backdropOpacity]);
+  }, [active, scale, saved, dragScale, borderRadius, tx, ty, savedTx, savedTy, backdropOpacity]);
 
   const pinch = Gesture.Pinch()
     .onUpdate((e) => {
       scale.value = Math.max(1, Math.min(5, saved.value * e.scale));
+      dragScale.value = 1;
+      borderRadius.value = 0;
       if (backdropOpacity) backdropOpacity.value = 1;
     })
     .onEnd(() => {
@@ -122,16 +132,32 @@ function ZoomableImage({
         tx.value = savedTx.value + e.translationX;
         ty.value = savedTy.value + e.translationY;
         if (backdropOpacity) backdropOpacity.value = 1;
-      } else if (Math.abs(e.translationY) > Math.abs(e.translationX)) {
-        // A escala 1 un arrastre vertical es candidato a swipe-down: la foto
-        // sigue al dedo y encoge; el swipe horizontal queda para el carrusel.
-        ty.value = e.translationY;
-        scale.value = Math.max(0.7, 1 - Math.abs(e.translationY) / 1000);
-        if (backdropOpacity) {
-          backdropOpacity.value = 1 - Math.min(0.65, Math.abs(e.translationY) / 400);
-        }
-      } else if (backdropOpacity) {
-        backdropOpacity.value = 1;
+        return;
+      }
+
+      const vertical = Math.abs(e.translationY) > Math.abs(e.translationX) * 0.7;
+      if (e.translationY > 8 && (vertical || ty.value > 0)) {
+        // Física 2D de tarjeta: la foto acompaña X/Y, encoge y redondea.
+        const frame = computeSwipeDismissFrame(e.translationX, e.translationY, height);
+        tx.value = frame.tx;
+        ty.value = frame.ty;
+        dragScale.value = frame.scale;
+        borderRadius.value = frame.borderRadius;
+        if (backdropOpacity) backdropOpacity.value = frame.backdropOpacity;
+      } else if (e.translationY <= 0) {
+        const frame = computeSwipeDismissFrame(e.translationX, e.translationY, height);
+        tx.value = frame.tx;
+        ty.value = frame.ty;
+        dragScale.value = 1;
+        borderRadius.value = 0;
+        if (backdropOpacity) backdropOpacity.value = 1;
+      } else {
+        // Arrastre horizontal a escala 1: el carrusel conserva el gesto.
+        tx.value = 0;
+        ty.value = 0;
+        dragScale.value = 1;
+        borderRadius.value = 0;
+        if (backdropOpacity) backdropOpacity.value = 1;
       }
     })
     .onEnd((e) => {
@@ -140,13 +166,18 @@ function ZoomableImage({
         savedTy.value = ty.value;
         return;
       }
-      if (onDismiss && (Math.abs(e.translationY) > 120 || Math.abs(e.velocityY) > 700)) {
+      if (
+        onDismiss &&
+        shouldTriggerSwipeDismiss(e.translationY, e.velocityY, SWIPE_DOWN_THRESHOLD)
+      ) {
         runOnJS(onDismiss)();
         return;
       }
-      ty.value = withTiming(0);
-      scale.value = withTiming(1);
-      if (backdropOpacity) backdropOpacity.value = withTiming(1);
+      tx.value = withSpring(0);
+      ty.value = withSpring(0);
+      dragScale.value = withSpring(1);
+      borderRadius.value = withTiming(0, { duration: 150 });
+      if (backdropOpacity) backdropOpacity.value = withTiming(1, { duration: 150 });
     });
 
   const doubleTap = Gesture.Tap()
@@ -158,6 +189,8 @@ function ZoomableImage({
       const next = saved.value > 1 ? 1 : 2.5;
       saved.value = next;
       scale.value = withTiming(next);
+      dragScale.value = 1;
+      borderRadius.value = 0;
       if (backdropOpacity) backdropOpacity.value = 1;
       if (next === 1) {
         tx.value = withTiming(0);
@@ -175,7 +208,13 @@ function ZoomableImage({
   const taps = Gesture.Exclusive(doubleTap, singleTap);
 
   const style = useAnimatedStyle(() => ({
-    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
+    transform: [
+      { translateX: tx.value },
+      { translateY: ty.value },
+      { scale: scale.value * dragScale.value },
+    ],
+    borderRadius: borderRadius.value,
+    overflow: "hidden",
   }));
 
   return (
@@ -294,6 +333,7 @@ export type CarouselItem = {
   durationMs?: number | null;
   takenAt: number;
   dateGroup?: string;
+  city?: string | null;
   isFavorite: boolean;
   isScreenshot?: boolean;
   isDocument?: boolean;
@@ -374,6 +414,32 @@ function MediaPage({
   );
 }
 
+function DockButton({
+  icon,
+  label,
+  onPress,
+  disabled,
+}: {
+  icon: ReactNode;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={10}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      className={`items-center justify-center w-11 h-11 ${disabled ? "opacity-50" : ""}`}
+    >
+      {icon}
+      <Text className="text-[9px] text-white/80 mt-0.5">{label}</Text>
+    </Pressable>
+  );
+}
+
 export default function MediaViewer() {
   const params = useLocalSearchParams<{
     id: string;
@@ -393,6 +459,7 @@ export default function MediaViewer() {
   const isLocalItem = !id || id.startsWith("l-") || id.startsWith("q-") || Boolean(params.localUri);
 
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [showInfo, setShowInfo] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
@@ -401,10 +468,11 @@ export default function MediaViewer() {
   const [immersive, setImmersive] = useState(false);
   const backdropOpacity = useSharedValue(1);
   const barsOpacity = useSharedValue(1);
+  const chromeVisible = !immersive && !editorOpen && !shareOpen && !addToAlbumOpen;
 
   useEffect(() => {
-    barsOpacity.value = withTiming(immersive ? 0 : 1, { duration: 180 });
-  }, [immersive, barsOpacity]);
+    barsOpacity.value = withTiming(chromeVisible ? 1 : 0, { duration: 180 });
+  }, [chromeVisible, barsOpacity]);
 
   const backdropStyle = useAnimatedStyle(() => ({
     backgroundColor: `rgba(0, 0, 0, ${backdropOpacity.value})`,
@@ -446,6 +514,7 @@ export default function MediaViewer() {
         durationMs: p.durationMs,
         takenAt: p.takenAt,
         dateGroup: new Date(p.takenAt).toISOString().slice(0, 10),
+        city: p.remote?.city ?? null,
         isFavorite: p.remote?.isFavorite ?? false,
         isScreenshot: p.remote?.isScreenshot ?? false,
         isDocument: p.remote?.isDocument ?? false,
@@ -892,42 +961,49 @@ export default function MediaViewer() {
     }
   };
 
+  const contextLocation = activeItem?.city ?? detail.data?.city ?? d?.locationName ?? null;
+  const contextText = [d ? formatDateTime(d.takenAt) : null, contextLocation ?? d?.cameraModel]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <SafeAreaView className="flex-1 bg-transparent" edges={["top", "bottom"]}>
+    <SafeAreaView className="flex-1 bg-transparent" edges={["top"]}>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, backdropStyle]} />
-      <Animated.View style={barsStyle} pointerEvents={immersive ? "none" : "auto"}>
+      <Animated.View style={barsStyle} pointerEvents={chromeVisible ? "auto" : "none"}>
         <View className="flex-row items-center justify-between px-4 py-2 z-10">
           <View className="flex-row items-center gap-3">
             <Pressable onPress={() => router.back()} accessibilityLabel="cerrar" hitSlop={12}>
-              <X color="#fff" size={26} />
+              <X color="#fff" size={20} />
             </Pressable>
-            {isLocalItem ? (
-              <View className="bg-neutral-800/90 border border-neutral-700/60 px-2.5 py-1 rounded-full">
-                <Text className="text-neutral-300 text-xs font-medium">Sin sincronizar</Text>
+            {items.length > 0 ? (
+              <View className="bg-black/50 border border-white/15 rounded-full px-2.5 py-1">
+                <Text className="text-white/90 text-xs font-medium">
+                  {activeIndex + 1} / {items.length}
+                </Text>
               </View>
             ) : null}
           </View>
-          <View className="flex-row gap-5">
-            {d?.mediaType === "photo" && !isLocalItem ? (
-              <Pressable
-                onPress={() => setEditorOpen(true)}
-                accessibilityLabel={t.editor.title}
-                hitSlop={12}
-              >
-                <Crop color="#fff" size={24} />
-              </Pressable>
-            ) : null}
-            {!isLocalItem ? (
+          <View className="flex-row items-center gap-5">
+            {activeRemoteId ? (
               <Pressable
                 onPress={() => fav.mutate(activeId)}
                 disabled={fav.isPending}
                 accessibilityLabel={t.viewer.favorite}
                 hitSlop={12}
               >
-                <Heart color="#fff" size={24} fill={isFav ? "#f43f5e" : "none"} />
+                <Heart color="#fff" size={22} fill={isFav ? "#f43f5e" : "none"} />
               </Pressable>
             ) : null}
-            {!isLocalItem ? (
+            {activeRemoteId ? (
+              <Pressable
+                onPress={() => setAddToAlbumOpen(true)}
+                accessibilityLabel={t.albums.addToAlbum}
+                hitSlop={12}
+              >
+                <FolderPlus color="#fff" size={22} />
+              </Pressable>
+            ) : null}
+            {activeRemoteId ? (
               <Pressable
                 onPress={() => void onDownload()}
                 disabled={downloading}
@@ -937,40 +1013,10 @@ export default function MediaViewer() {
                 {downloading ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Download color="#fff" size={24} />
+                  <Download color="#fff" size={22} />
                 )}
               </Pressable>
             ) : null}
-            <Pressable
-              onPress={() => setShareOpen(true)}
-              accessibilityLabel={t.viewer.shareMedia}
-              hitSlop={12}
-            >
-              <Share2 color="#fff" size={24} />
-            </Pressable>
-            <Pressable
-              onPress={() => setShowInfo(true)}
-              accessibilityLabel={t.viewer.info}
-              hitSlop={12}
-            >
-              <Info color="#fff" size={24} />
-            </Pressable>
-            {!isLocalItem ? (
-              <Pressable
-                onPress={() => setAddToAlbumOpen(true)}
-                accessibilityLabel={t.albums.addToAlbum}
-                hitSlop={12}
-              >
-                <FolderPlus color="#fff" size={24} />
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={onDeletePress}
-              accessibilityLabel={t.viewer.deleteTitle}
-              hitSlop={12}
-            >
-              <Trash2 color="#fff" size={24} />
-            </Pressable>
           </View>
         </View>
       </Animated.View>
@@ -1113,6 +1159,62 @@ export default function MediaViewer() {
           />
         )}
       </View>
+
+      <Animated.View
+        style={[
+          {
+            position: "absolute",
+            left: 0,
+            right: 0,
+            alignItems: "center",
+            zIndex: 30,
+            bottom: Math.max(insets.bottom, 16) + (isWeb && items.length > 1 ? 76 : 0),
+          },
+          barsStyle,
+        ]}
+        pointerEvents={chromeVisible ? "box-none" : "none"}
+      >
+        {!showInfo && contextText ? (
+          <View className="mb-2 rounded-full bg-black/50 px-3 py-1">
+            <Text className="text-white/80 text-[11px] font-medium" numberOfLines={1}>
+              {contextText}
+            </Text>
+          </View>
+        ) : null}
+        <View className="bg-black/75 border border-white/15 rounded-full px-5 py-2.5 flex-row items-center justify-center gap-6 shadow-2xl">
+          <DockButton
+            icon={<Share2 color="#fff" size={20} />}
+            label="Compartir"
+            onPress={() => setShareOpen(true)}
+          />
+          {d?.mediaType === "photo" ? (
+            <DockButton
+              icon={<Crop color="#fff" size={20} />}
+              label="Editar"
+              onPress={() => setEditorOpen(true)}
+            />
+          ) : null}
+          {activeRemoteId ? (
+            <DockButton
+              icon={<Info color={showInfo ? "#14b8a6" : "#fff"} size={20} />}
+              label="Info"
+              onPress={() => setShowInfo((v) => !v)}
+            />
+          ) : null}
+          <DockButton
+            icon={
+              del.isPending ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Trash2 color="#f87171" size={20} />
+              )
+            }
+            label="Eliminar"
+            onPress={onDeletePress}
+            disabled={del.isPending}
+          />
+        </View>
+      </Animated.View>
 
       {/* Tira inferior de miniaturas (filmstrip) en Web */}
       {isWeb && items.length > 1 ? (
