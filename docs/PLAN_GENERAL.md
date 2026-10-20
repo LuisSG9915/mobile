@@ -19,6 +19,6 @@
 | **Fase 10** | `apps/mobile/src/lib/haptics.ts`, `app/media/[id].tsx` | Micro-interacciones Hápticas y Visor Inmersivo | [x] Completado | 7c1c54e |
 | **Fase 11** | `apps/mobile/src/app/(tabs)/index.tsx`, `app/search.tsx` | Smart Status Banner y Búsqueda Fluida | [x] Completado | 7c1c54e |
 | **Fase 12** | `apps/mobile/src/queue/*.test.ts` | Suite de Regresión y Pipeline Final $0 | [x] Completado | 7c1c54e |
-| **Fase 13** | `queue/progress.ts`, `app/(tabs)/index.tsx` | Zero-SQLite Polling & SmartBanner Aislado | [x] Completado | pendiente |
-| **Fase 14** | `queue/{db,processor}.*` | Batch Pre-Hash & Lookahead Pipeline | [x] Completado | pendiente |
-| **Fase 15** | `app/{_layout,search,cleaner}.tsx`, `app/media/[id].tsx` | Transparent Modal, Infinite Search & Limpieza Local | [x] Completado | pendiente |
+| **Fase 13** | `queue/progress.ts`, `app/(tabs)/index.tsx` | Zero-SQLite Polling & SmartBanner Aislado | [x] Completado | e518273 |
+| **Fase 14** | `queue/{db,processor}.*` | Batch Pre-Hash & Lookahead Pipeline | [x] Completado | e518273 |
+| **Fase 15** | `app/{_layout,search,cleaner}.tsx`, `app/media/[id].tsx` | Transparent Modal, Infinite Search & Limpieza Local | [x] Completado | e518273 |
