@@ -4,7 +4,8 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { useQueueEvents } from "../lib/events";
 import { useSettings } from "../lib/store";
-import { getLastScanTs, isBackupPaused } from "./db";
+import { registerBackupTask } from "./background";
+import { getLastScanTs, getQueueStats, isBackupPaused } from "./db";
 import { processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
@@ -16,6 +17,9 @@ export type BackupPassOptions = { forceScan?: boolean; incrementalWindowMs?: num
  * la app / volver a foreground si pasó el intervalo, o a demanda.
  */
 const SCAN_MIN_INTERVAL_MS = 15 * 60_000;
+
+/** Subidas simultáneas al minimizar: el SO las continúa con la app suspendida. */
+const BACKGROUND_BURST_CONCURRENCY = 3;
 
 /**
  * Escanea la biblioteca (si toca por cadencia o se fuerza) y procesa la cola
@@ -54,9 +58,32 @@ export function useBackupRunner(enabled: boolean) {
     const pass = () => {
       void runBackupPass().catch(() => {});
     };
-    pass();
+    // Arranque diferido: deja pintar la primera página del timeline y sus
+    // miniaturas antes de competir por CPU/red con el escaneo.
+    const startTimer = setTimeout(pass, 2000);
+
+    /**
+     * Al minimizar: lanzar ya la ráfaga (sin escanear) para que las sesiones
+     * BACKGROUND del SO sigan subiendo aunque el hilo JS quede suspendido.
+     */
+    const startBackgroundBurst = () => {
+      try {
+        if (isBackupPaused()) return;
+        if (getQueueStats().pending <= 0) return;
+        void processQueue({
+          prioritizePhotos: true,
+          skipBatchPrehash: true,
+          concurrency: BACKGROUND_BURST_CONCURRENCY,
+        }).catch(() => {});
+        void registerBackupTask().catch(() => {});
+      } catch {
+        // Sin cola disponible: el runner periódico lo reintenta.
+      }
+    };
+
     const sub = AppState.addEventListener("change", (s) => {
       if (s === "active") pass();
+      else if (s === "background") startBackgroundBurst();
     });
     const interval = setInterval(() => {
       if (AppState.currentState === "active") pass();
@@ -105,6 +132,7 @@ export function useBackupRunner(enabled: boolean) {
 
     return () => {
       disposed = true;
+      clearTimeout(startTimer);
       sub.remove();
       clearInterval(interval);
       if (libraryTimer) clearTimeout(libraryTimer);

@@ -1,14 +1,15 @@
 import type { TimelineFilter, TimelineItem } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import { getQueueItems } from "../queue/db";
+import { getQueueItems, reconcileQueueWithRemote } from "../queue/db";
 import { useLibraryEvents, useQueueEvents } from "./events";
 import {
   buildGalleryRows,
   type GalleryRow,
   type HybridPhoto,
   type LocalAsset,
+  matchLocalToRemote,
   mergeGallery,
 } from "./gallery";
 import { listLocalAssets } from "./local-assets";
@@ -18,6 +19,17 @@ import { useTimeline } from "./timeline";
 export type AlbumFilter =
   | { type: "remote"; albumId: string; title: string }
   | { type: "local"; albumId: string; title: string };
+
+/**
+ * Último listado local por alcance (toda la biblioteca / álbum / álbumes con
+ * flag). El visor lo usa para montar el carrusel con índice válido desde el
+ * primer frame, sin esperar a que MediaLibrary vuelva a paginar.
+ */
+let localAssetsCache: { key: string; assets: LocalAsset[] } | null = null;
+
+function localScopeKey(albumId: string | null | undefined, synced: string[] | null): string {
+  return `${albumId ?? "all"}|${synced === null ? "ALL" : synced.join(",")}`;
+}
 
 /**
  * Hook unificado de la galería híbrida: combina los assets locales del
@@ -38,16 +50,36 @@ export function useHybridGallery(
   // tick de la cola — el listado completo es demasiado caro para cada badge.
   const libTick = useLibraryEvents((s) => s.tick);
   const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
-  const [localAssets, setLocalAssets] = useState<LocalAsset[]>([]);
+  const localAlbumId = albumFilter?.type === "local" ? albumFilter.albumId : undefined;
+  const scopeKey = localScopeKey(localAlbumId, syncedAlbumIds);
+  const scopeRef = useRef(scopeKey);
+  scopeRef.current = scopeKey;
+  const [localAssets, setLocalAssets] = useState<LocalAsset[]>(() =>
+    localAssetsCache?.key === scopeKey ? localAssetsCache.assets : [],
+  );
+
+  // Cambio de alcance (álbum/filtro): reutilizar el listado cacheado de ese
+  // alcance mientras el refresco real llega.
+  useEffect(() => {
+    if (localAssetsCache?.key === scopeKey) setLocalAssets(localAssetsCache.assets);
+  }, [scopeKey]);
 
   const refreshLocal = useCallback(async () => {
+    const key = scopeKey;
+    const commit = (assets: LocalAsset[]) => {
+      if (scopeRef.current !== key) return;
+      localAssetsCache = { key, assets };
+      setLocalAssets(assets);
+    };
     try {
-      const albId = albumFilter?.type === "local" ? albumFilter.albumId : undefined;
-      setLocalAssets(await listLocalAssets(2000, albId, syncedAlbumIds));
+      // Primera página (60) en cuanto MediaLibrary la entrega; el resto sigue
+      // paginando en segundo plano sin bloquear el primer render.
+      const assets = await listLocalAssets(2000, localAlbumId, syncedAlbumIds, commit);
+      commit(assets);
     } catch {
       // Sin permisos o error de MediaLibrary: galería solo remota/cola.
     }
-  }, [albumFilter, syncedAlbumIds]);
+  }, [localAlbumId, syncedAlbumIds, scopeKey]);
 
   useEffect(() => {
     void refreshLocal();
@@ -62,15 +94,54 @@ export function useHybridGallery(
     enabled: albumFilter?.type === "remote",
   });
 
+  const remoteItems = useMemo<TimelineItem[]>(() => {
+    if (albumFilter?.type === "remote") return remoteAlbumQuery.data?.items ?? [];
+    return query.data?.pages.flatMap((p) => p.items) ?? [];
+  }, [albumFilter, remoteAlbumQuery.data, query.data]);
+
+  /**
+   * Reconciliación tras reinstalar: una fila `queued` sin sha ni remote_id cuyo
+   * asset local coincide (tipo, dimensiones, captura ±3 s) con un remoto ya
+   * cargado se marca `duplicate` en la cola. Así no se re-hashea ni se re-sube
+   * nada de lo que ya estaba en R2 antes de desinstalar.
+   */
+  useEffect(() => {
+    if (!remoteItems.length || !localAssets.length) return;
+    const localById = new Map(localAssets.map((a) => [a.id, a]));
+    const queue = getQueueItems();
+    if (!queue.length) return;
+
+    const claimed = new Set<string>();
+    const remoteIdBySha = new Map<string, string>();
+    for (const r of remoteItems) if (r.sha256) remoteIdBySha.set(r.sha256, r.id);
+    const queuedLocals: LocalAsset[] = [];
+    for (const q of queue) {
+      if (q.remote_id) claimed.add(q.remote_id);
+      else if (q.sha256) {
+        const id = remoteIdBySha.get(q.sha256);
+        if (id) claimed.add(id);
+      }
+      if (q.state !== "queued" || q.sha256 || q.remote_id) continue;
+      const local = localById.get(q.asset_id);
+      if (local) queuedLocals.push(local);
+    }
+    if (!queuedLocals.length) return;
+
+    const matches = matchLocalToRemote(queuedLocals, remoteItems, claimed);
+    const rows: { assetId: string; remoteId: string; sha256: string }[] = [];
+    for (const [assetId, remote] of matches) {
+      if (remote.sha256) rows.push({ assetId, remoteId: remote.id, sha256: remote.sha256 });
+    }
+    if (!rows.length) return;
+    void reconcileQueueWithRemote(rows)
+      .then((updated) => {
+        if (updated > 0) useQueueEvents.getState().emit();
+      })
+      .catch(() => {});
+  }, [remoteItems, localAssets]);
+
   const photos = useMemo<HybridPhoto[]>(() => {
     void tick; // la cola local se lee en vivo dentro del memo
-
-    let remoteItems: TimelineItem[] = [];
-    if (albumFilter?.type === "remote") {
-      remoteItems = remoteAlbumQuery.data?.items ?? [];
-    } else {
-      remoteItems = query.data?.pages.flatMap((p) => p.items) ?? [];
-    }
 
     const effectiveLocal =
       albumFilter?.type === "remote"
@@ -115,7 +186,16 @@ export function useHybridGallery(
     if (filter === "screenshots") return merged.filter((p) => p.remote?.isScreenshot === true);
     if (filter === "documents") return merged.filter((p) => p.remote?.isDocument === true);
     return merged;
-  }, [query.data, remoteAlbumQuery.data, localAssets, tick, filter, albumFilter, syncedAlbumIds]);
+  }, [
+    remoteItems,
+    query.data,
+    remoteAlbumQuery.data,
+    localAssets,
+    tick,
+    filter,
+    albumFilter,
+    syncedAlbumIds,
+  ]);
 
   const rows = useMemo<GalleryRow[]>(() => buildGalleryRows(photos), [photos]);
 

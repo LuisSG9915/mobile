@@ -1,10 +1,13 @@
 import * as BackgroundTask from "expo-background-task";
 import * as TaskManager from "expo-task-manager";
-import { getQueueOwner, initializeQueue } from "./db";
+import { getQueueOwner, getQueueStats, initializeQueue } from "./db";
 import { processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
 export const BACKUP_TASK = "photos-backup-sync";
+
+/** Subidas simultáneas en la ventana de background (sesiones del SO). */
+const BACKGROUND_CONCURRENCY = 3;
 
 /**
  * iOS decide cuándo ejecutar la tarea; procesamos un lote acotado por tiempo.
@@ -20,8 +23,15 @@ TaskManager.defineTask(BACKUP_TASK, async () => {
     const owner = getQueueOwner();
     if (!owner) return BackgroundTask.BackgroundTaskResult.Success;
     await initializeQueue(owner);
-    await scanLibrary();
-    await processQueue({ deadlineMs: Date.now() + 25_000, prioritizePhotos: true });
+    // Con trabajo pendiente la ventana (~25 s) se dedica a subir: escanear
+    // primero agotaba el deadline en paginar la biblioteca y pre-hashear.
+    if (getQueueStats().pending === 0) await scanLibrary();
+    await processQueue({
+      deadlineMs: Date.now() + 25_000,
+      prioritizePhotos: true,
+      skipBatchPrehash: true,
+      concurrency: BACKGROUND_CONCURRENCY,
+    });
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch {
     return BackgroundTask.BackgroundTaskResult.Failed;

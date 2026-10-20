@@ -4,6 +4,7 @@ import type { QueueItem, QueueState } from "../queue/types";
 import {
   buildGalleryRows,
   type LocalAsset,
+  matchLocalToRemote,
   mergeGallery,
   queueStateToSyncStatus,
   resolvePredominantLocation,
@@ -238,6 +239,76 @@ describe("mergeGallery", () => {
       remoteItems: [makeRemote({ id: "mid", sha256: SHA_B, takenAt: 200 })],
     });
     expect(photos.map((p) => p.key)).toEqual(["l-new", "r-mid", "l-old"]);
+  });
+});
+
+describe("emparejamiento por metadatos tras reinstalar", () => {
+  it("fusiona local y remoto en un solo SYNCED sin cola", () => {
+    const photos = mergeGallery({
+      localAssets: [makeLocal({ id: "asset-9", creationTime: 1_000 })],
+      queueItems: [],
+      remoteItems: [makeRemote({ id: "remote-9", takenAt: 2_500 })],
+    });
+    expect(photos).toHaveLength(1);
+    expect(photos[0].key).toBe("l-asset-9");
+    expect(photos[0].syncStatus).toBe("SYNCED");
+    expect(photos[0].localUri).toBe("file:///local/1.jpg");
+    expect(photos[0].thumbUrl).toBe("https://example.com/t.webp");
+    expect(photos[0].remoteId).toBe("remote-9");
+  });
+
+  it("acepta dimensiones giradas (retrato local vs paisaje remoto)", () => {
+    const matches = matchLocalToRemote(
+      [makeLocal({ id: "a", width: 400, height: 300 })],
+      [makeRemote({ id: "r", width: 300, height: 400 })],
+    );
+    expect(matches.get("a")?.id).toBe("r");
+  });
+
+  it("no empareja fuera de la ventana de 3 segundos", () => {
+    const photos = mergeGallery({
+      localAssets: [makeLocal({ id: "a", creationTime: 1_000 })],
+      queueItems: [],
+      remoteItems: [makeRemote({ id: "r", takenAt: 5_000 })],
+    });
+    expect(photos).toHaveLength(2);
+    expect(photos.map((p) => p.syncStatus).sort()).toEqual(["LOCAL_ONLY", "REMOTE_ONLY"]);
+  });
+
+  it("no empareja tipos de medio distintos", () => {
+    const matches = matchLocalToRemote(
+      [makeLocal({ id: "a", mediaType: "video" })],
+      [makeRemote({ id: "r", mediaType: "photo" })],
+    );
+    expect(matches.size).toBe(0);
+  });
+
+  it("descarta correspondencias ambiguas (ráfaga del mismo segundo)", () => {
+    const matches = matchLocalToRemote(
+      [makeLocal({ id: "a" }), makeLocal({ id: "b" })],
+      [makeRemote({ id: "r" })],
+    );
+    expect(matches.size).toBe(0);
+  });
+
+  it("no reutiliza un remoto ya reclamado por la cola", () => {
+    const photos = mergeGallery({
+      localAssets: [makeLocal({ id: "a" }), makeLocal({ id: "b", uri: "file:///b.jpg" })],
+      queueItems: [makeQueue({ asset_id: "a", state: "done", remote_id: "remote-1" })],
+      remoteItems: [makeRemote({ id: "remote-1" })],
+    });
+    expect(photos).toHaveLength(2);
+    expect(photos.find((p) => p.assetId === "b")?.syncStatus).toBe("LOCAL_ONLY");
+    expect(photos.find((p) => p.assetId === "b")?.remoteId).toBeNull();
+  });
+
+  it("ignora remotos excluidos explícitamente", () => {
+    const matches = matchLocalToRemote(
+      [makeLocal({ id: "a" })],
+      [makeRemote({ id: "r" })],
+      new Set(["r"]),
+    );
+    expect(matches.size).toBe(0);
   });
 });
 

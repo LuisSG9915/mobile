@@ -283,6 +283,42 @@ describe("getters síncronos con scoping", () => {
   });
 });
 
+describe("reconciliación tras reinstalar", () => {
+  it("getNextPending excluye los assets ya en vuelo", async () => {
+    sqliteDb.getFirstSync.mockReturnValueOnce({ asset_id: "c" });
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    db.getNextPending({ excludeAssetIds: ["a", "b"] });
+    const [sql, params] = sqliteDb.getFirstSync.mock.calls.at(-1) as [string, unknown[]];
+    expect(sql).toContain("asset_id NOT IN (?,?)");
+    expect(params).toEqual(["u1", expect.any(Number), "a", "b"]);
+  });
+
+  it("marca duplicate las filas queued emparejadas en una transacción", async () => {
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    sqliteDb.runSync.mockClear();
+    const updated = await db.reconcileQueueWithRemote([
+      { assetId: "a", remoteId: "r1", sha256: "f".repeat(64) },
+    ]);
+    expect(updated).toBe(1);
+    expect(sqliteDb.withTransactionSync).toHaveBeenCalledTimes(1);
+    expect(sqliteDb.runSync).toHaveBeenCalledWith(
+      expect.stringContaining("state = 'duplicate'"),
+      expect.arrayContaining(["r1", "f".repeat(64), "a", "u1"]),
+    );
+    expect(sqliteDb.runSync.mock.calls.at(-1)?.[0]).toContain("AND state = 'queued'");
+  });
+
+  it("sin matches no abre transacción", async () => {
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    sqliteDb.withTransactionSync.mockClear();
+    expect(await db.reconcileQueueWithRemote([])).toBe(0);
+    expect(sqliteDb.withTransactionSync).not.toHaveBeenCalled();
+  });
+});
+
 describe("owner para el contexto headless", () => {
   it("getQueueOwner lee kv y se limpia al cerrar", async () => {
     sqliteDb.getFirstSync.mockReturnValueOnce({ v: "u9" });

@@ -366,13 +366,15 @@ export function setNextRetryAt(assetId: string, at: number): Promise<void> {
 }
 
 export function getNextPending(
-  opts: { prioritizePhotos?: boolean; excludeAssetId?: string } = {},
+  opts: { prioritizePhotos?: boolean; excludeAssetId?: string; excludeAssetIds?: string[] } = {},
 ): QueueItem | null {
   const now = Date.now();
+  const excluded = opts.excludeAssetIds?.length ? new Set(opts.excludeAssetIds) : null;
   let best: Row | null = null;
   for (const row of queue.values()) {
     if (!PENDING_STATES.includes(row.state) || row.next_retry_at > now) continue;
     if (opts.excludeAssetId && row.asset_id === opts.excludeAssetId) continue;
+    if (excluded?.has(row.asset_id)) continue;
     if (!best) {
       best = row;
       continue;
@@ -472,6 +474,37 @@ export function getQueueStats(): QueueStats {
     else pending++;
   }
   return { total: queue.size, done, pending, failed };
+}
+
+export type RemoteMatch = { assetId: string; remoteId: string; sha256: string };
+
+/**
+ * Paridad con db.ts: marca `duplicate` las filas `queued` que ya existen en la
+ * nube tras reinstalar, en una sola transacción IndexedDB.
+ */
+export function reconcileQueueWithRemote(matches: RemoteMatch[]): Promise<number> {
+  if (!matches.length) return Promise.resolve(0);
+  const byAsset = new Map(matches.map((m) => [m.assetId, m]));
+  return mutation(async (ctx) => {
+    let updated = 0;
+    const now = Date.now();
+    const rows = await store.updateUserItems(ctx.userId, (row) => {
+      if (row.state !== "queued") return null;
+      const match = byAsset.get(row.asset_id);
+      if (!match) return null;
+      updated++;
+      return {
+        ...row,
+        state: "duplicate",
+        remote_id: match.remoteId,
+        sha256: match.sha256,
+        bytes_sent: row.bytes_total,
+        updated_at: now,
+      };
+    });
+    for (const row of rows) applyRow(row);
+    return updated;
+  });
 }
 
 /**

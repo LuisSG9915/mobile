@@ -501,3 +501,32 @@ describe("getQueueDb", () => {
     expect(() => db.getQueueDb()).toThrow("SQLite no está disponible en web.");
   });
 });
+
+describe("reconcileQueueWithRemote (web)", () => {
+  it("marca duplicate solo las filas queued emparejadas", async () => {
+    await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
+    await db.enqueueAsset({ id: "b", uri: "b", mediaType: "photo", creationTime: 200 });
+    await db.setState("b", "hashing");
+
+    const updated = await db.reconcileQueueWithRemote([
+      { assetId: "a", remoteId: "r1", sha256: "f".repeat(64) },
+      { assetId: "b", remoteId: "r2", sha256: "e".repeat(64) },
+    ]);
+    expect(updated).toBe(1);
+
+    const rows = await store.loadItems("u1");
+    const a = rows.find((r) => r.asset_id === "a");
+    const b = rows.find((r) => r.asset_id === "b");
+    expect(a?.state).toBe("duplicate");
+    expect(a?.remote_id).toBe("r1");
+    expect(a?.sha256).toBe("f".repeat(64));
+    // b estaba en vuelo: no se toca.
+    expect(b?.state).toBe("hashing");
+  });
+
+  it("getNextPending excluye los assets en vuelo", async () => {
+    await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
+    await db.enqueueAsset({ id: "b", uri: "b", mediaType: "photo", creationTime: 200 });
+    expect(db.getNextPending({ excludeAssetIds: ["a"] })?.asset_id).toBe("b");
+  });
+});

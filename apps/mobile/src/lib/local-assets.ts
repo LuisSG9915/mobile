@@ -73,18 +73,30 @@ export async function listLocalAssets(
   limit = 2000,
   albumId?: string | null,
   syncedAlbumIds?: string[] | null,
+  onFirstPage?: (assets: LocalAsset[]) => void,
 ): Promise<LocalAsset[]> {
   // Sin granularPermissions, Android chequea TODAS las declaradas (ver scanner).
   const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
   if (!perm.granted) return [];
 
   const out: LocalAsset[] = [];
+  let firstPageReported = false;
+  // Primera página en cuanto está: la galería pinta sin esperar las 10 páginas.
+  const reportFirstPage = () => {
+    if (firstPageReported || out.length === 0) return;
+    firstPageReported = true;
+    try {
+      onFirstPage?.(out.slice());
+    } catch {
+      // Un consumidor roto no debe abortar el listado completo.
+    }
+  };
 
   async function scanSource(sourceAlbumId?: string) {
     let after: string | undefined;
     do {
       const page = await MediaLibrary.getAssetsAsync({
-        first: Math.min(200, limit - out.length),
+        first: out.length === 0 ? Math.min(60, limit) : Math.min(200, limit - out.length),
         after,
         mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
         sortBy: [[MediaLibrary.SortBy.creationTime, false]],
@@ -116,6 +128,7 @@ export async function listLocalAssets(
         if (out.length >= limit) break;
       }
       after = page.hasNextPage && out.length < limit ? page.endCursor : undefined;
+      reportFirstPage();
     } while (after && out.length < limit);
   }
 

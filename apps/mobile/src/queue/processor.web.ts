@@ -195,6 +195,10 @@ export type ProcessOptions = {
   maxItems?: number;
   deadlineMs?: number;
   prioritizePhotos?: boolean;
+  /** Paridad con nativo; web procesa secuencial dentro del Web Lock. */
+  concurrency?: number;
+  /** Saltar el pre-hasheo por lotes (ráfaga de background). */
+  skipBatchPrehash?: boolean;
 };
 
 /** Pre-hashea hasta 8 items `queued` y deduplica el lote en una sola llamada. */
@@ -301,8 +305,10 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         // La pestaña pudo morir a mitad de un item: devolver los estados
         // transitorios a queued antes de elegir el siguiente pendiente.
         await recoverInterrupted().catch(() => {});
-        await prehashAndDedup(signal);
-        await preflightDedup(signal);
+        if (!opts.skipBatchPrehash) {
+          await prehashAndDedup(signal);
+          await preflightDedup(signal);
+        }
         while (true) {
           if (cancelled || signal.aborted) break;
           // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.

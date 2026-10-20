@@ -271,7 +271,7 @@ export async function setNextRetryAt(assetId: string, at: number): Promise<void>
 }
 
 export function getNextPending(
-  opts: { prioritizePhotos?: boolean; excludeAssetId?: string } = {},
+  opts: { prioritizePhotos?: boolean; excludeAssetId?: string; excludeAssetIds?: string[] } = {},
 ): QueueItem | null {
   const order = opts.prioritizePhotos
     ? "CASE WHEN media_type = 'photo' THEN 0 ELSE 1 END, created_at ASC"
@@ -281,6 +281,10 @@ export function getNextPending(
   if (opts.excludeAssetId) {
     exclude = "AND asset_id != ?";
     params.push(opts.excludeAssetId);
+  }
+  if (opts.excludeAssetIds?.length) {
+    exclude += ` AND asset_id NOT IN (${opts.excludeAssetIds.map(() => "?").join(",")})`;
+    params.push(...opts.excludeAssetIds);
   }
   return (
     getQueueDb().getFirstSync<QueueItem>(
@@ -374,6 +378,32 @@ export async function recoverInterrupted(): Promise<void> {
 
 /** En nativo los getters leen SQLite en vivo: refrescar no hace falta. */
 export async function refreshProjection(): Promise<void> {}
+
+export type RemoteMatch = { assetId: string; remoteId: string; sha256: string };
+
+/**
+ * Tras reinstalar, las filas `queued` sin sha ni remote_id que ya existen en
+ * la nube se marcan `duplicate` en una sola transacción. Evita re-hashear y
+ * re-subir fotos que ya estaban respaldadas antes de desinstalar.
+ */
+export async function reconcileQueueWithRemote(matches: RemoteMatch[]): Promise<number> {
+  if (!matches.length) return 0;
+  const db = getQueueDb();
+  const now = Date.now();
+  let updated = 0;
+  db.withTransactionSync(() => {
+    for (const match of matches) {
+      const res = db.runSync(
+        `UPDATE queue SET state = 'duplicate', remote_id = ?, sha256 = ?,
+           bytes_sent = bytes_total, updated_at = ?
+         WHERE user_id IS ? AND asset_id = ? AND state = 'queued'`,
+        [match.remoteId, match.sha256, now, activeUserId, match.assetId],
+      );
+      updated += res.changes;
+    }
+  });
+  return updated;
+}
 
 export function getQueueStats(): QueueStats {
   const row = getQueueDb().getFirstSync<QueueStats>(

@@ -87,6 +87,80 @@ const ACTIVE_STATES: ReadonlySet<QueueState> = new Set([
   "completing",
 ]);
 
+/** Margen de captura para reconocer una foto tras reinstalar (sin sha local). */
+const MATCH_WINDOW_MS = 3000;
+
+/**
+ * Empareja assets locales sin cola con remotos ya cargados usando huella de
+ * metadatos: mismo tipo, mismas dimensiones (o giradas) y captura a ±3 s.
+ *
+ * Tras desinstalar/reinstalar la cola está vacía, así que sin esto cada foto
+ * aparece dos veces (`l-<assetId>` local y `r-<remoteId>` en la nube).
+ *
+ * Solo acepta correspondencias 1:1 únicas: si un local encaja con dos remotos
+ * (o dos locales con el mismo remoto, típico de una ráfaga del mismo segundo)
+ * se descarta. Marcar un `queued` como `duplicate` por error haría que esa
+ * foto nunca se respalde, así que la ambigüedad se resuelve sin emparejar.
+ */
+export function matchLocalToRemote(
+  localAssets: LocalAsset[],
+  remoteItems: TimelineItem[],
+  claimedRemoteIds: ReadonlySet<string> = new Set(),
+): Map<string, TimelineItem> {
+  // Índice por tipo + dimensiones normalizadas (ancho/alto pueden venir
+  // girados): evita comparar cada local contra toda la página del timeline.
+  const buckets = new Map<string, TimelineItem[]>();
+  for (const remote of remoteItems) {
+    if (claimedRemoteIds.has(remote.id)) continue;
+    const key = `${remote.mediaType}|${Math.min(remote.width, remote.height)}x${Math.max(
+      remote.width,
+      remote.height,
+    )}`;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(remote);
+    else buckets.set(key, [remote]);
+  }
+
+  const candidatesByLocal = new Map<string, TimelineItem[]>();
+  const localsByRemote = new Map<string, string[]>();
+
+  for (const local of localAssets) {
+    const key = `${local.mediaType}|${Math.min(local.width, local.height)}x${Math.max(
+      local.width,
+      local.height,
+    )}`;
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+    for (const remote of bucket) {
+      if (Math.abs(remote.takenAt - local.creationTime) > MATCH_WINDOW_MS) continue;
+      // En video la duración desambigua ráfagas con las mismas dimensiones.
+      if (
+        local.mediaType === "video" &&
+        Math.abs((remote.durationMs ?? 0) - (local.durationMs ?? 0)) > 1000
+      ) {
+        continue;
+      }
+
+      const candidates = candidatesByLocal.get(local.id);
+      if (candidates) candidates.push(remote);
+      else candidatesByLocal.set(local.id, [remote]);
+
+      const locals = localsByRemote.get(remote.id);
+      if (locals) locals.push(local.id);
+      else localsByRemote.set(remote.id, [local.id]);
+    }
+  }
+
+  const matches = new Map<string, TimelineItem>();
+  for (const [localId, candidates] of candidatesByLocal) {
+    if (candidates.length !== 1) continue;
+    const remote = candidates[0];
+    if (localsByRemote.get(remote.id)?.length !== 1) continue;
+    matches.set(localId, remote);
+  }
+  return matches;
+}
+
 /** Estado de la cola → estado del contrato de sincronización. */
 export function queueStateToSyncStatus(state: QueueState): SyncStatus {
   if (state === "failed") return "FAILED";
@@ -170,8 +244,39 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
     }
   }
 
+  // Reinstalación: la cola está vacía y no hay sha local que enlace con la
+  // nube. Emparejar por metadatos evita el tile duplicado local+remoto.
+  const metadataMatches = matchLocalToRemote(
+    localAssets.filter((a) => !claimedLocal.has(a.id)),
+    remoteItems,
+    claimedRemote,
+  );
+
   for (const a of localAssets) {
     if (claimedLocal.has(a.id)) continue;
+    const matched = metadataMatches.get(a.id);
+    if (matched) {
+      claimedRemote.add(matched.id);
+      photos.push({
+        key: `l-${a.id}`,
+        syncStatus: "SYNCED",
+        progress: null,
+        takenAt: matched.takenAt,
+        mediaType: matched.mediaType,
+        width: matched.width,
+        height: matched.height,
+        durationMs: matched.durationMs,
+        localUri: a.uri,
+        thumbUrl: matched.thumbUrl,
+        thumbhash: matched.thumbhash,
+        remoteId: matched.id,
+        assetId: a.id,
+        albumId: a.albumId ?? null,
+        queueItem: null,
+        remote: matched,
+      });
+      continue;
+    }
     photos.push({
       key: `l-${a.id}`,
       syncStatus: "LOCAL_ONLY",

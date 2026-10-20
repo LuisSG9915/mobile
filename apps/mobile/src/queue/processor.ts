@@ -31,7 +31,7 @@ import { makeThumbAndHash, type ThumbResult } from "./thumb";
 let running = false;
 let cancelled = false;
 let forceCellular = false;
-let activeUploadTask: FileSystem.UploadTask | null = null;
+const activeUploadTasks = new Set<FileSystem.UploadTask>();
 const precheckedHashes = new Set<string>();
 const thumbCache = new Map<string, ThumbResult>();
 const THUMB_CACHE_MAX = 2;
@@ -76,7 +76,7 @@ function emitStructure() {
  */
 export function cancelQueue() {
   cancelled = true;
-  void activeUploadTask?.cancelAsync().catch(() => {});
+  for (const task of activeUploadTasks) void task.cancelAsync().catch(() => {});
 }
 
 export function isRunning() {
@@ -139,7 +139,7 @@ async function uploadFile(
       onProgress?.(p.totalBytesSent, p.totalBytesExpectedToSend);
     },
   );
-  activeUploadTask = task;
+  activeUploadTasks.add(task);
   // Watchdog: una conexión colgada sin eventos no puede congelar la cola.
   const watchdog = setInterval(() => {
     if (Date.now() - lastEventAt > STALL_MS) void task.cancelAsync().catch(() => {});
@@ -151,11 +151,11 @@ async function uploadFile(
     }
   } finally {
     clearInterval(watchdog);
-    if (activeUploadTask === task) activeUploadTask = null;
+    activeUploadTasks.delete(task);
   }
 }
 
-async function processItem(item: QueueItem): Promise<void> {
+async function processItem(item: QueueItem, allowLookahead = true): Promise<void> {
   const db = getQueueDb();
 
   const info = await MediaLibrary.getAssetInfoAsync(item.asset_id, {
@@ -257,7 +257,7 @@ async function processItem(item: QueueItem): Promise<void> {
 
   await setState(item.asset_id, "uploading_original");
   emitStructure();
-  void prepareNextThumb(item.asset_id);
+  if (allowLookahead) void prepareNextThumb(item.asset_id);
   const fileUri = file.uri;
   let lastProgress = 0;
   await uploadFile(init.original, fileUri, (sent) => {
@@ -320,7 +320,13 @@ export type ProcessOptions = {
   maxItems?: number;
   deadlineMs?: number;
   prioritizePhotos?: boolean;
+  /** Subidas simultáneas; 1 = secuencial (comportamiento histórico). */
+  concurrency?: number;
+  /** Background: saltar el pre-hasheo por lotes para no agotar el deadline. */
+  skipBatchPrehash?: boolean;
 };
+
+const MAX_CONCURRENCY = 4;
 
 /** Pre-hashea hasta 8 items `queued` y deduplica el lote en una sola llamada. */
 async function prehashAndDedup(): Promise<void> {
@@ -396,79 +402,113 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   running = true;
   cancelled = false;
   let processed = 0;
+  const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(opts.concurrency ?? 1)));
+  const inFlight = new Set<string>();
+  let videosInFlight = 0;
   precheckedHashes.clear();
   try {
     // La app pudo morir a mitad de un item (kill): devolver los estados
     // transitorios a queued con bytes_sent=0 antes de elegir el siguiente.
     await recoverInterrupted().catch(() => {});
-    await prehashAndDedup();
-    await preflightDedup();
-    while (true) {
-      if (cancelled) break;
-      // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.
-      if (isBackupPaused()) break;
-      if (opts.maxItems !== undefined && processed >= opts.maxItems) break;
-      if (opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs) break;
+    if (!opts.skipBatchPrehash) {
+      await prehashAndDedup();
+      await preflightDedup();
+    }
 
-      const net = await canUploadNow();
-      if (!net.ok) break;
+    const deadlinePassed = () => opts.deadlineMs !== undefined && Date.now() > opts.deadlineMs;
+    const shouldStop = () =>
+      cancelled ||
+      isBackupPaused() ||
+      (opts.maxItems !== undefined && processed >= opts.maxItems) ||
+      deadlinePassed();
 
-      const synced = useSettings.getState().syncedAlbumIds;
-      if (Array.isArray(synced) && synced.length === 0) break;
-
-      const item = getNextPending({ prioritizePhotos: opts.prioritizePhotos });
-      if (!item) break;
-
-      try {
-        await processItem(item);
-        processed++;
-        if (processed % 8 === 0) await prehashAndDedup();
-      } catch (e) {
-        if (cancelled) {
-          // Cancelada por el usuario (logout): vuelve a queued sin gastar intento.
-          await setState(item.asset_id, "queued").catch(() => {});
-          useItemProgress.getState().clearItemProgress(item.asset_id);
-          emitStructure();
-          break;
-        }
-        const message =
-          e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
-        // Sesión caída a mitad de pasada: reintentar quemaría intentos hasta
-        // 'failed' contra un 401 que no se arregla solo. Reencolar y cortar.
-        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-          await setState(item.asset_id, "queued").catch(() => {});
-          useItemProgress.getState().clearItemProgress(item.asset_id);
-          emitStructure();
-          break;
-        }
-        // 4xx definitivos no arreglan solos reintentando: failed directo.
-        // 413 quota_exceeded además pausa el respaldo para no quemar intentos
-        // en el resto de la cola — el usuario libera espacio y reanuda.
-        if (e instanceof ApiError && e.status === 413) {
-          await setState(item.asset_id, "failed", { last_error: message });
-          setBackupPaused(true);
-        } else if (e instanceof ApiError && e.status === 400) {
-          await setState(item.asset_id, "failed", { last_error: message });
-        } else {
-          const db = getQueueDb();
-          const row = db.getFirstSync<{ attempts: number }>(
-            "SELECT attempts FROM queue WHERE asset_id = ? AND user_id IS ?",
-            [item.asset_id, item.user_id ?? null],
-          );
-          const attempts = (row?.attempts ?? item.attempts) + 1;
-          await bumpAttempt(item.asset_id);
-          if (attempts >= MAX_ATTEMPTS) {
-            await setState(item.asset_id, "failed", { last_error: message });
-          } else {
-            const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
-            await setNextRetryAt(item.asset_id, Date.now() + wait);
-            await setState(item.asset_id, "queued", { last_error: message });
-          }
-        }
+    /** Devuelve true cuando la pasada debe cortarse (cancelación/sesión caída). */
+    const handleFailure = async (item: QueueItem, e: unknown): Promise<boolean> => {
+      if (cancelled) {
+        // Cancelada por el usuario (logout): vuelve a queued sin gastar intento.
+        await setState(item.asset_id, "queued").catch(() => {});
         useItemProgress.getState().clearItemProgress(item.asset_id);
         emitStructure();
+        return true;
       }
-    }
+      const message =
+        e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
+      // Sesión caída a mitad de pasada: reintentar quemaría intentos hasta
+      // 'failed' contra un 401 que no se arregla solo. Reencolar y cortar.
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        await setState(item.asset_id, "queued").catch(() => {});
+        useItemProgress.getState().clearItemProgress(item.asset_id);
+        emitStructure();
+        return true;
+      }
+      // 4xx definitivos no arreglan solos reintentando: failed directo.
+      // 413 quota_exceeded además pausa el respaldo para no quemar intentos
+      // en el resto de la cola — el usuario libera espacio y reanuda.
+      if (e instanceof ApiError && e.status === 413) {
+        await setState(item.asset_id, "failed", { last_error: message });
+        setBackupPaused(true);
+      } else if (e instanceof ApiError && e.status === 400) {
+        await setState(item.asset_id, "failed", { last_error: message });
+      } else {
+        const db = getQueueDb();
+        const row = db.getFirstSync<{ attempts: number }>(
+          "SELECT attempts FROM queue WHERE asset_id = ? AND user_id IS ?",
+          [item.asset_id, item.user_id ?? null],
+        );
+        const attempts = (row?.attempts ?? item.attempts) + 1;
+        await bumpAttempt(item.asset_id);
+        if (attempts >= MAX_ATTEMPTS) {
+          await setState(item.asset_id, "failed", { last_error: message });
+        } else {
+          const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
+          await setNextRetryAt(item.asset_id, Date.now() + wait);
+          await setState(item.asset_id, "queued", { last_error: message });
+        }
+      }
+      useItemProgress.getState().clearItemProgress(item.asset_id);
+      emitStructure();
+      return false;
+    };
+
+    const worker = async (): Promise<void> => {
+      while (!shouldStop()) {
+        const net = await canUploadNow();
+        if (!net.ok) return;
+
+        const synced = useSettings.getState().syncedAlbumIds;
+        if (Array.isArray(synced) && synced.length === 0) return;
+
+        const item = getNextPending({
+          prioritizePhotos: opts.prioritizePhotos,
+          excludeAssetIds: [...inFlight],
+        });
+        if (!item) return;
+
+        inFlight.add(item.asset_id);
+        let reservedVideo = false;
+        try {
+          // Un video a la vez: su miniatura y buffer pesan mucho más.
+          if (item.media_type === "video") {
+            while (videosInFlight > 0 && !cancelled && !deadlinePassed()) {
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+            if (videosInFlight > 0) return;
+            videosInFlight++;
+            reservedVideo = true;
+          }
+          await processItem(item, concurrency === 1);
+          processed++;
+          if (concurrency === 1 && processed % 8 === 0) await prehashAndDedup();
+        } catch (e) {
+          if (await handleFailure(item, e)) return;
+        } finally {
+          if (reservedVideo) videosInFlight--;
+          inFlight.delete(item.asset_id);
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
   } finally {
     running = false;
     forceCellular = false;

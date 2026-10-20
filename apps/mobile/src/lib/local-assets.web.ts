@@ -19,6 +19,7 @@ export async function listLocalAssets(
   _limit = 2000,
   _albumId?: string | null,
   _syncedAlbumIds?: string[] | null,
+  _onFirstPage?: (assets: LocalAsset[]) => void,
 ): Promise<LocalAsset[]> {
   return [];
 }

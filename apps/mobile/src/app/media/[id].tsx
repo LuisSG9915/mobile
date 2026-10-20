@@ -71,6 +71,7 @@ function ZoomableImage({
   onDismiss,
   onDoubleTap,
   onSingleTap,
+  onZoomChange,
   backdropOpacity,
 }: {
   uri: string;
@@ -81,6 +82,8 @@ function ZoomableImage({
   onDoubleTap?: () => void;
   /** Tap simple → modo inmersivo (ocultar/mostrar barras). */
   onSingleTap?: () => void;
+  /** Zoom > 1 → el padre desactiva el scroll del carrusel (fase 19). */
+  onZoomChange?: (zoomed: boolean) => void;
   /** Opacidad del fondo durante el swipe-down. */
   backdropOpacity?: SharedValue<number>;
 }) {
@@ -93,10 +96,32 @@ function ZoomableImage({
   const ty = useSharedValue(0);
   const savedTx = useSharedValue(0);
   const savedTy = useSharedValue(0);
+  // Último estado de zoom notificado al padre (0 = 1x, 1 = ampliada).
+  const zoomState = useSharedValue(0);
+  const [isZoomed, setIsZoomed] = useState(false);
+
+  const notifyZoom = useCallback(
+    (zoomed: boolean) => {
+      setIsZoomed(zoomed);
+      onZoomChange?.(zoomed);
+    },
+    [onZoomChange],
+  );
+
+  // Worklet compartido: evita cruzar el puente en cada frame del pinch.
+  const syncZoom = (zoomed: boolean) => {
+    "worklet";
+    if (!active) return;
+    const next = zoomed ? 1 : 0;
+    if (zoomState.value === next) return;
+    zoomState.value = next;
+    runOnJS(notifyZoom)(zoomed);
+  };
 
   // Al pasar de página el zoom vuelve a 1: al volver atrás la foto no queda ampliada.
   useEffect(() => {
     if (active) return;
+    const wasZoomed = zoomState.value !== 0;
     scale.value = 1;
     saved.value = 1;
     tx.value = 0;
@@ -105,8 +130,23 @@ function ZoomableImage({
     savedTy.value = 0;
     dragScale.value = 1;
     borderRadius.value = 0;
+    zoomState.value = 0;
     if (backdropOpacity) backdropOpacity.value = 1;
-  }, [active, scale, saved, dragScale, borderRadius, tx, ty, savedTx, savedTy, backdropOpacity]);
+    if (wasZoomed) notifyZoom(false);
+  }, [
+    active,
+    scale,
+    saved,
+    dragScale,
+    borderRadius,
+    tx,
+    ty,
+    savedTx,
+    savedTy,
+    zoomState,
+    backdropOpacity,
+    notifyZoom,
+  ]);
 
   const pinch = Gesture.Pinch()
     .onUpdate((e) => {
@@ -114,6 +154,7 @@ function ZoomableImage({
       dragScale.value = 1;
       borderRadius.value = 0;
       if (backdropOpacity) backdropOpacity.value = 1;
+      syncZoom(scale.value > 1.01);
     })
     .onEnd(() => {
       saved.value = scale.value;
@@ -122,10 +163,16 @@ function ZoomableImage({
         ty.value = withTiming(0);
         savedTx.value = 0;
         savedTy.value = 0;
+        syncZoom(false);
       }
     });
 
-  const pan = Gesture.Pan()
+  // A escala 1 el pan solo se activa en vertical y falla en horizontal: así el
+  // FlatList horizontal conserva el desliz entre fotos. Ampliada, panea libre.
+  const panBase = isZoomed
+    ? Gesture.Pan()
+    : Gesture.Pan().activeOffsetY([-14, 14]).failOffsetX([-14, 14]);
+  const pan = panBase
     .minPointers(1)
     .onUpdate((e) => {
       if (saved.value > 1) {
@@ -192,6 +239,7 @@ function ZoomableImage({
       dragScale.value = 1;
       borderRadius.value = 0;
       if (backdropOpacity) backdropOpacity.value = 1;
+      syncZoom(next > 1);
       if (next === 1) {
         tx.value = withTiming(0);
         ty.value = withTiming(0);
@@ -367,6 +415,7 @@ function MediaPage({
   onDismiss,
   onDoubleTap,
   onSingleTap,
+  onZoomChange,
   backdropOpacity,
 }: {
   item: CarouselItem;
@@ -375,6 +424,7 @@ function MediaPage({
   onDismiss?: () => void;
   onDoubleTap?: () => void;
   onSingleTap?: () => void;
+  onZoomChange?: (zoomed: boolean) => void;
   backdropOpacity?: SharedValue<number>;
 }) {
   const remoteId =
@@ -407,6 +457,7 @@ function MediaPage({
       onDismiss={onDismiss}
       onDoubleTap={onDoubleTap}
       onSingleTap={onSingleTap}
+      onZoomChange={onZoomChange}
       backdropOpacity={backdropOpacity}
     />
   ) : (
@@ -465,6 +516,8 @@ export default function MediaViewer() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [immersive, setImmersive] = useState(false);
+  // Zoom activo en la página visible: el carrusel se bloquea para no robar el paneo.
+  const [zoomed, setZoomed] = useState(false);
   const backdropOpacity = useSharedValue(1);
   const barsOpacity = useSharedValue(1);
   const chromeVisible = !immersive && !editorOpen && !shareOpen && !addToAlbumOpen;
@@ -1110,6 +1163,7 @@ export default function MediaViewer() {
             testID="carousel"
             horizontal
             pagingEnabled
+            scrollEnabled={!zoomed}
             snapToInterval={width}
             snapToAlignment="start"
             disableIntervalMomentum
@@ -1120,9 +1174,10 @@ export default function MediaViewer() {
             windowSize={3}
             initialNumToRender={3}
             extraData={activeIndex}
-            onMomentumScrollEnd={(e) =>
-              setScrolledIndex(Math.round(e.nativeEvent.contentOffset.x / width))
-            }
+            onMomentumScrollEnd={(e) => {
+              setZoomed(false);
+              setScrolledIndex(Math.round(e.nativeEvent.contentOffset.x / width));
+            }}
             renderItem={({ item, index }) => (
               // Página con tamaño explícito: sin flex (en web flex-basis:0
               // colapsaría el width; sin height el contenido flex-1 mide 0).
@@ -1134,6 +1189,7 @@ export default function MediaViewer() {
                   onDismiss={onDismiss}
                   onDoubleTap={handleDoubleTap}
                   onSingleTap={() => setImmersive((v) => !v)}
+                  onZoomChange={index === activeIndex ? setZoomed : undefined}
                   backdropOpacity={backdropOpacity}
                 />
               </View>

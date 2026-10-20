@@ -99,6 +99,8 @@ type CellProps = {
   size: number;
   selecting: boolean;
   selected: boolean;
+  /** Primeras celdas visibles: expo-image las descarga antes. */
+  highPriority?: boolean;
   onPress: (photo: HybridPhoto) => void;
   onLongPress: (photo: HybridPhoto) => void;
 };
@@ -109,7 +111,15 @@ type CellProps = {
  * celda sin tocar el resto de la cuadrícula.
  */
 const PhotoCell = memo(
-  function PhotoCell({ photo, size, selecting, selected, onPress, onLongPress }: CellProps) {
+  function PhotoCell({
+    photo,
+    size,
+    selecting,
+    selected,
+    highPriority,
+    onPress,
+    onLongPress,
+  }: CellProps) {
     const uri = photo.localUri ?? photo.thumbUrl;
     return (
       <Pressable
@@ -127,11 +137,17 @@ const PhotoCell = memo(
       >
         {uri ? (
           <Image
-            source={{ uri }}
+            source={{
+              uri,
+              // Las URLs prefirmadas cambian en cada fetch; sin clave estable
+              // expo-image no reutiliza el disco y la celda queda en negro.
+              cacheKey: photo.remoteId ? `thumb-${photo.remoteId}` : photo.key,
+            }}
             placeholder={photo.thumbhash ? { thumbhash: photo.thumbhash } : undefined}
             contentFit="cover"
             transition={200}
             recyclingKey={photo.key}
+            priority={highPriority ? "high" : "normal"}
             style={{ width: "100%", height: "100%" }}
           />
         ) : null}
@@ -166,6 +182,7 @@ const PhotoCell = memo(
     prev.size === next.size &&
     prev.selecting === next.selecting &&
     prev.selected === next.selected &&
+    prev.highPriority === next.highPriority &&
     prev.photo.key === next.photo.key &&
     prev.photo.syncStatus === next.photo.syncStatus &&
     prev.photo.localUri === next.photo.localUri &&
@@ -883,6 +900,7 @@ export default function GalleryScreen() {
                     size={cell}
                     selecting={!!selected}
                     selected={!!selected?.has(item.photo.key)}
+                    highPriority={index < 18}
                     onPress={onCellPress}
                     onLongPress={beginSelect}
                   />
