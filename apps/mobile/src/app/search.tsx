@@ -1,5 +1,5 @@
 import type { SearchFilter, TimelineItem } from "@photos/shared";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { ChevronLeft, Heart, MapPin, Play, Search, Tag, X } from "lucide-react-native";
@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
 import { formatDuration } from "../lib/format";
+import { useDebouncedValue } from "../lib/use-debounced-value";
 import { EmptyState } from "../ui";
 
 const FILTER_TYPES: { key: SearchFilter; label: string }[] = [
@@ -35,6 +36,7 @@ export default function SearchScreen() {
   const [selectedFilter, setSelectedFilter] = useState<SearchFilter>("all");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<"all" | "10mb" | "50mb">("all");
+  const debouncedSearchText = useDebouncedValue(searchText, 250);
 
   const tagsQuery = useQuery({
     queryKey: ["tags"],
@@ -50,15 +52,16 @@ export default function SearchScreen() {
     selectedSize === "10mb" ? 10_000_000 : selectedSize === "50mb" ? 50_000_000 : undefined;
 
   const searchQuery = useQuery({
-    queryKey: ["search", searchText, selectedFilter, selectedTag, selectedSize],
+    queryKey: ["search", debouncedSearchText, selectedFilter, selectedTag, selectedSize],
     queryFn: () =>
       api.search({
-        q: searchText.trim() || undefined,
+        q: debouncedSearchText.trim() || undefined,
         tag: selectedTag || undefined,
         filter: selectedFilter,
         minBytes,
         limit: 100,
       }),
+    placeholderData: keepPreviousData,
   });
 
   const numColumns = width > 768 ? 5 : 3;
@@ -94,6 +97,7 @@ export default function SearchScreen() {
             autoFocus
             returnKeyType="search"
           />
+          {searchQuery.isFetching ? <ActivityIndicator size="small" color="#4f46e5" /> : null}
           {searchText.length > 0 ? (
             <Pressable
               onPress={() => setSearchText("")}

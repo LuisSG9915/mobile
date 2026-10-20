@@ -52,7 +52,13 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
   }
 
   const lastScan = opts.forceScan ? 0 : getLastScanTs();
-  const createdAfter = lastScan > 0 ? Math.max(0, lastScan - SCAN_SAFETY_MARGIN_MS) : undefined;
+  const createdAfter = opts.forceScan
+    ? undefined
+    : opts.incrementalWindowMs
+      ? Math.max(0, (lastScan || Date.now()) - opts.incrementalWindowMs)
+      : lastScan > 0
+        ? Math.max(0, lastScan - SCAN_SAFETY_MARGIN_MS)
+        : undefined;
 
   let added = 0;
   let skipped = 0;

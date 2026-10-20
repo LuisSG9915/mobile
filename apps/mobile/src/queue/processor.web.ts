@@ -2,6 +2,7 @@ import { MIME_BY_EXT } from "@photos/shared";
 import { ApiError, api } from "../api/client";
 import { useQueueEvents } from "../lib/events";
 import { queryClient } from "../lib/query-client";
+import { useItemProgress } from "../lib/store";
 import { getFile } from "../web/files";
 import { sha256File } from "../web/hash";
 import { getActiveContext } from "../web/queue-store";
@@ -11,6 +12,7 @@ import {
   bumpAttempt,
   finishItem,
   getNextPending,
+  getQueuedWithSha,
   isBackupPaused,
   type QueueItem,
   recoverInterrupted,
@@ -38,12 +40,21 @@ export function isRunning() {
   return running;
 }
 
+/** En web no hay restricción de Wi-Fi; paridad de API con el procesador nativo. */
+export function allowUploadOnCellularOnce(): void {}
+
 function refreshRemoteData() {
   try {
     void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["storage"] }).catch(() => {});
   } catch {}
+}
+
+/** Cambio estructural de la cola: estado, encolado, borrado o vínculo remoto. */
+function emitStructure() {
+  useQueueEvents.getState().emit();
+  publishSyncProgress(true);
 }
 
 /** Tras cada await susceptible de cancelación. */
@@ -59,8 +70,8 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
     await setState(item.asset_id, "failed", {
       last_error: "El archivo ya no está disponible. Vuelve a seleccionarlo.",
     });
-    useQueueEvents.getState().emit();
-    publishSyncProgress(true);
+    useItemProgress.getState().clearItemProgress(item.asset_id);
+    emitStructure();
     return;
   }
 
@@ -71,8 +82,8 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
     await setState(item.asset_id, "failed", {
       last_error: `Formato no admitido (.${rawExt}).`,
     });
-    useQueueEvents.getState().emit();
-    publishSyncProgress(true);
+    useItemProgress.getState().clearItemProgress(item.asset_id);
+    emitStructure();
     return;
   }
   const ext = extFromFilename(item.filename, item.media_type);
@@ -80,6 +91,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   const mediaType = extToMediaType(ext);
 
   await setState(item.asset_id, "hashing", { bytes_total: file.size });
+  emitStructure();
   const sha256 = await sha256File(file);
   throwIfAborted(signal);
 
@@ -96,8 +108,9 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
         remote_id: hit.id,
         bytes_sent: file.size,
       });
+      useItemProgress.getState().clearItemProgress(item.asset_id);
       refreshRemoteData();
-      publishSyncProgress(true);
+      emitStructure();
       return;
     }
   } catch {
@@ -106,11 +119,13 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   }
 
   await setState(item.asset_id, "thumbnailing");
+  emitStructure();
   const thumb = await makeThumb(mediaType, file);
   throwIfAborted(signal);
   if (!thumb.thumbhash) throw new Error("No se pudo generar la huella de la miniatura.");
 
   await setState(item.asset_id, "init", { sha256 });
+  emitStructure();
   const init = await api.initUpload(
     {
       sha256,
@@ -132,16 +147,19 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   if (init.status === "duplicate") {
     // Estado terminal + borrado del blob en una sola transacción.
     await finishItem(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: file.size });
+    useItemProgress.getState().clearItemProgress(item.asset_id);
     refreshRemoteData();
-    publishSyncProgress(true);
+    emitStructure();
     return;
   }
 
   await setState(item.asset_id, "uploading_thumb", { remote_id: init.id });
+  emitStructure();
   await uploadBlob(init.thumb, thumb.blob, undefined, signal);
   throwIfAborted(signal);
 
   await setState(item.asset_id, "uploading_original");
+  emitStructure();
   let lastProgress = 0;
   await uploadBlob(
     init.original,
@@ -151,7 +169,9 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
       if (now - lastProgress > 500) {
         lastProgress = now;
         void setState(item.asset_id, "uploading_original", { bytes_sent: sent }).catch(() => {});
-        useQueueEvents.getState().emit();
+        useItemProgress
+          .getState()
+          .setItemProgress(item.asset_id, file.size > 0 ? sent / file.size : 0);
         publishSyncProgress(true);
       }
     },
@@ -160,14 +180,47 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   throwIfAborted(signal);
 
   await setState(item.asset_id, "completing", { bytes_sent: file.size });
+  emitStructure();
   await api.completeUpload(init.id, { signal });
   await finishItem(item.asset_id, "done", { remote_id: init.id, bytes_sent: file.size });
+  useItemProgress.getState().clearItemProgress(item.asset_id);
   refreshRemoteData();
-  useQueueEvents.getState().emit();
-  publishSyncProgress(true);
+  emitStructure();
 }
 
-export type ProcessOptions = { maxItems?: number; deadlineMs?: number };
+export type ProcessOptions = {
+  maxItems?: number;
+  deadlineMs?: number;
+  prioritizePhotos?: boolean;
+};
+
+/** Dedup por lote de items que ya tienen sha (reintentos/pre-hasheados). */
+async function preflightDedup(signal: AbortSignal): Promise<void> {
+  const items = getQueuedWithSha(10);
+  if (items.length === 0) return;
+  try {
+    const { existing } = await api.checkHashes(
+      items.map((i) => i.sha256).filter((s): s is string => Boolean(s)),
+      { signal },
+    );
+    if (existing.length === 0) return;
+    const bySha = new Map(existing.map((e) => [e.sha256, e.id]));
+    for (const item of items) {
+      const remoteId = item.sha256 ? bySha.get(item.sha256) : undefined;
+      if (!remoteId || !item.sha256) continue;
+      await finishItem(item.asset_id, "duplicate", {
+        sha256: item.sha256,
+        remote_id: remoteId,
+        bytes_sent: item.bytes_total,
+      });
+      useItemProgress.getState().clearItemProgress(item.asset_id);
+    }
+    refreshRemoteData();
+    emitStructure();
+  } catch {
+    throwIfAborted(signal);
+  }
+}
 
 /**
  * Una pasada de la cola, con exclusión por pestaña vía Web Locks
@@ -201,6 +254,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         // La pestaña pudo morir a mitad de un item: devolver los estados
         // transitorios a queued antes de elegir el siguiente pendiente.
         await recoverInterrupted().catch(() => {});
+        await preflightDedup(signal);
         while (true) {
           if (cancelled || signal.aborted) break;
           // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.
@@ -212,7 +266,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
           // Ver lo que encoló otra pestaña entre iteración e iteración.
           await refreshProjection();
 
-          const item = getNextPending();
+          const item = getNextPending({ prioritizePhotos: opts.prioritizePhotos });
           if (!item) break;
           if (seenThisPass.has(item.asset_id)) break;
           seenThisPass.add(item.asset_id);
@@ -227,6 +281,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
               try {
                 await setState(item.asset_id, "queued");
               } catch {}
+              useItemProgress.getState().clearItemProgress(item.asset_id);
+              emitStructure();
               break;
             }
             const message =
@@ -237,6 +293,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
               try {
                 await setState(item.asset_id, "queued");
               } catch {}
+              useItemProgress.getState().clearItemProgress(item.asset_id);
+              emitStructure();
               break;
             }
             try {
@@ -264,8 +322,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
             } catch {
               // La cola se cerró a mitad de la pasada (logout/cierre): nada que anotar.
             }
-            useQueueEvents.getState().emit();
-            publishSyncProgress(true);
+            useItemProgress.getState().clearItemProgress(item.asset_id);
+            emitStructure();
           }
         }
       } finally {

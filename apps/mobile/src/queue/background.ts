@@ -21,7 +21,7 @@ TaskManager.defineTask(BACKUP_TASK, async () => {
     if (!owner) return BackgroundTask.BackgroundTaskResult.Success;
     await initializeQueue(owner);
     await scanLibrary();
-    await processQueue({ deadlineMs: Date.now() + 25_000 });
+    await processQueue({ deadlineMs: Date.now() + 25_000, prioritizePhotos: true });
     return BackgroundTask.BackgroundTaskResult.Success;
   } catch {
     return BackgroundTask.BackgroundTaskResult.Failed;

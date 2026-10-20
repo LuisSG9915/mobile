@@ -3,7 +3,7 @@ import { useQueueEvents } from "../lib/events";
 import { processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
-export type BackupPassOptions = { forceScan?: boolean };
+export type BackupPassOptions = { forceScan?: boolean; incrementalWindowMs?: number };
 
 /**
  * En web no hay biblioteca que escanear (scanLibrary es no-op): solo procesa.

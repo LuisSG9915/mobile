@@ -80,7 +80,7 @@ export default function BackupScreen() {
         ? stats.pending > 0
           ? wifiOnly
             ? t.backup.waitingWifi
-            : t.backup.allDone
+            : t.backup.queued(stats.pending)
           : t.backup.allDone
         : stats.pending > 0
           ? t.backup.uploading(`${stats.pending} pendientes`)

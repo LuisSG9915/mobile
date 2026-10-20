@@ -123,3 +123,31 @@ export const useSyncProgress = create<
   status: "idle",
   update: (s) => set(s),
 }));
+
+/**
+ * Progreso de bytes por asset, separado del bus de estructura de la cola.
+ * Los procesadores lo actualizan cada ~500 ms sin emitir `useQueueEvents`, así
+ * solo se re-renderiza el badge de la celda que está subiendo.
+ */
+export const useItemProgress = create<{
+  progressByAssetId: Record<string, number>;
+  setItemProgress: (assetId: string, progress: number) => void;
+  clearItemProgress: (assetId: string) => void;
+}>((set) => ({
+  progressByAssetId: {},
+  setItemProgress: (assetId, progress) => {
+    const clamped = Math.max(0, Math.min(1, progress));
+    set((s) =>
+      s.progressByAssetId[assetId] === clamped
+        ? s
+        : { progressByAssetId: { ...s.progressByAssetId, [assetId]: clamped } },
+    );
+  },
+  clearItemProgress: (assetId) =>
+    set((s) => {
+      if (!(assetId in s.progressByAssetId)) return s;
+      const next = { ...s.progressByAssetId };
+      delete next[assetId];
+      return { progressByAssetId: next };
+    }),
+}));

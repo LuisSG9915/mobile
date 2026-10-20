@@ -92,6 +92,7 @@ export const t = {
     pause: "Pausar respaldo",
     resume: "Reanudar respaldo",
     paused: "Respaldo en pausa",
+    queued: (n: number) => `En cola (${n} pendientes)`,
   },
   gallery: {
     emptyTitle: "Aún no hay fotos respaldadas",
@@ -119,6 +120,13 @@ export const t = {
     filterDocuments: "Documentos",
     jumpToMonth: "Ir a un mes",
     jumpEmpty: "No hay meses disponibles",
+    bannerError: "Algunas fotos no se pudieron respaldar",
+    bannerPaused: (n: number) => `Respaldo en pausa (${n} pendientes)`,
+    bannerWifi: (n: number) => `Esperando Wi-Fi para respaldar ${n} elementos`,
+    bannerRetry: "Reintentar",
+    bannerResume: "Reanudar",
+    bannerUploadNow: "Subir ahora",
+    bannerDismiss: "Ocultar aviso",
   },
   sync: {
     localOnly: "Solo en este dispositivo",

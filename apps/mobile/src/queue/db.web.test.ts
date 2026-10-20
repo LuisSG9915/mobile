@@ -139,6 +139,13 @@ describe("getNextPending", () => {
     expect(db.getNextPending()?.asset_id).toBe("b");
   });
 
+  it("prioritizePhotos devuelve una foto antes que un video más antiguo", async () => {
+    await db.enqueueAsset({ id: "video", uri: "v", mediaType: "video", creationTime: 100 });
+    await db.enqueueAsset({ id: "photo", uri: "p", mediaType: "photo", creationTime: 200 });
+    expect(db.getNextPending()?.asset_id).toBe("video");
+    expect(db.getNextPending({ prioritizePhotos: true })?.asset_id).toBe("photo");
+  });
+
   it("ignora items con next_retry_at en el futuro", async () => {
     await db.enqueueAsset({ id: "a", uri: "a", mediaType: "photo", creationTime: 100 });
     await db.enqueueAsset({ id: "b", uri: "b", mediaType: "photo", creationTime: 200 });

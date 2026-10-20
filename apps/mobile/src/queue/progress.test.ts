@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useItemProgress } from "../lib/store";
 import { computeSyncProgress } from "./progress";
 import type { QueueItem } from "./types";
+
+beforeEach(() => {
+  useItemProgress.setState({ progressByAssetId: {} });
+});
 
 function item(over: Partial<QueueItem> = {}): QueueItem {
   return {
@@ -75,5 +80,25 @@ describe("computeSyncProgress", () => {
     const items = [item({ state: "done", bytes_total: 100, bytes_sent: 250 })];
     const p = computeSyncProgress(items, false);
     expect(p.bytesUploaded).toBe(100);
+  });
+});
+
+describe("useItemProgress", () => {
+  it("actualiza el progreso por asset y lo limpia al terminar", () => {
+    useItemProgress.getState().setItemProgress("a", 0.5);
+    useItemProgress.getState().setItemProgress("b", 0.25);
+    expect(useItemProgress.getState().progressByAssetId).toEqual({ a: 0.5, b: 0.25 });
+
+    useItemProgress.getState().clearItemProgress("a");
+    expect(useItemProgress.getState().progressByAssetId).toEqual({ b: 0.25 });
+    useItemProgress.getState().clearItemProgress("b");
+    expect(useItemProgress.getState().progressByAssetId).toEqual({});
+  });
+
+  it("clampea el progreso a 0..1", () => {
+    useItemProgress.getState().setItemProgress("a", 1.5);
+    expect(useItemProgress.getState().progressByAssetId.a).toBe(1);
+    useItemProgress.getState().setItemProgress("a", -0.2);
+    expect(useItemProgress.getState().progressByAssetId.a).toBe(0);
   });
 });

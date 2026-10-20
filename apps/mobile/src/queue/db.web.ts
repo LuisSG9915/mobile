@@ -365,14 +365,34 @@ export function setNextRetryAt(assetId: string, at: number): Promise<void> {
   });
 }
 
-export function getNextPending(): QueueItem | null {
+export function getNextPending(opts: { prioritizePhotos?: boolean } = {}): QueueItem | null {
   const now = Date.now();
   let best: Row | null = null;
   for (const row of queue.values()) {
     if (!PENDING_STATES.includes(row.state) || row.next_retry_at > now) continue;
-    if (!best || row.created_at < best.created_at) best = row;
+    if (!best) {
+      best = row;
+      continue;
+    }
+    if (opts.prioritizePhotos) {
+      const bestIsPhoto = best.media_type === "photo";
+      const rowIsPhoto = row.media_type === "photo";
+      if (bestIsPhoto !== rowIsPhoto) {
+        if (rowIsPhoto) best = row;
+        continue;
+      }
+    }
+    if (row.created_at < best.created_at) best = row;
   }
   return best;
+}
+
+/** Items en `queued` con sha conocido (reintentos/pre-hasheados) para dedup por lote. */
+export function getQueuedWithSha(limit = 10): QueueItem[] {
+  return [...queue.values()]
+    .filter((r) => r.state === "queued" && r.sha256 != null)
+    .sort((a, b) => a.created_at - b.created_at)
+    .slice(0, limit);
 }
 
 export function getPendingItems(limit = 100): QueueItem[] {

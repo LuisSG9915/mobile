@@ -33,7 +33,11 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="media/[id]"
-          options={{ presentation: "fullScreenModal", animation: "fade" }}
+          options={{
+            presentation: "fullScreenModal",
+            animation: "fade",
+            contentStyle: { backgroundColor: "transparent" },
+          }}
         />
         <Stack.Screen name="trash" options={{ presentation: "modal" }} />
         <Stack.Screen name="cleaner" />

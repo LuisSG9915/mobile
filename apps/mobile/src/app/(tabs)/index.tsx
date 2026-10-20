@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import {
+  AlertCircle,
   Calendar,
   Check,
   Download,
@@ -11,9 +12,11 @@ import {
   FolderPlus,
   Heart,
   MapPin,
+  Pause,
   Play,
   Search,
   Trash2,
+  Wifi,
   X,
 } from "lucide-react-native";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,12 +41,17 @@ import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { downloadMany } from "../../lib/download-many";
+import { useQueueEvents } from "../../lib/events";
 import { formatDuration } from "../../lib/format";
 import { deleteLocalAssets } from "../../lib/free-space";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
-import { useSettings } from "../../lib/store";
+import { hapticMedium, hapticSelection } from "../../lib/haptics";
+import { useSettings, useSyncProgress } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
+import { isBackupPaused, retryFailed, setBackupPaused } from "../../queue/db";
+import { allowUploadOnCellularOnce, isRunning } from "../../queue/processor";
+import { runBackupPass } from "../../queue/runner";
 import { EmptyState, SelectAlbumsModal, SyncBadge } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { FastScrubber } from "../../ui/FastScrubber";
@@ -139,7 +147,7 @@ const PhotoCell = memo(
             <Heart size={12} color="#f43f5e" fill="#f43f5e" />
           </View>
         ) : null}
-        <SyncBadge status={photo.syncStatus} progress={photo.progress} />
+        <SyncBadge status={photo.syncStatus} progress={photo.progress} assetId={photo.assetId} />
       </Pressable>
     );
   },
@@ -149,7 +157,6 @@ const PhotoCell = memo(
     prev.selected === next.selected &&
     prev.photo.key === next.photo.key &&
     prev.photo.syncStatus === next.photo.syncStatus &&
-    prev.photo.progress === next.photo.progress &&
     prev.photo.localUri === next.photo.localUri &&
     prev.photo.thumbUrl === next.photo.thumbUrl &&
     prev.photo.remoteId === next.photo.remoteId &&
@@ -165,8 +172,13 @@ export default function GalleryScreen() {
   const albumFilter = useSettings((s) => s.albumFilter);
   const setAlbumFilter = useSettings((s) => s.setAlbumFilter);
   const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
+  const wifiOnly = useSettings((s) => s.wifiOnly);
+  const syncStatus = useSyncProgress((s) => s.status);
+  const filesRemaining = useSyncProgress((s) => s.filesRemaining);
+  const paused = isBackupPaused();
   const cell = width / columns;
   const [albumModalOpen, setAlbumModalOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.
   const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter, albumFilter);
@@ -181,6 +193,52 @@ export default function GalleryScreen() {
   // closures (los callbacks estables no pueden capturar `selected` directo).
   const selectedRef = useRef<Set<string> | null>(null);
   selectedRef.current = selected;
+
+  const banner = useMemo(() => {
+    if (syncStatus === "error") {
+      return {
+        kind: "error" as const,
+        text: t.gallery.bannerError,
+        action: t.gallery.bannerRetry,
+        onPress: () => {
+          void retryFailed()
+            .then(() => {
+              useQueueEvents.getState().emit();
+              void runBackupPass().catch(() => {});
+            })
+            .catch(() => {});
+        },
+      };
+    }
+    if (paused && filesRemaining > 0) {
+      return {
+        kind: "paused" as const,
+        text: t.gallery.bannerPaused(filesRemaining),
+        action: t.gallery.bannerResume,
+        onPress: () => {
+          setBackupPaused(false);
+          useQueueEvents.getState().emit();
+          void runBackupPass().catch(() => {});
+        },
+      };
+    }
+    if (!isRunning() && filesRemaining > 0 && wifiOnly) {
+      return {
+        kind: "wifi" as const,
+        text: t.gallery.bannerWifi(filesRemaining),
+        action: t.gallery.bannerUploadNow,
+        onPress: () => {
+          allowUploadOnCellularOnce();
+          void runBackupPass().catch(() => {});
+        },
+      };
+    }
+    return null;
+  }, [syncStatus, filesRemaining, paused, wifiOnly]);
+
+  useEffect(() => {
+    setBannerDismissed(false);
+  }, [banner?.kind]);
 
   useEffect(() => {
     if (!selected) return;
@@ -255,7 +313,12 @@ export default function GalleryScreen() {
   // ---- gestos ----
 
   const applyPinch = useCallback(
-    (dir: -1 | 1) => setGridColumns(pinchLevel(columns, dir)),
+    (dir: -1 | 1) => {
+      const next = pinchLevel(columns, dir);
+      if (next === columns) return;
+      hapticSelection();
+      setGridColumns(next);
+    },
     [columns, setGridColumns],
   );
   const pinch = useMemo(
@@ -275,11 +338,13 @@ export default function GalleryScreen() {
     lastHitRow.current = idx;
     const row = rows[idx];
     if (row?.type !== "photo") return;
+    hapticSelection();
     setSelected((prev) => new Set(prev ?? []).add(row.key));
   };
 
   const beginSelect = useCallback((photo: HybridPhoto) => {
     lastHitRow.current = -1;
+    hapticMedium();
     setSelected((prev) => new Set(prev ?? []).add(photo.key));
     setDragSelecting(true);
   }, []);
@@ -647,6 +712,30 @@ export default function GalleryScreen() {
             accessibilityLabel="Configurar álbumes"
           >
             <Text className="text-xs font-semibold text-accent">Configurar</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {banner && !bannerDismissed && !selected ? (
+        <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2 dark:border-amber-700/60 dark:bg-amber-950/40">
+          {banner.kind === "error" ? (
+            <AlertCircle size={15} color="#dc2626" />
+          ) : banner.kind === "paused" ? (
+            <Pause size={15} color="#d97706" />
+          ) : (
+            <Wifi size={15} color="#d97706" />
+          )}
+          <Text className="flex-1 text-xs font-medium text-amber-900 dark:text-amber-100">
+            {banner.text}
+          </Text>
+          <Pressable onPress={banner.onPress} hitSlop={8} accessibilityRole="button">
+            <Text className="text-xs font-semibold text-accent">{banner.action}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setBannerDismissed(true)}
+            hitSlop={8}
+            accessibilityLabel={t.gallery.bannerDismiss}
+          >
+            <X size={14} color="#a3a3a3" />
           </Pressable>
         </View>
       ) : null}

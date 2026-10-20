@@ -233,6 +233,16 @@ describe("getters síncronos con scoping", () => {
     expect(params).toEqual(["u1", expect.any(Number)]);
   });
 
+  it("prioritizePhotos ordena fotos antes que videos", async () => {
+    sqliteDb.getFirstSync.mockReturnValueOnce({ asset_id: "photo" });
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    const item = db.getNextPending({ prioritizePhotos: true });
+    expect(item?.asset_id).toBe("photo");
+    const [sql] = sqliteDb.getFirstSync.mock.calls.at(-1) as [string, unknown[]];
+    expect(sql).toContain("CASE WHEN media_type = 'photo' THEN 0 ELSE 1 END");
+  });
+
   it("getQueueItems filtra por el usuario activo", async () => {
     const db = await importNativeDb();
     await db.initializeQueue("u1");

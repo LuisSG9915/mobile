@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { t } from "../i18n/es";
+import { useItemProgress } from "../lib/store";
 
 export function Button({
   label,
@@ -123,7 +124,17 @@ const BADGE_A11Y: Record<SyncStatus, string> = {
  * Chip de estado de sincronización sobre la miniatura (estilo Google Fotos).
  * FAILED destaca en rojo; SYNCING muestra el porcentaje si hay progreso.
  */
-export function SyncBadge({ status, progress }: { status: SyncStatus; progress?: number | null }) {
+export function SyncBadge({
+  status,
+  progress,
+  assetId,
+}: {
+  status: SyncStatus;
+  progress?: number | null;
+  assetId?: string | null;
+}) {
+  const liveProgress = useItemProgress((s) => (assetId ? s.progressByAssetId[assetId] : undefined));
+  const effectiveProgress = liveProgress ?? progress;
   const icon = { size: 14, color: "#fff" } as const;
   let glyph: ReactNode;
   let label: string | null = null;
@@ -138,7 +149,7 @@ export function SyncBadge({ status, progress }: { status: SyncStatus; progress?:
       break;
     case "SYNCING":
       glyph = <CloudUpload {...icon} />;
-      label = progress != null ? `${Math.round(progress * 100)}%` : null;
+      label = effectiveProgress != null ? `${Math.round(effectiveProgress * 100)}%` : null;
       bg = "bg-accent/80";
       break;
     case "PENDING":

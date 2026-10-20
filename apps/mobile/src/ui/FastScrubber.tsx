@@ -4,6 +4,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import type { GalleryRow } from "../lib/gallery";
 import { type GridGeometry, lineAtY, scrubLabel } from "../lib/grid-geometry";
+import { hapticSelection } from "../lib/haptics";
 
 type Props = {
   geometry: GridGeometry;
@@ -22,6 +23,7 @@ export function FastScrubber({ geometry, rows, onScrub }: Props) {
   const [trackH, setTrackH] = useState(0);
   const [bubble, setBubble] = useState<{ y: number; label: string } | null>(null);
   const lastIndex = useRef(-1);
+  const lastLabel = useRef("");
 
   const scrub = useCallback(
     (y: number) => {
@@ -35,13 +37,19 @@ export function FastScrubber({ geometry, rows, onScrub }: Props) {
         lastIndex.current = rowIndex;
         onScrub(rowIndex);
       }
-      setBubble({ y: Math.min(Math.max(y, 20), trackH - 20), label: scrubLabel(line, rows) });
+      const label = scrubLabel(line, rows);
+      if (label !== lastLabel.current) {
+        lastLabel.current = label;
+        hapticSelection();
+      }
+      setBubble({ y: Math.min(Math.max(y, 20), trackH - 20), label });
     },
     [trackH, geometry, rows, onScrub],
   );
 
   const endScrub = useCallback(() => {
     lastIndex.current = -1;
+    lastLabel.current = "";
     setBubble(null);
   }, []);
 

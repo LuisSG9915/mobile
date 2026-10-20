@@ -270,16 +270,29 @@ export async function setNextRetryAt(assetId: string, at: number): Promise<void>
   ]);
 }
 
-export function getNextPending(): QueueItem | null {
+export function getNextPending(opts: { prioritizePhotos?: boolean } = {}): QueueItem | null {
+  const order = opts.prioritizePhotos
+    ? "CASE WHEN media_type = 'photo' THEN 0 ELSE 1 END, created_at ASC"
+    : "created_at ASC";
   return (
     getQueueDb().getFirstSync<QueueItem>(
       `SELECT * FROM queue
        WHERE user_id IS ?
          AND state IN ('queued','hashing','thumbnailing','init','uploading_thumb','uploading_original','completing')
          AND next_retry_at <= ?
-       ORDER BY created_at ASC LIMIT 1`,
+       ORDER BY ${order} LIMIT 1`,
       [activeUserId, Date.now()],
     ) ?? null
+  );
+}
+
+/** Items en `queued` con sha conocido (reintentos/pre-hasheados) para dedup por lote. */
+export function getQueuedWithSha(limit = 10): QueueItem[] {
+  return getQueueDb().getAllSync<QueueItem>(
+    `SELECT * FROM queue
+     WHERE user_id IS ? AND state = 'queued' AND sha256 IS NOT NULL
+     ORDER BY created_at ASC LIMIT ?`,
+    [activeUserId, limit],
   );
 }
 

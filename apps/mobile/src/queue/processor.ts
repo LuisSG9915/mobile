@@ -3,15 +3,17 @@ import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library/legacy";
 import * as Network from "expo-network";
+import { AppState } from "react-native";
 import { ApiError, api } from "../api/client";
 import { useQueueEvents } from "../lib/events";
 import { queryClient } from "../lib/query-client";
-import { useSettings } from "../lib/store";
+import { useItemProgress, useSettings } from "../lib/store";
 import {
   bumpAttempt,
   finishItem,
   getNextPending,
   getQueueDb,
+  getQueuedWithSha,
   isBackupPaused,
   type QueueItem,
   recoverInterrupted,
@@ -26,14 +28,41 @@ import { makeThumbAndHash } from "./thumb";
 
 let running = false;
 let cancelled = false;
+let forceCellular = false;
 let activeUploadTask: FileSystem.UploadTask | null = null;
 
-function refreshRemoteData() {
+let refreshPending = false;
+
+function invalidateRemoteData() {
   try {
     void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["storage"] }).catch(() => {});
   } catch {}
+}
+
+/**
+ * En background no hay UI que refrescar: se acumula y se invalida una sola vez
+ * al cerrar la pasada, en vez de hacerlo por cada archivo.
+ */
+function refreshRemoteData() {
+  if (AppState.currentState !== "active") {
+    refreshPending = true;
+    return;
+  }
+  invalidateRemoteData();
+}
+
+function flushRemoteData() {
+  if (!refreshPending) return;
+  refreshPending = false;
+  invalidateRemoteData();
+}
+
+/** Cambio estructural de la cola: estado, encolado, borrado o vínculo remoto. */
+function emitStructure() {
+  useQueueEvents.getState().emit();
+  publishSyncProgress(true);
 }
 
 /**
@@ -49,8 +78,13 @@ export function isRunning() {
   return running;
 }
 
+/** "Subir ahora": permite una pasada por datos móviles sin cambiar el ajuste. */
+export function allowUploadOnCellularOnce(): void {
+  forceCellular = true;
+}
+
 async function canUploadNow(): Promise<{ ok: boolean; reason?: "wifi" }> {
-  if (!useSettings.getState().wifiOnly) return { ok: true };
+  if (!useSettings.getState().wifiOnly || forceCellular) return { ok: true };
   const net = await Network.getNetworkStateAsync();
   const type = net.type;
   if (type === Network.NetworkStateType.WIFI || type === Network.NetworkStateType.ETHERNET) {
@@ -132,8 +166,8 @@ async function processItem(item: QueueItem): Promise<void> {
     await setState(item.asset_id, "failed", {
       last_error: `Formato no admitido (.${rawExt}).`,
     });
-    useQueueEvents.getState().emit();
-    publishSyncProgress(true);
+    useItemProgress.getState().clearItemProgress(item.asset_id);
+    emitStructure();
     return;
   }
   const ext = extFromFilename(item.filename, item.media_type);
@@ -151,6 +185,7 @@ async function processItem(item: QueueItem): Promise<void> {
   const durationMs = item.media_type === "video" ? Math.round((info.duration ?? 0) * 1000) : null;
 
   await setState(item.asset_id, "hashing", { bytes_total: fileSize });
+  emitStructure();
   const sha256 = await sha256File(localUri);
 
   // Dedup criptográfica temprana: si el API ya tiene este sha256 'ready', la
@@ -165,9 +200,9 @@ async function processItem(item: QueueItem): Promise<void> {
         remote_id: hit.id,
         bytes_sent: fileSize,
       });
+      useItemProgress.getState().clearItemProgress(item.asset_id);
       refreshRemoteData();
-      useQueueEvents.getState().emit();
-      publishSyncProgress(true);
+      emitStructure();
       return;
     }
   } catch {
@@ -175,9 +210,11 @@ async function processItem(item: QueueItem): Promise<void> {
   }
 
   await setState(item.asset_id, "thumbnailing");
+  emitStructure();
   const thumb = await makeThumbAndHash(mediaType, localUri);
 
   await setState(item.asset_id, "init", { sha256 });
+  emitStructure();
   const init = await api.initUpload({
     sha256,
     mediaType,
@@ -196,17 +233,20 @@ async function processItem(item: QueueItem): Promise<void> {
 
   if (init.status === "duplicate") {
     await setState(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: fileSize });
+    useItemProgress.getState().clearItemProgress(item.asset_id);
     safeDelete(thumb.uri);
     refreshRemoteData();
-    publishSyncProgress(true);
+    emitStructure();
     return;
   }
 
   await setState(item.asset_id, "uploading_thumb", { remote_id: init.id });
+  emitStructure();
   await uploadFile(init.thumb, thumb.uri);
   safeDelete(thumb.uri);
 
   await setState(item.asset_id, "uploading_original");
+  emitStructure();
   const fileUri = file.uri;
   let lastProgress = 0;
   await uploadFile(init.original, fileUri, (sent) => {
@@ -218,17 +258,18 @@ async function processItem(item: QueueItem): Promise<void> {
         item.asset_id,
         item.user_id ?? null,
       ]);
-      useQueueEvents.getState().emit();
+      useItemProgress.getState().setItemProgress(item.asset_id, fileSize > 0 ? sent / fileSize : 0);
       publishSyncProgress(true);
     }
   });
 
   await setState(item.asset_id, "completing", { bytes_sent: fileSize });
+  emitStructure();
   await api.completeUpload(init.id);
   await setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
+  useItemProgress.getState().clearItemProgress(item.asset_id);
   refreshRemoteData();
-  useQueueEvents.getState().emit();
-  publishSyncProgress(true);
+  emitStructure();
 }
 
 function safeDelete(uri: string) {
@@ -237,7 +278,38 @@ function safeDelete(uri: string) {
   } catch {}
 }
 
-export type ProcessOptions = { maxItems?: number; deadlineMs?: number };
+export type ProcessOptions = {
+  maxItems?: number;
+  deadlineMs?: number;
+  prioritizePhotos?: boolean;
+};
+
+/** Dedup por lote de items que ya tienen sha (reintentos/pre-hasheados). */
+async function preflightDedup(): Promise<void> {
+  const items = getQueuedWithSha(10);
+  if (items.length === 0) return;
+  try {
+    const { existing } = await api.checkHashes(
+      items.map((i) => i.sha256).filter((s): s is string => Boolean(s)),
+    );
+    if (existing.length === 0) return;
+    const bySha = new Map(existing.map((e) => [e.sha256, e.id]));
+    for (const item of items) {
+      const remoteId = item.sha256 ? bySha.get(item.sha256) : undefined;
+      if (!remoteId || !item.sha256) continue;
+      await finishItem(item.asset_id, "duplicate", {
+        sha256: item.sha256,
+        remote_id: remoteId,
+        bytes_sent: item.bytes_total,
+      });
+      useItemProgress.getState().clearItemProgress(item.asset_id);
+    }
+    refreshRemoteData();
+    emitStructure();
+  } catch {
+    // Sin red el flujo normal de /init sigue deduplicando.
+  }
+}
 
 export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   if (running) return;
@@ -248,6 +320,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
     // La app pudo morir a mitad de un item (kill): devolver los estados
     // transitorios a queued con bytes_sent=0 antes de elegir el siguiente.
     await recoverInterrupted().catch(() => {});
+    await preflightDedup();
     while (true) {
       if (cancelled) break;
       // Pausa persistente: el item en vuelo terminó; no se toma el siguiente.
@@ -261,7 +334,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
       const synced = useSettings.getState().syncedAlbumIds;
       if (Array.isArray(synced) && synced.length === 0) break;
 
-      const item = getNextPending();
+      const item = getNextPending({ prioritizePhotos: opts.prioritizePhotos });
       if (!item) break;
 
       try {
@@ -271,6 +344,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         if (cancelled) {
           // Cancelada por el usuario (logout): vuelve a queued sin gastar intento.
           await setState(item.asset_id, "queued").catch(() => {});
+          useItemProgress.getState().clearItemProgress(item.asset_id);
+          emitStructure();
           break;
         }
         const message =
@@ -279,6 +354,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         // 'failed' contra un 401 que no se arregla solo. Reencolar y cortar.
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
           await setState(item.asset_id, "queued").catch(() => {});
+          useItemProgress.getState().clearItemProgress(item.asset_id);
+          emitStructure();
           break;
         }
         // 4xx definitivos no arreglan solos reintentando: failed directo.
@@ -305,12 +382,14 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
             await setState(item.asset_id, "queued", { last_error: message });
           }
         }
-        useQueueEvents.getState().emit();
-        publishSyncProgress(true);
+        useItemProgress.getState().clearItemProgress(item.asset_id);
+        emitStructure();
       }
     }
   } finally {
     running = false;
+    forceCellular = false;
+    flushRemoteData();
     publishSyncProgress(false);
   }
 }

@@ -35,7 +35,7 @@ export type QueueItem = {
 export type QueueStats = { total: number; done: number; pending: number; failed: number };
 
 /** Opciones para el escaneo de biblioteca. */
-export type ScanOptions = { forceScan?: boolean };
+export type ScanOptions = { forceScan?: boolean; incrementalWindowMs?: number };
 
 /** Resultado del scan de biblioteca: encolados + omitidos por formato. */
 export type ScanResult = { added: number; skipped: number };

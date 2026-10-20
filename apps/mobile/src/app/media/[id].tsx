@@ -31,6 +31,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
@@ -39,6 +40,7 @@ import {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
+  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -52,6 +54,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import { deleteLocalAsset, hasLocalCopy } from "../../lib/free-space";
+import { hapticLight } from "../../lib/haptics";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
@@ -64,6 +67,8 @@ function ZoomableImage({
   active,
   onDismiss,
   onDoubleTap,
+  onSingleTap,
+  backdropOpacity,
 }: {
   uri: string;
   thumbhash: string;
@@ -71,6 +76,10 @@ function ZoomableImage({
   /** Swipe-down a escala 1 → cerrar el visor (fase 7). */
   onDismiss?: () => void;
   onDoubleTap?: () => void;
+  /** Tap simple → modo inmersivo (ocultar/mostrar barras). */
+  onSingleTap?: () => void;
+  /** Opacidad del fondo durante el swipe-down. */
+  backdropOpacity?: SharedValue<number>;
 }) {
   const scale = useSharedValue(1);
   const saved = useSharedValue(1);
@@ -88,11 +97,13 @@ function ZoomableImage({
     ty.value = 0;
     savedTx.value = 0;
     savedTy.value = 0;
-  }, [active, scale, saved, tx, ty, savedTx, savedTy]);
+    if (backdropOpacity) backdropOpacity.value = 1;
+  }, [active, scale, saved, tx, ty, savedTx, savedTy, backdropOpacity]);
 
   const pinch = Gesture.Pinch()
     .onUpdate((e) => {
       scale.value = Math.max(1, Math.min(5, saved.value * e.scale));
+      if (backdropOpacity) backdropOpacity.value = 1;
     })
     .onEnd(() => {
       saved.value = scale.value;
@@ -110,11 +121,17 @@ function ZoomableImage({
       if (saved.value > 1) {
         tx.value = savedTx.value + e.translationX;
         ty.value = savedTy.value + e.translationY;
+        if (backdropOpacity) backdropOpacity.value = 1;
       } else if (Math.abs(e.translationY) > Math.abs(e.translationX)) {
         // A escala 1 un arrastre vertical es candidato a swipe-down: la foto
         // sigue al dedo y encoge; el swipe horizontal queda para el carrusel.
         ty.value = e.translationY;
         scale.value = Math.max(0.7, 1 - Math.abs(e.translationY) / 1000);
+        if (backdropOpacity) {
+          backdropOpacity.value = 1 - Math.min(0.65, Math.abs(e.translationY) / 400);
+        }
+      } else if (backdropOpacity) {
+        backdropOpacity.value = 1;
       }
     })
     .onEnd((e) => {
@@ -129,6 +146,7 @@ function ZoomableImage({
       }
       ty.value = withTiming(0);
       scale.value = withTiming(1);
+      if (backdropOpacity) backdropOpacity.value = withTiming(1);
     });
 
   const doubleTap = Gesture.Tap()
@@ -140,6 +158,7 @@ function ZoomableImage({
       const next = saved.value > 1 ? 1 : 2.5;
       saved.value = next;
       scale.value = withTiming(next);
+      if (backdropOpacity) backdropOpacity.value = 1;
       if (next === 1) {
         tx.value = withTiming(0);
         ty.value = withTiming(0);
@@ -148,12 +167,19 @@ function ZoomableImage({
       }
     });
 
+  const singleTap = Gesture.Tap()
+    .numberOfTaps(1)
+    .onEnd(() => {
+      if (onSingleTap) runOnJS(onSingleTap)();
+    });
+  const taps = Gesture.Exclusive(doubleTap, singleTap);
+
   const style = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
 
   return (
-    <GestureDetector gesture={Gesture.Simultaneous(pinch, pan, doubleTap)}>
+    <GestureDetector gesture={Gesture.Simultaneous(pinch, pan, taps)}>
       <Animated.View style={[{ flex: 1 }, style]}>
         <Image
           source={{ uri }}
@@ -300,12 +326,16 @@ function MediaPage({
   near,
   onDismiss,
   onDoubleTap,
+  onSingleTap,
+  backdropOpacity,
 }: {
   item: CarouselItem;
   active: boolean;
   near: boolean;
   onDismiss?: () => void;
   onDoubleTap?: () => void;
+  onSingleTap?: () => void;
+  backdropOpacity?: SharedValue<number>;
 }) {
   const remoteId =
     item.remoteId ?? (!item.id.startsWith("l-") && !item.id.startsWith("q-") ? item.id : null);
@@ -336,6 +366,8 @@ function MediaPage({
       active={active}
       onDismiss={onDismiss}
       onDoubleTap={onDoubleTap}
+      onSingleTap={onSingleTap}
+      backdropOpacity={backdropOpacity}
     />
   ) : (
     <ThumbPage item={item} />
@@ -366,6 +398,16 @@ export default function MediaViewer() {
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [immersive, setImmersive] = useState(false);
+  const backdropOpacity = useSharedValue(1);
+  const barsOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    barsOpacity.value = withTiming(immersive ? 0 : 1, { duration: 180 });
+  }, [immersive, barsOpacity]);
+
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
+  const barsStyle = useAnimatedStyle(() => ({ opacity: barsOpacity.value }));
 
   // El carrusel respeta el filtro activo de la galería (favoritos incluidos) o el álbum si viene de uno.
   const filter = useSettings((s) => s.timelineFilter);
@@ -841,6 +883,7 @@ export default function MediaViewer() {
   };
 
   const handleDoubleTap = () => {
+    hapticLight();
     triggerHeartAnimation();
     if (!isFav && !isLocalItem) {
       fav.mutate(activeId);
@@ -848,80 +891,90 @@ export default function MediaViewer() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-black" edges={["top", "bottom"]}>
-      <View className="flex-row items-center justify-between px-4 py-2 z-10">
-        <View className="flex-row items-center gap-3">
-          <Pressable onPress={() => router.back()} accessibilityLabel="cerrar" hitSlop={12}>
-            <X color="#fff" size={26} />
-          </Pressable>
-          {isLocalItem ? (
-            <View className="bg-neutral-800/90 border border-neutral-700/60 px-2.5 py-1 rounded-full">
-              <Text className="text-neutral-300 text-xs font-medium">Sin sincronizar</Text>
-            </View>
-          ) : null}
+    <SafeAreaView className="flex-1 bg-transparent" edges={["top", "bottom"]}>
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, { backgroundColor: "black" }, backdropStyle]}
+      />
+      <Animated.View style={barsStyle} pointerEvents={immersive ? "none" : "auto"}>
+        <View className="flex-row items-center justify-between px-4 py-2 z-10">
+          <View className="flex-row items-center gap-3">
+            <Pressable onPress={() => router.back()} accessibilityLabel="cerrar" hitSlop={12}>
+              <X color="#fff" size={26} />
+            </Pressable>
+            {isLocalItem ? (
+              <View className="bg-neutral-800/90 border border-neutral-700/60 px-2.5 py-1 rounded-full">
+                <Text className="text-neutral-300 text-xs font-medium">Sin sincronizar</Text>
+              </View>
+            ) : null}
+          </View>
+          <View className="flex-row gap-5">
+            {d?.mediaType === "photo" && !isLocalItem ? (
+              <Pressable
+                onPress={() => setEditorOpen(true)}
+                accessibilityLabel={t.editor.title}
+                hitSlop={12}
+              >
+                <Crop color="#fff" size={24} />
+              </Pressable>
+            ) : null}
+            {!isLocalItem ? (
+              <Pressable
+                onPress={() => fav.mutate(activeId)}
+                disabled={fav.isPending}
+                accessibilityLabel={t.viewer.favorite}
+                hitSlop={12}
+              >
+                <Heart color="#fff" size={24} fill={isFav ? "#f43f5e" : "none"} />
+              </Pressable>
+            ) : null}
+            {!isLocalItem ? (
+              <Pressable
+                onPress={() => void onDownload()}
+                disabled={downloading}
+                accessibilityLabel={t.viewer.download}
+                hitSlop={12}
+              >
+                {downloading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Download color="#fff" size={24} />
+                )}
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => setShareOpen(true)}
+              accessibilityLabel={t.viewer.shareMedia}
+              hitSlop={12}
+            >
+              <Share2 color="#fff" size={24} />
+            </Pressable>
+            <Pressable
+              onPress={() => setShowInfo(true)}
+              accessibilityLabel={t.viewer.info}
+              hitSlop={12}
+            >
+              <Info color="#fff" size={24} />
+            </Pressable>
+            {!isLocalItem ? (
+              <Pressable
+                onPress={() => setAddToAlbumOpen(true)}
+                accessibilityLabel={t.albums.addToAlbum}
+                hitSlop={12}
+              >
+                <FolderPlus color="#fff" size={24} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={onDeletePress}
+              accessibilityLabel={t.viewer.deleteTitle}
+              hitSlop={12}
+            >
+              <Trash2 color="#fff" size={24} />
+            </Pressable>
+          </View>
         </View>
-        <View className="flex-row gap-5">
-          {d?.mediaType === "photo" && !isLocalItem ? (
-            <Pressable
-              onPress={() => setEditorOpen(true)}
-              accessibilityLabel={t.editor.title}
-              hitSlop={12}
-            >
-              <Crop color="#fff" size={24} />
-            </Pressable>
-          ) : null}
-          {!isLocalItem ? (
-            <Pressable
-              onPress={() => fav.mutate(activeId)}
-              disabled={fav.isPending}
-              accessibilityLabel={t.viewer.favorite}
-              hitSlop={12}
-            >
-              <Heart color="#fff" size={24} fill={isFav ? "#f43f5e" : "none"} />
-            </Pressable>
-          ) : null}
-          {!isLocalItem ? (
-            <Pressable
-              onPress={() => void onDownload()}
-              disabled={downloading}
-              accessibilityLabel={t.viewer.download}
-              hitSlop={12}
-            >
-              {downloading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Download color="#fff" size={24} />
-              )}
-            </Pressable>
-          ) : null}
-          <Pressable
-            onPress={() => setShareOpen(true)}
-            accessibilityLabel={t.viewer.shareMedia}
-            hitSlop={12}
-          >
-            <Share2 color="#fff" size={24} />
-          </Pressable>
-          <Pressable
-            onPress={() => setShowInfo(true)}
-            accessibilityLabel={t.viewer.info}
-            hitSlop={12}
-          >
-            <Info color="#fff" size={24} />
-          </Pressable>
-          {!isLocalItem ? (
-            <Pressable
-              onPress={() => setAddToAlbumOpen(true)}
-              accessibilityLabel={t.albums.addToAlbum}
-              hitSlop={12}
-            >
-              <FolderPlus color="#fff" size={24} />
-            </Pressable>
-          ) : null}
-          <Pressable onPress={onDeletePress} accessibilityLabel={t.viewer.deleteTitle} hitSlop={12}>
-            <Trash2 color="#fff" size={24} />
-          </Pressable>
-        </View>
-      </View>
+      </Animated.View>
 
       <View className="flex-1">
         {/* Corazón animado para gesto de doble toque */}
@@ -1033,6 +1086,8 @@ export default function MediaViewer() {
                   near={Math.abs(index - activeIndex) <= 1}
                   onDismiss={onDismiss}
                   onDoubleTap={handleDoubleTap}
+                  onSingleTap={() => setImmersive((v) => !v)}
+                  backdropOpacity={backdropOpacity}
                 />
               </View>
             )}
@@ -1054,6 +1109,8 @@ export default function MediaViewer() {
             active
             onDismiss={onDismiss}
             onDoubleTap={handleDoubleTap}
+            onSingleTap={() => setImmersive((v) => !v)}
+            backdropOpacity={backdropOpacity}
           />
         )}
       </View>

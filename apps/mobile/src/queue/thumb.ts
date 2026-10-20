@@ -41,7 +41,9 @@ export async function makeThumbAndHash(
     try {
       if (!tiny.base64) return "";
       const bytes = toByteArray(tiny.base64);
+      await new Promise((r) => setTimeout(r, 0));
       const decoded = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true });
+      await new Promise((r) => setTimeout(r, 0));
       const hashBytes = rgbaToThumbHash(decoded.width, decoded.height, decoded.data);
       return fromByteArray(hashBytes);
     } catch {
@@ -53,13 +55,10 @@ export async function makeThumbAndHash(
   const thumbhash =
     hashB64 || fromByteArray(rgbaToThumbHash(1, 1, new Uint8Array([128, 128, 128, 255])));
 
-  // Miniatura: WebP ≤ 50KB con degradación progresiva
+  // Miniatura: WebP ≤ 50KB con un único fallback (evita 5 decodes del original).
   const attempts: [number, number][] = [
-    [THUMB_MAX_DIMENSION, 0.7],
-    [THUMB_MAX_DIMENSION, 0.55],
-    [THUMB_MAX_DIMENSION, 0.4],
-    [320, 0.5],
-    [320, 0.35],
+    [THUMB_MAX_DIMENSION, 0.65],
+    [320, 0.42],
   ];
   let last: { uri: string; bytes: number } | null = null;
   for (const [dim, q] of attempts) {
