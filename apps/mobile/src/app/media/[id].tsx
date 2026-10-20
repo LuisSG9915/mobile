@@ -456,7 +456,6 @@ export default function MediaViewer() {
   }>();
   const id = params.id;
   const isWeb = Platform.OS === "web";
-  const isLocalItem = !id || id.startsWith("l-") || id.startsWith("q-") || Boolean(params.localUri);
 
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -577,6 +576,9 @@ export default function MediaViewer() {
   const activeRemoteId =
     activeItem?.remoteId ??
     (!activeId.startsWith("l-") && !activeId.startsWith("q-") ? activeId : null);
+  // Un item con copia local pero ya respaldado sigue siendo remoto: conserva
+  // EXIF, favoritos y acciones de nube. Solo es local si no tiene remoteId.
+  const isLocalItem = !activeRemoteId;
 
   const activeAssetId =
     activeItem?.assetId ??
