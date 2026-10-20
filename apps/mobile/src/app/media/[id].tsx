@@ -1169,7 +1169,7 @@ export default function MediaViewer() {
             disableIntervalMomentum
             decelerationRate="fast"
             showsHorizontalScrollIndicator={false}
-            initialScrollIndex={foundIndex}
+            initialScrollIndex={foundIndex >= 0 ? foundIndex : undefined}
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
             windowSize={3}
             initialNumToRender={3}
