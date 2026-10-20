@@ -2,13 +2,29 @@ import type { MemoryGroup } from "@photos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { Heart, Play, Sparkles, X } from "lucide-react-native";
-import { memo, useState } from "react";
-import { FlatList, Modal, Pressable, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Play, Sparkles, X } from "lucide-react-native";
+import { memo, useCallback, useEffect, useState } from "react";
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import Animated, {
+  cancelAnimation,
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
-import { formatDuration } from "../lib/format";
+import { computeStoryStep, resolveTapZone, STORY_DURATION_MS } from "../lib/story-player";
 
 type MemoryModalProps = {
   group: MemoryGroup | null;
@@ -16,76 +32,184 @@ type MemoryModalProps = {
 };
 
 function MemoryModal({ group, onClose }: MemoryModalProps) {
-  if (!group) return null;
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [runId, setRunId] = useState(0);
+  const progress = useSharedValue(0);
+  const kenBurnsScale = useSharedValue(1);
+  const currentItem = group?.items[activeStoryIndex] ?? group?.items[0] ?? null;
+  const total = group?.items.length ?? 0;
+
+  // Al abrir otra historia, vuelve a la primera diapositiva.
+  useEffect(() => {
+    if (!group) return;
+    setActiveStoryIndex(0);
+    setIsPaused(false);
+  }, [group?.id]);
+
+  // Cada diapositiva reinicia el Ken Burns y la barra de progreso.
+  useEffect(() => {
+    progress.value = 0;
+    kenBurnsScale.value = 1;
+  }, [activeStoryIndex, group?.id, runId, progress, kenBurnsScale]);
+
+  const goTo = useCallback(
+    (direction: "next" | "prev") => {
+      if (!group) return;
+      const step = computeStoryStep(activeStoryIndex, group.items.length, direction);
+      if (step.shouldClose) {
+        onClose();
+        return;
+      }
+      if (step.nextIndex === activeStoryIndex) {
+        // 'prev' en la primera diapositiva: reinicia la historia.
+        setRunId((v) => v + 1);
+        return;
+      }
+      setActiveStoryIndex(step.nextIndex);
+    },
+    [activeStoryIndex, group, onClose],
+  );
+
+  useEffect(() => {
+    if (!group || total === 0 || !currentItem) return;
+    if (isPaused) {
+      cancelAnimation(progress);
+      cancelAnimation(kenBurnsScale);
+      return;
+    }
+    const remaining = STORY_DURATION_MS * Math.max(0, 1 - progress.value);
+    progress.value = withTiming(
+      1,
+      { duration: Math.max(1, remaining), easing: Easing.linear },
+      (finished) => {
+        if (finished) runOnJS(goTo)("next");
+      },
+    );
+    kenBurnsScale.value = withTiming(1.06, {
+      duration: Math.max(1, remaining),
+      easing: Easing.linear,
+    });
+    return () => {
+      cancelAnimation(progress);
+      cancelAnimation(kenBurnsScale);
+    };
+  }, [activeStoryIndex, currentItem, group, isPaused, progress, kenBurnsScale, runId, total, goTo]);
+
+  const progressStyle = useAnimatedStyle(() => ({
+    width: `${Math.min(1, progress.value) * 100}%`,
+  }));
+  const kenBurnsStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: kenBurnsScale.value }],
+  }));
+
+  if (!group || !currentItem) return null;
+
+  const openCurrent = () => {
+    onClose();
+    router.push({
+      pathname: "/media/[id]",
+      params: {
+        id: currentItem.id,
+        mediaType: currentItem.mediaType,
+        durationMs: currentItem.durationMs != null ? String(currentItem.durationMs) : "",
+        width: String(currentItem.width),
+        height: String(currentItem.height),
+        thumbhash: currentItem.thumbhash,
+      },
+    });
+  };
 
   return (
-    <Modal visible={!!group} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView className="flex-1 bg-white dark:bg-neutral-900">
-        <View className="flex-row items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
-          <View>
-            <Text className="text-xl font-bold text-neutral-900 dark:text-white">
-              {group.title}
-            </Text>
-            <Text className="text-xs text-neutral-500 dark:text-neutral-400">
-              {group.date} · {t.memories.photosCount(group.items.length)}
-            </Text>
-          </View>
-          <Pressable
-            onPress={onClose}
-            hitSlop={8}
-            accessibilityLabel={t.memories.close}
-            className="p-1 rounded-full active:bg-neutral-100 dark:active:bg-neutral-800"
-          >
-            <X size={24} color="#737373" />
-          </Pressable>
-        </View>
+    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <View className="flex-1 bg-black">
+        <Animated.View style={[StyleSheet.absoluteFill, kenBurnsStyle]}>
+          <Image
+            source={{ uri: currentItem.thumbUrl }}
+            placeholder={currentItem.thumbhash ? { thumbhash: currentItem.thumbhash } : undefined}
+            contentFit="cover"
+            style={{ flex: 1 }}
+            transition={150}
+          />
+        </Animated.View>
+        <View className="absolute inset-0 bg-black/20" pointerEvents="none" />
 
-        <FlatList
-          data={group.items}
-          keyExtractor={(item) => item.id}
-          numColumns={3}
-          contentContainerStyle={{ padding: 2 }}
-          renderItem={({ item }) => (
+        <Pressable
+          className="absolute inset-0"
+          onPress={(e) => {
+            const zone = resolveTapZone(e.nativeEvent.locationX, width);
+            goTo(zone);
+          }}
+          onLongPress={() => setIsPaused(true)}
+          onPressOut={() => setIsPaused(false)}
+          delayLongPress={250}
+          accessibilityLabel={group.title}
+        >
+          {currentItem.mediaType === "video" ? (
+            <View className="flex-1 items-center justify-center" pointerEvents="none">
+              <View className="bg-black/50 rounded-full p-4">
+                <Play size={32} color="#fff" fill="#fff" />
+              </View>
+            </View>
+          ) : null}
+        </Pressable>
+
+        <View
+          className="absolute inset-0"
+          style={{ opacity: isPaused ? 0 : 1 }}
+          pointerEvents={isPaused ? "none" : "box-none"}
+        >
+          <View style={{ paddingTop: insets.top + 12 }} className="px-4">
+            <View className="flex-row gap-1.5">
+              {group.items.map((item, idx) => (
+                <View
+                  key={item.id}
+                  className="flex-1 h-0.5 rounded-full overflow-hidden bg-white/30"
+                >
+                  {idx < activeStoryIndex ? <View className="flex-1 bg-white" /> : null}
+                  {idx === activeStoryIndex ? (
+                    <Animated.View style={progressStyle} className="h-full bg-white" />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+
+            <View className="flex-row items-center justify-between mt-4">
+              <View className="flex-1 pr-3">
+                <Text className="text-white text-lg font-bold">{group.title}</Text>
+                <Text className="text-white/80 text-xs mt-0.5" numberOfLines={1}>
+                  {group.date}
+                  {currentItem.city ? ` · ${currentItem.city}` : ""}
+                </Text>
+              </View>
+              <Pressable
+                onPress={onClose}
+                hitSlop={12}
+                accessibilityLabel={t.memories.close}
+                className="p-1 rounded-full active:bg-white/20"
+              >
+                <X size={24} color="#fff" />
+              </Pressable>
+            </View>
+          </View>
+
+          <View
+            className="absolute left-0 right-0 items-center"
+            style={{ bottom: insets.bottom + 24 }}
+            pointerEvents="box-none"
+          >
             <Pressable
-              onPress={() => {
-                onClose();
-                router.push({
-                  pathname: "/media/[id]",
-                  params: {
-                    id: item.id,
-                    mediaType: item.mediaType,
-                    durationMs: item.durationMs != null ? String(item.durationMs) : "",
-                    width: String(item.width),
-                    height: String(item.height),
-                    thumbhash: item.thumbhash,
-                  },
-                });
-              }}
-              style={{ flex: 1 / 3, aspectRatio: 1, padding: 2 }}
+              onPress={openCurrent}
+              className="bg-black/60 border border-white/20 rounded-full px-5 py-2.5 active:bg-black/80"
+              accessibilityRole="button"
             >
-              <Image
-                source={{ uri: item.thumbUrl }}
-                placeholder={item.thumbhash ? { thumbhash: item.thumbhash } : undefined}
-                contentFit="cover"
-                style={{ width: "100%", height: "100%", borderRadius: 6 }}
-              />
-              {item.mediaType === "video" ? (
-                <View className="absolute bottom-2 right-2 flex-row items-center bg-black/60 rounded px-1.5 py-0.5 gap-1">
-                  <Play size={10} color="#fff" />
-                  <Text className="text-white text-[10px] font-medium">
-                    {formatDuration(item.durationMs) ?? ""}
-                  </Text>
-                </View>
-              ) : null}
-              {item.isFavorite ? (
-                <View className="absolute bottom-2 left-2 bg-black/50 rounded-full p-1 shadow-sm">
-                  <Heart size={12} color="#f43f5e" fill="#f43f5e" />
-                </View>
-              ) : null}
+              <Text className="text-white text-sm font-semibold">{t.memories.viewPhoto}</Text>
             </Pressable>
-          )}
-        />
-      </SafeAreaView>
+          </View>
+        </View>
+      </View>
     </Modal>
   );
 }
