@@ -25,3 +25,7 @@
 | **Fase 16** | `lib/gallery.ts`, `lib/grid-geometry.ts`, `app/(tabs)/index.tsx` | El Lienzo Silencioso & Contexto de Lugar | [x] Completado | 6f7f2c7 |
 | **Fase 17** | `lib/viewer-physics.ts`, `app/media/[id].tsx` | Visor Ergonómico & Física 2D | [x] Completado | 360efac |
 | **Fase 18** | `lib/story-player.ts`, `ui/MemoriesBar.tsx`, `app/search.tsx` | Story Player & Hub Explorar | [x] Completado | 72b056b |
+| **Fase 19** | `app/media/[id].tsx`, `lib/use-hybrid-gallery.ts` | Swipe Horizontal en Visor & Caché de Carrusel | [x] Completado | 1ef9b9c |
+| **Fase 20** | `lib/gallery.ts`, `queue/{db,db.web}.ts` | Anti-Duplicación tras Reinstalar | [x] Completado | 1ef9b9c |
+| **Fase 21** | `lib/local-assets.ts`, `app/(tabs)/index.tsx` | Arranque Instantáneo & Miniaturas | [x] Completado | 1ef9b9c |
+| **Fase 22** | `queue/{background,runner,processor}.ts`, `app.json` | Background Sync Real & Concurrencia | [x] Completado | 1ef9b9c |
