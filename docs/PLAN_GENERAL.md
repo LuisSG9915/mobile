@@ -14,8 +14,8 @@
 | **Fase 5** | `docs/fases/05_filtros_favoritos_busqueda.md` | Favoritos, Chips de Filtro y Date Jump | [x] Completado | 6ed25ed |
 | **Fase 6** | `docs/fases/06_admin_r2_storage.md` | Panel Almacenamiento R2 para luis.sg9915@gmail.com | [x] Completado | 423f7fe |
 | **Fase 7** | `docs/fases/07_ux_gestos_pipeline.md` | Gestos (Zoom, Scrubber, Swipe) y Tests Finales | [x] Completado | c171624 |
-| **Fase 8** | `apps/mobile/src/queue/*`, `lib/store.ts` | Zero-Jank Gallery & Progress Store | [x] Completado | pendiente |
-| **Fase 9** | `apps/mobile/src/queue/{db,runner,background,processor}.*` | Real-Time & Smart Background Sync | [x] Completado | pendiente |
-| **Fase 10** | `apps/mobile/src/lib/haptics.ts`, `app/media/[id].tsx` | Micro-interacciones Hápticas y Visor Inmersivo | [x] Completado | pendiente |
-| **Fase 11** | `apps/mobile/src/app/(tabs)/index.tsx`, `app/search.tsx` | Smart Status Banner y Búsqueda Fluida | [x] Completado | pendiente |
-| **Fase 12** | `apps/mobile/src/queue/*.test.ts` | Suite de Regresión y Pipeline Final $0 | [x] Completado | pendiente |
+| **Fase 8** | `apps/mobile/src/queue/*`, `lib/store.ts` | Zero-Jank Gallery & Progress Store | [x] Completado | 7c1c54e |
+| **Fase 9** | `apps/mobile/src/queue/{db,runner,background,processor}.*` | Real-Time & Smart Background Sync | [x] Completado | 7c1c54e |
+| **Fase 10** | `apps/mobile/src/lib/haptics.ts`, `app/media/[id].tsx` | Micro-interacciones Hápticas y Visor Inmersivo | [x] Completado | 7c1c54e |
+| **Fase 11** | `apps/mobile/src/app/(tabs)/index.tsx`, `app/search.tsx` | Smart Status Banner y Búsqueda Fluida | [x] Completado | 7c1c54e |
+| **Fase 12** | `apps/mobile/src/queue/*.test.ts` | Suite de Regresión y Pipeline Final $0 | [x] Completado | 7c1c54e |
