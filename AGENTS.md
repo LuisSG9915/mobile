@@ -50,6 +50,13 @@ La app Expo también corre en navegador. Particularidades:
 - **vars de producción vs dev**: `vars` en `apps/api/wrangler.jsonc` lleva los valores de PRODUCCIÓN (`BETTER_AUTH_URL`, `WEB_ORIGINS` → `*.luis-sg9915.workers.dev`); en `wrangler dev` los sobrescribe `.dev.vars` (localhost). Si se añade un var que difiere dev/prod, definir ambos lados.
 - **build:web/deploy:web exigen API de producción**: `apps/mobile/scripts/check-web-env.mjs` aborta si `EXPO_PUBLIC_API_URL` no está definida o no es https/no-localhost (env del proceso > `.env`). `deploy:web` = check + `expo export -p web` + `wrangler deploy` del worker `photos-web` (assets `dist/`, SPA fallback).
 
+## Operación (P0)
+
+- **Errores:** Sentry es opcional y queda apagado sin DSN. Móvil: `EXPO_PUBLIC_SENTRY_DSN` (exige rebuild nativo por el módulo/plugin). Worker: `wrangler secret put SENTRY_DSN`. Guía: `docs/ops/OBSERVABILITY.md`.
+- **Respaldo del catálogo D1:** workflow diario `.github/workflows/backup-d1.yml` → `r2://photos-media/backups/d1/` (SQL + sha256, retención 90 días). Requiere los secrets `CLOUDFLARE_API_TOKEN` (D1:Edit + Workers R2 Storage:Edit) y `CLOUDFLARE_ACCOUNT_ID`. Restauración: `docs/ops/D1_BACKUP.md`.
+- **Versión visible:** `appVersion()`/`appBuild()` (`lib/telemetry.ts`) leen la versión real del binario que gestiona EAS, no la de `app.json`.
+- **Error boundary global:** exportado en `app/_layout.tsx`; captura en Sentry y permite compartir diagnóstico.
+
 ## Reglas
 
 - NO ejecutar `assembleDebug` / builds nativos salvo que sea estrictamente necesario (cambios en deps nativas). Se usa dev-client y se compila una sola vez.

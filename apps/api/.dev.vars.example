@@ -28,3 +28,8 @@ RESEND_API_KEY=
 # para producción hace falta un dominio verificado en Resend y ponerlo aquí
 # (dev) o como var EMAIL_FROM en wrangler.jsonc (prod).
 EMAIL_FROM=Photos <onboarding@resend.dev>
+
+# Sentry (opcional). Sin DSN el SDK no se inicializa.
+# En producción: `npx wrangler secret put SENTRY_DSN`.
+# SENTRY_DSN=
+# SENTRY_ENVIRONMENT=development

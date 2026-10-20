@@ -11,10 +11,12 @@ import { t } from "../../i18n/es";
 import { useQueueEvents } from "../../lib/events";
 import { formatBytes, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
+import { appBuild, appVersion } from "../../lib/telemetry";
 import { performLogout } from "../../queue/logout";
 import { Button, Card } from "../../ui";
 
 const isWeb = Platform.OS === "web";
+const buildLabel = appBuild();
 
 export default function SettingsScreen() {
   const { data: session } = useSession();
@@ -174,7 +176,8 @@ export default function SettingsScreen() {
         <Button label={t.auth.logout} variant="ghost" onPress={logout} />
 
         <Text className="text-xs text-neutral-400 text-center">
-          {t.settings.version} 1.0.0 · Photos
+          {t.settings.version} {appVersion()}
+          {buildLabel ? ` (${buildLabel})` : ""} · Photos
         </Text>
       </ScrollView>
     </SafeAreaView>

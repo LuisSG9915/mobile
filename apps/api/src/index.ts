@@ -1,5 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { apiReference } from "@scalar/hono-api-reference";
+import { captureException, withSentry } from "@sentry/cloudflare";
 import { cors } from "hono/cors";
 import { createAuth } from "./auth";
 import { runCleanup } from "./cron/cleanup";
@@ -20,6 +21,8 @@ const app = new OpenAPIHono<AppEnv>({ strict: false });
 
 app.onError((err, c) => {
   console.error("api_error", err);
+  // Hono atrapa el error y responde 500: sin esto Sentry no lo vería.
+  captureException(err);
   return c.json(
     { error: "internal_error", message: "Algo salió mal. Inténtalo de nuevo en unos segundos." },
     500,
@@ -99,9 +102,22 @@ app.get("/docs", apiReference({ spec: { url: "/openapi.json" }, theme: "default"
 
 export type AppType = typeof v1;
 
-export default {
+const handler = {
   fetch: app.fetch,
   scheduled: async (_event: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
     ctx.waitUntil(runCleanup(env));
   },
 } satisfies ExportedHandler<Bindings>;
+
+// Sin SENTRY_DSN el SDK no se inicializa y el handler queda intacto.
+export default withSentry(
+  (env) =>
+    env.SENTRY_DSN
+      ? {
+          dsn: env.SENTRY_DSN,
+          environment: env.SENTRY_ENVIRONMENT ?? "production",
+          tracesSampleRate: 0.1,
+        }
+      : undefined,
+  handler,
+);

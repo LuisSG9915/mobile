@@ -59,7 +59,8 @@
           "photosPermission": "Permite el acceso para respaldar tus fotos y videos.",
           "savePhotosPermission": "Permite guardar fotos en tu biblioteca."
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "extra": {
       "router": {},
