@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQueueEvents } from "../lib/events";
-import { useSyncProgress } from "../lib/store";
+import { useItemProgress, useSyncProgress } from "../lib/store";
 import { getQueueItems } from "./db";
 import type { QueueItem, QueueState, SyncProgressState, SyncProgressStatus } from "./types";
 
@@ -66,10 +66,39 @@ export function computeSyncProgress(items: QueueItem[], running: boolean): SyncP
 // (evita el ciclo progress ↔ processor y mantiene el módulo ligero/testeable).
 let lastRunning = false;
 
+/** Bytes ya contabilizados por asset en el último snapshot estructural. */
+const sentByAsset = new Map<string, number>();
+
 /** Recalcula la proyección y la publica en el store global. */
 export function publishSyncProgress(running: boolean): void {
   lastRunning = running;
-  useSyncProgress.getState().update(computeSyncProgress(getQueueItems(), running));
+  const items = getQueueItems();
+  useSyncProgress.getState().update(computeSyncProgress(items, running));
+  sentByAsset.clear();
+  for (const item of items) {
+    sentByAsset.set(item.asset_id, Math.min(item.bytes_sent || 0, item.bytes_total || 0));
+  }
+}
+
+/**
+ * Tick de bytes (cada ~500 ms): actualiza solo el delta del asset activo, sin
+ * leer la cola de SQLite. El snapshot completo se recalcula en los cambios
+ * estructurales vía publishSyncProgress.
+ */
+export function publishByteTick(assetId: string, bytesSent: number, bytesTotal: number): void {
+  const total = Math.max(0, bytesTotal);
+  const sent = Math.max(0, Math.min(bytesSent, total || Number.MAX_SAFE_INTEGER));
+  const prev = sentByAsset.get(assetId) ?? 0;
+  const delta = Math.max(0, sent - prev);
+  sentByAsset.set(assetId, sent);
+  useItemProgress.getState().setItemProgress(assetId, total > 0 ? sent / total : 0);
+  if (delta <= 0) return;
+
+  const current = useSyncProgress.getState();
+  useSyncProgress.getState().update({
+    ...current,
+    bytesUploaded: Math.min(current.totalBytes, current.bytesUploaded + delta),
+  });
 }
 
 /**

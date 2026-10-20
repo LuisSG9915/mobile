@@ -285,6 +285,13 @@ export const t = {
     cleanAction: "Limpiar fotos seleccionadas",
     cleanSuccess: (count: number) => `${count} fotos movidas a la papelera`,
     keepCount: (count: number) => `Conservar ${count}`,
+    localCopiesTitle: "Copias locales",
+    localCopiesBody: (count: number) =>
+      `También hay ${count} ${count === 1 ? "copia local" : "copias locales"} de estas fotos en el dispositivo. ¿Eliminarlas también?`,
+    localCopiesDelete: "Eliminar del dispositivo",
+    localCopiesKeep: "Conservar",
+    localCopiesDeleted: (count: number) =>
+      `${count} ${count === 1 ? "copia local eliminada" : "copias locales eliminadas"}`,
   },
   editor: {
     title: "Editar foto",

@@ -365,11 +365,14 @@ export function setNextRetryAt(assetId: string, at: number): Promise<void> {
   });
 }
 
-export function getNextPending(opts: { prioritizePhotos?: boolean } = {}): QueueItem | null {
+export function getNextPending(
+  opts: { prioritizePhotos?: boolean; excludeAssetId?: string } = {},
+): QueueItem | null {
   const now = Date.now();
   let best: Row | null = null;
   for (const row of queue.values()) {
     if (!PENDING_STATES.includes(row.state) || row.next_retry_at > now) continue;
+    if (opts.excludeAssetId && row.asset_id === opts.excludeAssetId) continue;
     if (!best) {
       best = row;
       continue;
@@ -393,6 +396,31 @@ export function getQueuedWithSha(limit = 10): QueueItem[] {
     .filter((r) => r.state === "queued" && r.sha256 != null)
     .sort((a, b) => a.created_at - b.created_at)
     .slice(0, limit);
+}
+
+/** Items en `queued` sin sha para el pre-hasheo por lotes. */
+export function getQueuedWithoutHash(limit = 8): QueueItem[] {
+  const now = Date.now();
+  return [...queue.values()]
+    .filter((r) => r.state === "queued" && r.sha256 == null && r.next_retry_at <= now)
+    .sort((a, b) => {
+      const photoDiff = Number(b.media_type === "photo") - Number(a.media_type === "photo");
+      return photoDiff || a.created_at - b.created_at;
+    })
+    .slice(0, limit);
+}
+
+/** Guarda el sha256 precalculado sin cambiar el estado de la fila. */
+export function setItemHash(assetId: string, sha256: string, bytesTotal: number): Promise<void> {
+  return mutation(async (ctx) => {
+    const updated = await store.updateItem(ctx.userId, assetId, (row) => {
+      row.sha256 = sha256;
+      row.bytes_total = bytesTotal;
+      row.updated_at = Date.now();
+      return row;
+    });
+    if (updated) applyRow(updated);
+  });
 }
 
 export function getPendingItems(limit = 100): QueueItem[] {

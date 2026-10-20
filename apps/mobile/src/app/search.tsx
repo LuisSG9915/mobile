@@ -1,12 +1,12 @@
 import type { SearchFilter, TimelineItem } from "@photos/shared";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { FlashList } from "@shopify/flash-list";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { ChevronLeft, Heart, MapPin, Play, Search, Tag, X } from "lucide-react-native";
 import { useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Pressable,
   ScrollView,
   Text,
@@ -51,16 +51,19 @@ export default function SearchScreen() {
   const minBytes =
     selectedSize === "10mb" ? 10_000_000 : selectedSize === "50mb" ? 50_000_000 : undefined;
 
-  const searchQuery = useQuery({
+  const searchQuery = useInfiniteQuery({
     queryKey: ["search", debouncedSearchText, selectedFilter, selectedTag, selectedSize],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       api.search({
         q: debouncedSearchText.trim() || undefined,
         tag: selectedTag || undefined,
         filter: selectedFilter,
         minBytes,
-        limit: 100,
+        cursor: pageParam,
+        limit: 60,
       }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -68,8 +71,8 @@ export default function SearchScreen() {
   const gap = 3;
   const itemSize = (width - gap * (numColumns - 1)) / numColumns;
 
-  const results = searchQuery.data?.items ?? [];
-  const totalMatches = searchQuery.data?.totalMatches ?? 0;
+  const results = searchQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const totalMatches = searchQuery.data?.pages[0]?.totalMatches ?? 0;
   const availableTags = tagsQuery.data?.tags ?? [];
   const availablePlaces = placesQuery.data?.places ?? [];
 
@@ -291,11 +294,24 @@ export default function SearchScreen() {
             ) : null}
           </View>
 
-          <FlatList
+          <FlashList
             data={results}
             keyExtractor={(item) => item.id}
             numColumns={numColumns}
             key={numColumns}
+            onEndReached={() => {
+              if (searchQuery.hasNextPage && !searchQuery.isFetchingNextPage) {
+                void searchQuery.fetchNextPage();
+              }
+            }}
+            onEndReachedThreshold={0.6}
+            ListFooterComponent={
+              searchQuery.isFetchingNextPage ? (
+                <View className="py-4 items-center">
+                  <ActivityIndicator color="#4f46e5" />
+                </View>
+              ) : null
+            }
             renderItem={({ item }: { item: TimelineItem }) => (
               <Pressable
                 style={{ width: itemSize, height: itemSize, margin: gap / 2 }}

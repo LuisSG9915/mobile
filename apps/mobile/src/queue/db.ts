@@ -270,18 +270,27 @@ export async function setNextRetryAt(assetId: string, at: number): Promise<void>
   ]);
 }
 
-export function getNextPending(opts: { prioritizePhotos?: boolean } = {}): QueueItem | null {
+export function getNextPending(
+  opts: { prioritizePhotos?: boolean; excludeAssetId?: string } = {},
+): QueueItem | null {
   const order = opts.prioritizePhotos
     ? "CASE WHEN media_type = 'photo' THEN 0 ELSE 1 END, created_at ASC"
     : "created_at ASC";
+  const params: (string | number | null)[] = [activeUserId, Date.now()];
+  let exclude = "";
+  if (opts.excludeAssetId) {
+    exclude = "AND asset_id != ?";
+    params.push(opts.excludeAssetId);
+  }
   return (
     getQueueDb().getFirstSync<QueueItem>(
       `SELECT * FROM queue
        WHERE user_id IS ?
          AND state IN ('queued','hashing','thumbnailing','init','uploading_thumb','uploading_original','completing')
          AND next_retry_at <= ?
+         ${exclude}
        ORDER BY ${order} LIMIT 1`,
-      [activeUserId, Date.now()],
+      params,
     ) ?? null
   );
 }
@@ -293,6 +302,28 @@ export function getQueuedWithSha(limit = 10): QueueItem[] {
      WHERE user_id IS ? AND state = 'queued' AND sha256 IS NOT NULL
      ORDER BY created_at ASC LIMIT ?`,
     [activeUserId, limit],
+  );
+}
+
+/** Items en `queued` sin sha para el pre-hasheo por lotes. */
+export function getQueuedWithoutHash(limit = 8): QueueItem[] {
+  return getQueueDb().getAllSync<QueueItem>(
+    `SELECT * FROM queue
+     WHERE user_id IS ? AND state = 'queued' AND sha256 IS NULL AND next_retry_at <= ?
+     ORDER BY CASE WHEN media_type = 'photo' THEN 0 ELSE 1 END, created_at ASC LIMIT ?`,
+    [activeUserId, Date.now(), limit],
+  );
+}
+
+/** Guarda el sha256 precalculado sin cambiar el estado de la fila. */
+export async function setItemHash(
+  assetId: string,
+  sha256: string,
+  bytesTotal: number,
+): Promise<void> {
+  getQueueDb().runSync(
+    "UPDATE queue SET sha256 = ?, bytes_total = ?, updated_at = ? WHERE asset_id = ? AND user_id IS ?",
+    [sha256, bytesTotal, Date.now(), assetId, activeUserId],
   );
 }
 

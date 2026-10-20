@@ -13,23 +13,28 @@ import {
   finishItem,
   getNextPending,
   getQueueDb,
+  getQueuedWithoutHash,
   getQueuedWithSha,
   isBackupPaused,
   type QueueItem,
   recoverInterrupted,
   setBackupPaused,
+  setItemHash,
   setNextRetryAt,
   setState,
 } from "./db";
 import { sha256File } from "./hash";
-import { publishSyncProgress } from "./progress";
+import { publishByteTick, publishSyncProgress } from "./progress";
 import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
-import { makeThumbAndHash } from "./thumb";
+import { makeThumbAndHash, type ThumbResult } from "./thumb";
 
 let running = false;
 let cancelled = false;
 let forceCellular = false;
 let activeUploadTask: FileSystem.UploadTask | null = null;
+const precheckedHashes = new Set<string>();
+const thumbCache = new Map<string, ThumbResult>();
+const THUMB_CACHE_MAX = 2;
 
 let refreshPending = false;
 
@@ -186,32 +191,37 @@ async function processItem(item: QueueItem): Promise<void> {
 
   await setState(item.asset_id, "hashing", { bytes_total: fileSize });
   emitStructure();
-  const sha256 = await sha256File(localUri);
+  const sha256 = item.sha256 ?? (await sha256File(localUri));
+  if (!item.sha256) await setItemHash(item.asset_id, sha256, fileSize);
 
   // Dedup criptográfica temprana: si el API ya tiene este sha256 'ready', la
-  // foto queda SYNCED sin generar miniatura ni emitir PUTs prefirmados. Si la
-  // llamada falla (sin red), se sigue el flujo normal: /init deduplica igual.
-  try {
-    const { existing } = await api.checkHashes([sha256]);
-    const hit = existing.find((e) => e.sha256 === sha256);
-    if (hit) {
-      await finishItem(item.asset_id, "duplicate", {
-        sha256,
-        remote_id: hit.id,
-        bytes_sent: fileSize,
-      });
-      useItemProgress.getState().clearItemProgress(item.asset_id);
-      refreshRemoteData();
-      emitStructure();
-      return;
+  // foto queda SYNCED sin generar miniatura ni emitir PUTs prefirmados. El
+  // pre-hasheo por lotes ya lo comprobó para esta pasada.
+  if (!precheckedHashes.has(sha256)) {
+    try {
+      const { existing } = await api.checkHashes([sha256]);
+      const hit = existing.find((e) => e.sha256 === sha256);
+      if (hit) {
+        await finishItem(item.asset_id, "duplicate", {
+          sha256,
+          remote_id: hit.id,
+          bytes_sent: fileSize,
+        });
+        useItemProgress.getState().clearItemProgress(item.asset_id);
+        refreshRemoteData();
+        emitStructure();
+        return;
+      }
+    } catch {
+      // Error de red/servidor: el init de abajo sigue haciendo la dedup.
     }
-  } catch {
-    // Error de red/servidor: el init de abajo sigue haciendo la dedup.
   }
 
   await setState(item.asset_id, "thumbnailing");
   emitStructure();
-  const thumb = await makeThumbAndHash(mediaType, localUri);
+  const cachedThumb = thumbCache.get(item.asset_id);
+  const thumb = cachedThumb ?? (await makeThumbAndHash(mediaType, localUri));
+  if (cachedThumb) thumbCache.delete(item.asset_id);
 
   await setState(item.asset_id, "init", { sha256 });
   emitStructure();
@@ -247,6 +257,7 @@ async function processItem(item: QueueItem): Promise<void> {
 
   await setState(item.asset_id, "uploading_original");
   emitStructure();
+  void prepareNextThumb(item.asset_id);
   const fileUri = file.uri;
   let lastProgress = 0;
   await uploadFile(init.original, fileUri, (sent) => {
@@ -258,8 +269,7 @@ async function processItem(item: QueueItem): Promise<void> {
         item.asset_id,
         item.user_id ?? null,
       ]);
-      useItemProgress.getState().setItemProgress(item.asset_id, fileSize > 0 ? sent / fileSize : 0);
-      publishSyncProgress(true);
+      publishByteTick(item.asset_id, sent, fileSize);
     }
   });
 
@@ -278,15 +288,85 @@ function safeDelete(uri: string) {
   } catch {}
 }
 
+function clearThumbCache() {
+  for (const thumb of thumbCache.values()) safeDelete(thumb.uri);
+  thumbCache.clear();
+}
+
+/**
+ * Lookahead: mientras el original actual viaja a R2, prepara la miniatura del
+ * siguiente item `queued` para que su turno no espere CPU.
+ */
+async function prepareNextThumb(currentAssetId: string): Promise<void> {
+  if (thumbCache.size >= THUMB_CACHE_MAX) return;
+  const next = getNextPending({ prioritizePhotos: true, excludeAssetId: currentAssetId });
+  if (next?.media_type !== "photo" || thumbCache.has(next.asset_id)) return;
+  try {
+    const info = await MediaLibrary.getAssetInfoAsync(next.asset_id, {
+      shouldDownloadFromNetwork: true,
+    });
+    const thumb = await makeThumbAndHash("photo", info.localUri ?? next.uri);
+    if (thumbCache.size >= THUMB_CACHE_MAX) {
+      safeDelete(thumb.uri);
+      return;
+    }
+    thumbCache.set(next.asset_id, thumb);
+  } catch {
+    // Si falla, el item lo generará en su propio turno.
+  }
+}
+
 export type ProcessOptions = {
   maxItems?: number;
   deadlineMs?: number;
   prioritizePhotos?: boolean;
 };
 
+/** Pre-hashea hasta 8 items `queued` y deduplica el lote en una sola llamada. */
+async function prehashAndDedup(): Promise<void> {
+  const items = getQueuedWithoutHash(8);
+  if (items.length === 0) return;
+  const hashed: { item: QueueItem; sha256: string; fileSize: number }[] = [];
+  for (const item of items) {
+    try {
+      const info = await MediaLibrary.getAssetInfoAsync(item.asset_id, {
+        shouldDownloadFromNetwork: true,
+      });
+      const uri = info.localUri ?? item.uri;
+      const fileSize = new File(uri).size ?? 0;
+      const sha256 = await sha256File(uri);
+      await setItemHash(item.asset_id, sha256, fileSize);
+      precheckedHashes.add(sha256);
+      hashed.push({ item, sha256, fileSize });
+    } catch {
+      // El item se procesará individualmente y reportará su error.
+    }
+  }
+  if (hashed.length === 0) return;
+  try {
+    const { existing } = await api.checkHashes(hashed.map((h) => h.sha256));
+    if (existing.length === 0) return;
+    const bySha = new Map(existing.map((e) => [e.sha256, e.id]));
+    for (const h of hashed) {
+      const remoteId = bySha.get(h.sha256);
+      if (!remoteId) continue;
+      await finishItem(h.item.asset_id, "duplicate", {
+        sha256: h.sha256,
+        remote_id: remoteId,
+        bytes_sent: h.fileSize,
+      });
+      useItemProgress.getState().clearItemProgress(h.item.asset_id);
+    }
+    refreshRemoteData();
+    emitStructure();
+  } catch {
+    // Sin red el flujo normal de /init sigue deduplicando.
+  }
+}
+
 /** Dedup por lote de items que ya tienen sha (reintentos/pre-hasheados). */
 async function preflightDedup(): Promise<void> {
-  const items = getQueuedWithSha(10);
+  const items = getQueuedWithSha(10).filter((i) => !i.sha256 || !precheckedHashes.has(i.sha256));
   if (items.length === 0) return;
   try {
     const { existing } = await api.checkHashes(
@@ -316,10 +396,12 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   running = true;
   cancelled = false;
   let processed = 0;
+  precheckedHashes.clear();
   try {
     // La app pudo morir a mitad de un item (kill): devolver los estados
     // transitorios a queued con bytes_sent=0 antes de elegir el siguiente.
     await recoverInterrupted().catch(() => {});
+    await prehashAndDedup();
     await preflightDedup();
     while (true) {
       if (cancelled) break;
@@ -340,6 +422,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
       try {
         await processItem(item);
         processed++;
+        if (processed % 8 === 0) await prehashAndDedup();
       } catch (e) {
         if (cancelled) {
           // Cancelada por el usuario (logout): vuelve a queued sin gastar intento.
@@ -389,6 +472,8 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   } finally {
     running = false;
     forceCellular = false;
+    precheckedHashes.clear();
+    clearThumbCache();
     flushRemoteData();
     publishSyncProgress(false);
   }

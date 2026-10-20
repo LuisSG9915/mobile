@@ -12,16 +12,18 @@ import {
   bumpAttempt,
   finishItem,
   getNextPending,
+  getQueuedWithoutHash,
   getQueuedWithSha,
   isBackupPaused,
   type QueueItem,
   recoverInterrupted,
   refreshProjection,
   setBackupPaused,
+  setItemHash,
   setNextRetryAt,
   setState,
 } from "./db";
-import { publishSyncProgress } from "./progress";
+import { publishByteTick, publishSyncProgress } from "./progress";
 import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
 
 const CANCELLED_MSG = "Subida cancelada.";
@@ -29,6 +31,7 @@ const CANCELLED_MSG = "Subida cancelada.";
 let running = false;
 let cancelled = false;
 let controller: AbortController | null = null;
+const precheckedHashes = new Set<string>();
 
 /** Detiene la pasada en curso: aborta las peticiones/XHR en vuelo. */
 export function cancelQueue() {
@@ -92,30 +95,33 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
 
   await setState(item.asset_id, "hashing", { bytes_total: file.size });
   emitStructure();
-  const sha256 = await sha256File(file);
+  const sha256 = item.sha256 ?? (await sha256File(file));
+  if (!item.sha256) await setItemHash(item.asset_id, sha256, file.size);
   throwIfAborted(signal);
 
   // Dedup criptográfica temprana: si el API ya tiene este sha256 'ready', la
-  // foto queda SYNCED sin generar miniatura ni emitir PUTs. Si la llamada
-  // falla (abort → propagar; red → seguir), /init deduplica igual.
-  try {
-    const { existing } = await api.checkHashes([sha256], { signal });
-    const hit = existing.find((e) => e.sha256 === sha256);
-    if (hit) {
-      // Estado terminal + borrado del blob en una sola transacción.
-      await finishItem(item.asset_id, "duplicate", {
-        sha256,
-        remote_id: hit.id,
-        bytes_sent: file.size,
-      });
-      useItemProgress.getState().clearItemProgress(item.asset_id);
-      refreshRemoteData();
-      emitStructure();
-      return;
+  // foto queda SYNCED sin generar miniatura ni emitir PUTs. El pre-hasheo por
+  // lotes ya lo comprobó para esta pasada.
+  if (!precheckedHashes.has(sha256)) {
+    try {
+      const { existing } = await api.checkHashes([sha256], { signal });
+      const hit = existing.find((e) => e.sha256 === sha256);
+      if (hit) {
+        // Estado terminal + borrado del blob en una sola transacción.
+        await finishItem(item.asset_id, "duplicate", {
+          sha256,
+          remote_id: hit.id,
+          bytes_sent: file.size,
+        });
+        useItemProgress.getState().clearItemProgress(item.asset_id);
+        refreshRemoteData();
+        emitStructure();
+        return;
+      }
+    } catch {
+      // Abort durante la llamada → propagar; error de red → seguir.
+      throwIfAborted(signal);
     }
-  } catch {
-    // Abort durante la llamada → propagar; error de red → seguir.
-    throwIfAborted(signal);
   }
 
   await setState(item.asset_id, "thumbnailing");
@@ -169,10 +175,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
       if (now - lastProgress > 500) {
         lastProgress = now;
         void setState(item.asset_id, "uploading_original", { bytes_sent: sent }).catch(() => {});
-        useItemProgress
-          .getState()
-          .setItemProgress(item.asset_id, file.size > 0 ? sent / file.size : 0);
-        publishSyncProgress(true);
+        publishByteTick(item.asset_id, sent, file.size);
       }
     },
     signal,
@@ -194,9 +197,52 @@ export type ProcessOptions = {
   prioritizePhotos?: boolean;
 };
 
+/** Pre-hashea hasta 8 items `queued` y deduplica el lote en una sola llamada. */
+async function prehashAndDedup(signal: AbortSignal): Promise<void> {
+  const items = getQueuedWithoutHash(8);
+  if (items.length === 0) return;
+  const hashed: { item: QueueItem; sha256: string; fileSize: number }[] = [];
+  for (const item of items) {
+    try {
+      const file = await getFile(item.asset_id);
+      if (!file) continue;
+      const sha256 = await sha256File(file);
+      throwIfAborted(signal);
+      await setItemHash(item.asset_id, sha256, file.size);
+      precheckedHashes.add(sha256);
+      hashed.push({ item, sha256, fileSize: file.size });
+    } catch {
+      throwIfAborted(signal);
+    }
+  }
+  if (hashed.length === 0) return;
+  try {
+    const { existing } = await api.checkHashes(
+      hashed.map((h) => h.sha256),
+      { signal },
+    );
+    if (existing.length === 0) return;
+    const bySha = new Map(existing.map((e) => [e.sha256, e.id]));
+    for (const h of hashed) {
+      const remoteId = bySha.get(h.sha256);
+      if (!remoteId) continue;
+      await finishItem(h.item.asset_id, "duplicate", {
+        sha256: h.sha256,
+        remote_id: remoteId,
+        bytes_sent: h.fileSize,
+      });
+      useItemProgress.getState().clearItemProgress(h.item.asset_id);
+    }
+    refreshRemoteData();
+    emitStructure();
+  } catch {
+    throwIfAborted(signal);
+  }
+}
+
 /** Dedup por lote de items que ya tienen sha (reintentos/pre-hasheados). */
 async function preflightDedup(signal: AbortSignal): Promise<void> {
-  const items = getQueuedWithSha(10);
+  const items = getQueuedWithSha(10).filter((i) => !i.sha256 || !precheckedHashes.has(i.sha256));
   if (items.length === 0) return;
   try {
     const { existing } = await api.checkHashes(
@@ -242,6 +288,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
       if (running) return;
       running = true;
       cancelled = false;
+      precheckedHashes.clear();
       const ctrl = new AbortController();
       controller = ctrl;
       const signal = ctrl.signal;
@@ -254,6 +301,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         // La pestaña pudo morir a mitad de un item: devolver los estados
         // transitorios a queued antes de elegir el siguiente pendiente.
         await recoverInterrupted().catch(() => {});
+        await prehashAndDedup(signal);
         await preflightDedup(signal);
         while (true) {
           if (cancelled || signal.aborted) break;
@@ -274,6 +322,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
           try {
             await processItem(item, signal);
             processed++;
+            if (processed % 8 === 0) await prehashAndDedup(signal);
           } catch (e) {
             if (cancelled || signal.aborted) {
               // Cancelada por el usuario (logout/cierre): vuelve a queued SIN
@@ -328,6 +377,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         }
       } finally {
         running = false;
+        precheckedHashes.clear();
         if (controller === ctrl) controller = null;
         publishSyncProgress(false);
       }

@@ -210,6 +210,37 @@ describe("processQueue", () => {
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["timeline"] });
   });
 
+  it("pre-hashea el lote y deduplica con una sola llamada a checkHashes", async () => {
+    const a = new File(["a"], "a.png", { type: "image/png" });
+    const b = new File(["b"], "b.png", { type: "image/png" });
+    await encolar("web-1", "a.png", 1, a);
+    await encolar("web-2", "b.png", 2, b);
+    filesMock.__files.set("web-1", a);
+    filesMock.__files.set("web-2", b);
+
+    const hashModule = (await import("../web/hash")) as unknown as { sha256File: Mock };
+    hashModule.sha256File
+      .mockImplementationOnce(async () => "a".repeat(64))
+      .mockImplementationOnce(async () => "b".repeat(64));
+    apiMock.api.checkHashes.mockResolvedValue({
+      existing: [{ sha256: "a".repeat(64), id: "r9" }],
+    });
+    apiMock.api.initUpload.mockResolvedValue(initRespuestaUpload("r2"));
+    apiMock.api.completeUpload.mockResolvedValue({ id: "r2", status: "ready" });
+    const makeThumb = ((await import("../web/thumb")) as { makeThumb: Mock }).makeThumb;
+    makeThumb.mockClear();
+
+    await processor.processQueue();
+
+    expect(apiMock.api.checkHashes).toHaveBeenCalledTimes(1);
+    expect(apiMock.api.checkHashes.mock.calls[0][0]).toEqual(["a".repeat(64), "b".repeat(64)]);
+    const stateOf = (id: string) => db.getQueueItems().find((i) => i.asset_id === id)?.state;
+    expect(stateOf("web-1")).toBe("duplicate");
+    expect(stateOf("web-2")).toBe("done");
+    expect(makeThumb).toHaveBeenCalledTimes(1);
+    expect(apiMock.api.initUpload).toHaveBeenCalledTimes(1);
+  });
+
   it("si checkHashes falla (sin red) sigue el flujo normal: /init deduplica", async () => {
     const file = new File(["x"], "foto.png", { type: "image/png" });
     const row = await encolar("web-1", "foto.png", 1, file);

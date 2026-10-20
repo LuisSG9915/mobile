@@ -34,7 +34,7 @@ function RootNavigator() {
         <Stack.Screen
           name="media/[id]"
           options={{
-            presentation: "fullScreenModal",
+            presentation: "transparentModal",
             animation: "fade",
             contentStyle: { backgroundColor: "transparent" },
           }}

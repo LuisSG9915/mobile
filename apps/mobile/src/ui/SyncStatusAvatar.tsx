@@ -38,17 +38,22 @@ const STATUS_TEXT: Record<SyncProgressStatus, string> = {
  */
 export function SyncStatusAvatar() {
   useSyncProgressAuto();
-  const p = useSyncProgress();
+  const status = useSyncProgress((s) => s.status);
+  const bytesUploaded = useSyncProgress((s) => s.bytesUploaded);
+  const totalBytes = useSyncProgress((s) => s.totalBytes);
+  const filesTotal = useSyncProgress((s) => s.filesTotal);
+  const filesRemaining = useSyncProgress((s) => s.filesRemaining);
+  const currentFileName = useSyncProgress((s) => s.currentFileName);
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
 
   const pct =
-    p.totalBytes > 0
-      ? Math.min(1, p.bytesUploaded / p.totalBytes)
-      : p.filesTotal > 0
-        ? Math.min(1, 1 - p.filesRemaining / p.filesTotal)
+    totalBytes > 0
+      ? Math.min(1, bytesUploaded / totalBytes)
+      : filesTotal > 0
+        ? Math.min(1, 1 - filesRemaining / filesTotal)
         : 0;
-  const color = RING_COLOR[p.status];
+  const color = RING_COLOR[status];
   const r = (SIZE - STROKE) / 2;
   const c = 2 * Math.PI * r;
   const initial = session?.user?.name?.trim()?.charAt(0)?.toUpperCase() ?? null;
@@ -97,9 +102,9 @@ export function SyncStatusAvatar() {
           />
         </Svg>
         <View className="flex-1 items-center justify-center">
-          {p.status === "completed" ? (
+          {status === "completed" ? (
             <Check size={18} color="#16a34a" />
-          ) : p.status === "error" ? (
+          ) : status === "error" ? (
             <AlertCircle size={18} color="#dc2626" />
           ) : initial ? (
             <Text className="text-sm font-bold text-neutral-700 dark:text-neutral-200">
@@ -127,7 +132,7 @@ export function SyncStatusAvatar() {
               </Text>
             </View>
             <Text className="text-sm font-medium" style={{ color }}>
-              {STATUS_TEXT[p.status]}
+              {STATUS_TEXT[status]}
             </Text>
             {stats ? (
               <Text className="text-sm text-neutral-600 dark:text-neutral-300">
@@ -135,17 +140,15 @@ export function SyncStatusAvatar() {
               </Text>
             ) : null}
             <Text className="text-sm text-neutral-600 dark:text-neutral-300">
-              {t.syncP.bytes(formatBytes(p.bytesUploaded), formatBytes(p.totalBytes))}
+              {t.syncP.bytes(formatBytes(bytesUploaded), formatBytes(totalBytes))}
             </Text>
-            {p.status === "syncing" && p.currentFileName ? (
+            {status === "syncing" && currentFileName ? (
               <Text className="text-sm text-neutral-500" numberOfLines={1}>
-                {t.syncP.current(p.currentFileName)}
+                {t.syncP.current(currentFileName)}
               </Text>
             ) : null}
-            {p.filesRemaining > 0 ? (
-              <Text className="text-sm text-neutral-500">
-                {t.syncP.remaining(p.filesRemaining)}
-              </Text>
+            {filesRemaining > 0 ? (
+              <Text className="text-sm text-neutral-500">{t.syncP.remaining(filesRemaining)}</Text>
             ) : null}
             {stats && stats.failed > 0 ? (
               <Text className="text-sm text-red-600 dark:text-red-400">
@@ -155,7 +158,7 @@ export function SyncStatusAvatar() {
             <Text className="text-2xl font-bold text-neutral-900 dark:text-white self-center">
               {Math.round(pct * 100)}%
             </Text>
-            {paused || p.filesRemaining > 0 ? (
+            {paused || filesRemaining > 0 ? (
               <Pressable
                 onPress={togglePause}
                 className="border border-neutral-300 dark:border-neutral-700 rounded-xl px-4 py-2.5 items-center"

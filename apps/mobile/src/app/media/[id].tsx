@@ -406,7 +406,9 @@ export default function MediaViewer() {
     barsOpacity.value = withTiming(immersive ? 0 : 1, { duration: 180 });
   }, [immersive, barsOpacity]);
 
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    backgroundColor: `rgba(0, 0, 0, ${backdropOpacity.value})`,
+  }));
   const barsStyle = useAnimatedStyle(() => ({ opacity: barsOpacity.value }));
 
   // El carrusel respeta el filtro activo de la galería (favoritos incluidos) o el álbum si viene de uno.
@@ -892,10 +894,7 @@ export default function MediaViewer() {
 
   return (
     <SafeAreaView className="flex-1 bg-transparent" edges={["top", "bottom"]}>
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: "black" }, backdropStyle]}
-      />
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, backdropStyle]} />
       <Animated.View style={barsStyle} pointerEvents={immersive ? "none" : "auto"}>
         <View className="flex-row items-center justify-between px-4 py-2 z-10">
           <View className="flex-row items-center gap-3">

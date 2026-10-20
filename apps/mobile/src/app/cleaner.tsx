@@ -17,6 +17,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
+import { deleteLocalAssets } from "../lib/free-space";
+import { getQueueItems } from "../queue/db";
 import { Button, EmptyState } from "../ui";
 
 export default function CleanerScreen() {
@@ -43,14 +45,38 @@ export default function CleanerScreen() {
     setSelectedForTrash(initialTrash);
   }, [query.data]);
 
+  const offerLocalCleanup = (deleteIds: string[]) => {
+    const localIds = getQueueItems()
+      .filter((item) => item.remote_id && deleteIds.includes(item.remote_id))
+      .map((item) => item.asset_id);
+    if (localIds.length === 0) return;
+    const run = () => {
+      void deleteLocalAssets(localIds)
+        .then((n) => {
+          if (n > 0) toast.success(t.cleaner.localCopiesDeleted(n));
+        })
+        .catch(() => {});
+    };
+    const message = t.cleaner.localCopiesBody(localIds.length);
+    if (Platform.OS === "web") {
+      if (window.confirm(message)) run();
+      return;
+    }
+    Alert.alert(t.cleaner.localCopiesTitle, message, [
+      { text: t.cleaner.localCopiesKeep, style: "cancel" },
+      { text: t.cleaner.localCopiesDelete, style: "destructive", onPress: run },
+    ]);
+  };
+
   const cleanupMut = useMutation({
     mutationFn: (deleteIds: string[]) => api.cleanerCleanup({ deleteIds }),
-    onSuccess: (data) => {
+    onSuccess: (data, deleteIds) => {
       toast.success(t.cleaner.cleanSuccess(data.trashedCount));
       void qc.invalidateQueries({ queryKey: ["cleaner-bursts"] });
       void qc.invalidateQueries({ queryKey: ["timeline"] });
       void qc.invalidateQueries({ queryKey: ["stats"] });
-      void qc.invalidateQueries({ queryKey: ["user-storage"] });
+      void qc.invalidateQueries({ queryKey: ["storage"] });
+      offerLocalCleanup(deleteIds);
     },
     onError: (err: Error) => toast.error(err.message || t.auth.genericError),
   });

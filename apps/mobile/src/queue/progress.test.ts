@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useItemProgress } from "../lib/store";
-import { computeSyncProgress } from "./progress";
+import { useItemProgress, useSyncProgress } from "../lib/store";
+import { computeSyncProgress, publishByteTick } from "./progress";
 import type { QueueItem } from "./types";
 
 beforeEach(() => {
@@ -80,6 +80,26 @@ describe("computeSyncProgress", () => {
     const items = [item({ state: "done", bytes_total: 100, bytes_sent: 250 })];
     const p = computeSyncProgress(items, false);
     expect(p.bytesUploaded).toBe(100);
+  });
+});
+
+describe("publishByteTick", () => {
+  it("actualiza bytes y progreso por asset sin releer la cola", () => {
+    useSyncProgress.setState({
+      bytesUploaded: 0,
+      totalBytes: 100,
+      filesTotal: 1,
+      filesRemaining: 1,
+      currentFileName: "foto.jpg",
+      status: "syncing",
+    });
+    publishByteTick("tick-a", 40, 100);
+    expect(useSyncProgress.getState().bytesUploaded).toBe(40);
+    expect(useItemProgress.getState().progressByAssetId["tick-a"]).toBe(0.4);
+
+    publishByteTick("tick-a", 70, 100);
+    expect(useSyncProgress.getState().bytesUploaded).toBe(70);
+    expect(useItemProgress.getState().progressByAssetId["tick-a"]).toBe(0.7);
   });
 });
 

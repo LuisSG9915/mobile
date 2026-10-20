@@ -163,39 +163,20 @@ const PhotoCell = memo(
     prev.photo.remote?.isFavorite === next.photo.remote?.isFavorite,
 );
 
-export default function GalleryScreen() {
-  const { width } = useWindowDimensions();
-  const columns = useSettings((s) => s.gridColumns);
-  const setGridColumns = useSettings((s) => s.setGridColumns);
-  const timelineFilter = useSettings((s) => s.timelineFilter);
-  const setTimelineFilter = useSettings((s) => s.setTimelineFilter);
-  const albumFilter = useSettings((s) => s.albumFilter);
-  const setAlbumFilter = useSettings((s) => s.setAlbumFilter);
-  const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
-  const wifiOnly = useSettings((s) => s.wifiOnly);
-  const syncStatus = useSyncProgress((s) => s.status);
+/**
+ * Píldora de estado aislada: solo se re-renderiza si cambian `status` o
+ * `filesRemaining` (o un evento estructural), nunca por los ticks de bytes.
+ */
+const SmartSyncBanner = memo(function SmartSyncBanner() {
+  const status = useSyncProgress((s) => s.status);
   const filesRemaining = useSyncProgress((s) => s.filesRemaining);
+  const wifiOnly = useSettings((s) => s.wifiOnly);
+  useQueueEvents((s) => s.tick);
   const paused = isBackupPaused();
-  const cell = width / columns;
-  const [albumModalOpen, setAlbumModalOpen] = useState(false);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-  // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
-  // via useQueueSession + useBackupRunner.
-  const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter, albumFilter);
-
-  const listRef = useRef<FlashListRef<GalleryRow>>(null);
-  const gridRef = useRef<View>(null);
-  const gridPage = useRef({ x: 0, y: 0 });
-  const scrollY = useRef(0);
-  const lastHitRow = useRef(-1);
-  const [selected, setSelected] = useState<Set<string> | null>(null);
-  // Ref espejo para que las celdas memoizadas lean el modo actual sin stale
-  // closures (los callbacks estables no pueden capturar `selected` directo).
-  const selectedRef = useRef<Set<string> | null>(null);
-  selectedRef.current = selected;
+  const [dismissed, setDismissed] = useState(false);
 
   const banner = useMemo(() => {
-    if (syncStatus === "error") {
+    if (status === "error") {
       return {
         kind: "error" as const,
         text: t.gallery.bannerError,
@@ -234,11 +215,64 @@ export default function GalleryScreen() {
       };
     }
     return null;
-  }, [syncStatus, filesRemaining, paused, wifiOnly]);
+  }, [status, filesRemaining, paused, wifiOnly]);
 
   useEffect(() => {
-    setBannerDismissed(false);
+    setDismissed(false);
   }, [banner?.kind]);
+
+  if (!banner || dismissed) return null;
+  return (
+    <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2 dark:border-amber-700/60 dark:bg-amber-950/40">
+      {banner.kind === "error" ? (
+        <AlertCircle size={15} color="#dc2626" />
+      ) : banner.kind === "paused" ? (
+        <Pause size={15} color="#d97706" />
+      ) : (
+        <Wifi size={15} color="#d97706" />
+      )}
+      <Text className="flex-1 text-xs font-medium text-amber-900 dark:text-amber-100">
+        {banner.text}
+      </Text>
+      <Pressable onPress={banner.onPress} hitSlop={8} accessibilityRole="button">
+        <Text className="text-xs font-semibold text-accent">{banner.action}</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => setDismissed(true)}
+        hitSlop={8}
+        accessibilityLabel={t.gallery.bannerDismiss}
+      >
+        <X size={14} color="#a3a3a3" />
+      </Pressable>
+    </View>
+  );
+});
+
+export default function GalleryScreen() {
+  const { width } = useWindowDimensions();
+  const columns = useSettings((s) => s.gridColumns);
+  const setGridColumns = useSettings((s) => s.setGridColumns);
+  const timelineFilter = useSettings((s) => s.timelineFilter);
+  const setTimelineFilter = useSettings((s) => s.setTimelineFilter);
+  const albumFilter = useSettings((s) => s.albumFilter);
+  const setAlbumFilter = useSettings((s) => s.setAlbumFilter);
+  const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
+  const cell = width / columns;
+  const [albumModalOpen, setAlbumModalOpen] = useState(false);
+  // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
+  // via useQueueSession + useBackupRunner.
+  const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter, albumFilter);
+
+  const listRef = useRef<FlashListRef<GalleryRow>>(null);
+  const gridRef = useRef<View>(null);
+  const gridPage = useRef({ x: 0, y: 0 });
+  const scrollY = useRef(0);
+  const lastHitRow = useRef(-1);
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  // Ref espejo para que las celdas memoizadas lean el modo actual sin stale
+  // closures (los callbacks estables no pueden capturar `selected` directo).
+  const selectedRef = useRef<Set<string> | null>(null);
+  selectedRef.current = selected;
 
   useEffect(() => {
     if (!selected) return;
@@ -715,30 +749,7 @@ export default function GalleryScreen() {
           </Pressable>
         </View>
       ) : null}
-      {banner && !bannerDismissed && !selected ? (
-        <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2 dark:border-amber-700/60 dark:bg-amber-950/40">
-          {banner.kind === "error" ? (
-            <AlertCircle size={15} color="#dc2626" />
-          ) : banner.kind === "paused" ? (
-            <Pause size={15} color="#d97706" />
-          ) : (
-            <Wifi size={15} color="#d97706" />
-          )}
-          <Text className="flex-1 text-xs font-medium text-amber-900 dark:text-amber-100">
-            {banner.text}
-          </Text>
-          <Pressable onPress={banner.onPress} hitSlop={8} accessibilityRole="button">
-            <Text className="text-xs font-semibold text-accent">{banner.action}</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setBannerDismissed(true)}
-            hitSlop={8}
-            accessibilityLabel={t.gallery.bannerDismiss}
-          >
-            <X size={14} color="#a3a3a3" />
-          </Pressable>
-        </View>
-      ) : null}
+      {!selected ? <SmartSyncBanner /> : null}
       {selected || timelineFilter !== "all" || albumFilter ? null : <MemoriesBar />}
       {isEmpty ? (
         <EmptyState
