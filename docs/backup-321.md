@@ -134,3 +134,14 @@ Con esta configuración:
 4. Si Cloudflare tuviera alguna caída o cerraras tu cuenta, tienes una copia física exacta en tu casa.
 5. **Costo de almacenamiento mensual: $0.00** (dentro de los 10 GB de R2, o centavos si creces a 50+ GB).
 6. **Costo de descarga: $0.00 de por vida.**
+
+---
+
+## 6. Catálogo D1 (además de las fotos)
+
+Este documento cubre los **binarios** en R2. El catálogo (usuarios, álbumes,
+favoritos, shares, metadatos y claves R2) vive en D1 y se respalda a diario en
+`r2://photos-media/backups/d1/` con el workflow `.github/workflows/backup-d1.yml`.
+
+Procedimiento de restauración y secrets requeridos:
+[`docs/ops/D1_BACKUP.md`](ops/D1_BACKUP.md).
