@@ -14,22 +14,29 @@ reporte con una cuenta; nunca el email.
 
 ## Móvil
 
-1. Crea un proyecto **React Native** en Sentry (org `cb-5d`) y copia el DSN.
-2. Define el DSN en `apps/mobile/.env` para desarrollo y en el entorno de build
-   (EAS) para los APK:
+1. El proyecto actual es **`photos`** (org `cb-5d`, plataforma `react-native`).
+   El DSN vive en `apps/mobile/.env` (gitignored):
 
 ```ini
 EXPO_PUBLIC_SENTRY_DSN=https://<key>@o<orgId>.ingest.sentry.io/<projectId>
 EXPO_PUBLIC_SENTRY_ENVIRONMENT=production
 ```
 
-3. **Recompila** el dev-client/APK: `@sentry/react-native` es un módulo nativo
+2. **Recompila** el dev-client/APK: `@sentry/react-native` es un módulo nativo
    y el config plugin ya está en `app.json`. Un OTA no basta para la primera
    instalación.
-4. Para stack traces legibles (source maps), añade en EAS los secrets
-   `SENTRY_AUTH_TOKEN` y `SENTRY_PROJECT` (slug del proyecto). `SENTRY_ORG` ya
-   está en `eas.json` como `cb-5d`. Sin ellos los reportes llegan igual, pero
-   con nombres minificados.
+3. Para stack traces legibles (source maps), `SENTRY_ORG=cb-5d` y
+   `SENTRY_PROJECT=photos` ya están en `eas.json`. Falta el token como secreto
+   de EAS (nunca en el repo):
+
+```bash
+cd apps/mobile
+npx eas-cli env:create --name SENTRY_AUTH_TOKEN --value <token> \
+  --visibility secret --scope project
+```
+
+El `SENTRY_AUTH_TOKEN` de `apps/mobile/.env` solo sirve para builds locales;
+EAS no sube ese archivo.
 
 Comprobación rápida: con el DSN puesto, ejecuta
 
@@ -43,17 +50,27 @@ un error desde el boundary o provocar un `throw` en desarrollo.
 
 ## Worker
 
+El SDK ya está en el código (`withSentry` + `captureException` en `onError`).
+Solo necesita el DSN como secret; **no hay que configurar nada en el dashboard
+de Cloudflare**.
+
 ```bash
-# DSN del proyecto "Cloudflare Workers" de Sentry
+# Producción (interactivo o por stdin)
 node node_modules/wrangler/bin/wrangler.js secret put SENTRY_DSN
 
 # Opcional: entorno (por defecto "production")
-# En wrangler.jsonc → vars, o como secret:
 node node_modules/wrangler/bin/wrangler.js secret put SENTRY_ENVIRONMENT
+
+# Desplegar para que el Worker lo lea
+pnpm --filter @photos/api run deploy
 ```
 
-Despliega después de configurarlo. Sin el secret, `withSentry` recibe
-`undefined` y el Worker se comporta exactamente igual que antes.
+En `wrangler dev` el DSN se toma de `apps/api/.dev.vars` (`SENTRY_DSN=...`).
+
+Ahora mismo el Worker reutiliza el DSN del proyecto `photos` para no crear otro.
+Es válido, pero mezcla eventos de cliente y servidor. Si más adelante quieres
+separarlos: crea un proyecto **Cloudflare Workers** (`photos-api`), copia su DSN
+y repite `secret put SENTRY_DSN`.
 
 ## Sobre el "run code" del onboarding
 
