@@ -23,13 +23,15 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev"
+        "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev",
+        "SENTRY_ORG": "cb-5d"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev"
+        "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev",
+        "SENTRY_ORG": "cb-5d"
       }
     }
   }

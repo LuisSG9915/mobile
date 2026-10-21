@@ -14,11 +14,12 @@ reporte con una cuenta; nunca el email.
 
 ## Móvil
 
-1. Crea un proyecto **React Native** en Sentry y copia el DSN.
-2. Define el DSN en el entorno de build (EAS) o en `apps/mobile/.env` local:
+1. Crea un proyecto **React Native** en Sentry (org `cb-5d`) y copia el DSN.
+2. Define el DSN en `apps/mobile/.env` para desarrollo y en el entorno de build
+   (EAS) para los APK:
 
 ```ini
-EXPO_PUBLIC_SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project>
+EXPO_PUBLIC_SENTRY_DSN=https://<key>@o<orgId>.ingest.sentry.io/<projectId>
 EXPO_PUBLIC_SENTRY_ENVIRONMENT=production
 ```
 
@@ -26,11 +27,19 @@ EXPO_PUBLIC_SENTRY_ENVIRONMENT=production
    y el config plugin ya está en `app.json`. Un OTA no basta para la primera
    instalación.
 4. Para stack traces legibles (source maps), añade en EAS los secrets
-   `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` y `SENTRY_PROJECT`. Sin ellos los reportes
-   llegan igual, pero con nombres minificados.
+   `SENTRY_AUTH_TOKEN` y `SENTRY_PROJECT` (slug del proyecto). `SENTRY_ORG` ya
+   está en `eas.json` como `cb-5d`. Sin ellos los reportes llegan igual, pero
+   con nombres minificados.
 
-Comprobación rápida: con DSN configurado, lanza un error desde el boundary o
-provoca un `throw` en desarrollo y verifica el evento en Sentry.
+Comprobación rápida: con el DSN puesto, ejecuta
+
+```bash
+pnpm check:sentry
+```
+
+Envía un evento de prueba al endpoint de ingesta (sin abrir la app) y te dice
+el id. Búscalo en Sentry con el tag `source:check-sentry`. También puedes lanzar
+un error desde el boundary o provocar un `throw` en desarrollo.
 
 ## Worker
 
@@ -45,6 +54,14 @@ node node_modules/wrangler/bin/wrangler.js secret put SENTRY_ENVIRONMENT
 
 Despliega después de configurarlo. Sin el secret, `withSentry` recibe
 `undefined` y el Worker se comporta exactamente igual que antes.
+
+## Sobre el "run code" del onboarding
+
+La página de bienvenida de Sentry genera un código de 10 caracteres
+(`org-slug#run-code`) para que un agente reporte progreso a esa pantalla vía el
+MCP de Sentry. Este CLI no tiene ese MCP conectado, así que ese progreso no se
+puede marcar; la configuración del SDK no depende de él. El DSN es lo único que
+hace falta para empezar a recibir eventos.
 
 ## Coste
 

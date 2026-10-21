@@ -19,7 +19,8 @@
     "lint:fix": "biome check --write .",
     "typecheck": "turbo run typecheck",
     "format": "biome format --write .",
-    "backup:r2": "node scripts/backup-r2.mjs"
+    "backup:r2": "node scripts/backup-r2.mjs",
+    "check:sentry": "node scripts/check-sentry.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
