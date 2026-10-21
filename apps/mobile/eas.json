@@ -25,7 +25,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev",
         "SENTRY_ORG": "cb-5d",
-        "SENTRY_PROJECT": "photos"
+        "SENTRY_PROJECT": "photos",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://daef8372acd8af1f9bcabc9c9c6ef532@o4512291635200000.ingest.us.sentry.io/4512291671834624"
       }
     },
     "production": {
@@ -33,7 +34,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev",
         "SENTRY_ORG": "cb-5d",
-        "SENTRY_PROJECT": "photos"
+        "SENTRY_PROJECT": "photos",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://daef8372acd8af1f9bcabc9c9c6ef532@o4512291635200000.ingest.us.sentry.io/4512291671834624"
       }
     }
   }
