@@ -31,10 +31,44 @@ export async function getFile(assetId: string): Promise<File | undefined> {
 export type PickResult = { added: number; failed: number; skipped: number };
 
 /**
- * Abre el selector de archivos y encola lo elegido de forma SECUENCIAL (un
- * arrayBuffer a la vez, para no duplicar la RAM con N buffers). Cada archivo
- * válido queda persistido en IndexedDB junto a su fila de cola.
- * Devuelve {added, failed}; si todo falló lanza Error con mensaje en español.
+ * Encola una lista de archivos File de forma SECUENCIAL (un arrayBuffer a la vez,
+ * para no duplicar la RAM con N buffers). Cada archivo válido queda persistido
+ * en IndexedDB junto a su fila de cola.
+ */
+export async function enqueueFiles(files: FileList | File[]): Promise<PickResult> {
+  let added = 0;
+  let failed = 0;
+  let skipped = 0;
+  for (const f of Array.from(files)) {
+    const ext = (f.name.split(".").pop() ?? "").toLowerCase();
+    if (!(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
+      skipped++;
+      continue;
+    }
+    const id = `web-${crypto.randomUUID()}`;
+    try {
+      await enqueueAsset(
+        {
+          id,
+          uri: id,
+          filename: f.name,
+          mediaType: VIDEO_EXTENSIONS.includes(ext) ? "video" : "photo",
+          creationTime: f.lastModified || Date.now(),
+        },
+        f,
+      );
+      cache.set(id, f);
+      added++;
+    } catch {
+      failed++;
+    }
+  }
+  return { added, failed, skipped };
+}
+
+/**
+ * Abre el selector de archivos y encola lo elegido de forma SECUENCIAL.
+ * Devuelve {added, failed, skipped}; si todo falló lanza Error con mensaje en español.
  */
 export function pickAndEnqueue(): Promise<PickResult> {
   return new Promise((resolve, reject) => {
@@ -55,38 +89,9 @@ export function pickAndEnqueue(): Promise<PickResult> {
       resolve(result);
     };
     input.addEventListener("change", () => {
-      const procesar = async (): Promise<PickResult> => {
-        let added = 0;
-        let failed = 0;
-        let skipped = 0;
-        for (const f of Array.from(input.files ?? [])) {
-          const ext = (f.name.split(".").pop() ?? "").toLowerCase();
-          if (!(ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
-            skipped++;
-            continue;
-          }
-          const id = `web-${crypto.randomUUID()}`;
-          try {
-            await enqueueAsset(
-              {
-                id,
-                uri: id,
-                filename: f.name,
-                mediaType: VIDEO_EXTENSIONS.includes(ext) ? "video" : "photo",
-                creationTime: f.lastModified || Date.now(),
-              },
-              f,
-            );
-            cache.set(id, f);
-            added++;
-          } catch {
-            failed++;
-          }
-        }
-        return { added, failed, skipped };
-      };
-      // Si el procesamiento entero explota, cuenta como fallo global.
-      procesar().then(finish, () => finish({ added: 0, failed: 1, skipped: 0 }));
+      enqueueFiles(input.files ?? []).then(finish, () =>
+        finish({ added: 0, failed: 1, skipped: 0 }),
+      );
     });
     input.addEventListener("cancel", () => finish({ added: 0, failed: 0, skipped: 0 }));
     input.click();

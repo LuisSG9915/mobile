@@ -3,6 +3,7 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
+  ListMultipartUploadsCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -223,4 +224,54 @@ export async function abortMultipartUpload(
     UploadId: uploadId,
   });
   await getClient(env).send(command);
+}
+
+/**
+ * Purga subidas multipart incompletas que lleven más de `maxAgeMs` (por defecto 24 horas).
+ * R2 cobra el almacenamiento de los fragmentos cargados hasta que la subida se completa o aborta.
+ */
+export async function abortStaleMultipartUploads(
+  env: Bindings,
+  maxAgeMs = 24 * 3600 * 1000,
+): Promise<number> {
+  if (
+    !env.R2_ACCOUNT_ID ||
+    env.R2_ACCOUNT_ID === "test-account" ||
+    !env.R2_ACCESS_KEY_ID ||
+    !env.R2_SECRET_ACCESS_KEY ||
+    !env.R2_BUCKET_NAME
+  ) {
+    return 0;
+  }
+  try {
+    const client = getClient(env);
+    const res = await client.send(new ListMultipartUploadsCommand({ Bucket: env.R2_BUCKET_NAME }));
+    let aborted = 0;
+    const now = Date.now();
+    for (const upload of res.Uploads ?? []) {
+      if (upload.Key && upload.UploadId && upload.Initiated) {
+        if (now - upload.Initiated.getTime() > maxAgeMs) {
+          try {
+            await client.send(
+              new AbortMultipartUploadCommand({
+                Bucket: env.R2_BUCKET_NAME,
+                Key: upload.Key,
+                UploadId: upload.UploadId,
+              }),
+            );
+            aborted++;
+          } catch (err) {
+            console.error(
+              `Failed to abort multipart upload ${upload.UploadId} for key ${upload.Key}:`,
+              err,
+            );
+          }
+        }
+      }
+    }
+    return aborted;
+  } catch (err) {
+    console.error("Failed to list multipart uploads:", err);
+    return 0;
+  }
 }

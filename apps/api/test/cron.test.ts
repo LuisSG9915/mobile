@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { runCleanup } from "../src/cron/cleanup";
 import { getDb } from "../src/db/client";
 import { media, session, systemState, userStorageStats } from "../src/db/schema";
+import { abortStaleMultipartUploads } from "../src/lib/s3";
 import { createUser, sha } from "./helpers";
 
 const DAY = 24 * 3600 * 1000;
@@ -288,5 +289,90 @@ describe("cron cleanup", () => {
       .get();
     expect(stateRow2?.value).toBeNull();
     expect(deletedKeys).toContain(orphanKey);
+  });
+
+  it("objeto preview (>24h) asociado a media no es eliminado por sweepOrphanObjects y previewSize se reconcilia en cuota", async () => {
+    const { userId } = await createUser();
+    const db = getDb(env.DB);
+    const now = Date.now();
+
+    await seed(userId, {
+      seed: "prev_item",
+      status: "ready",
+      fileSize: 10_000,
+      thumbSize: 1_000,
+      previewSize: 5_000,
+      r2KeyPreview: `users/${userId}/previews/prev_item.webp`,
+    });
+
+    const previewKey = `users/${userId}/previews/prev_item.webp`;
+    const orphanPreviewKey = `users/${userId}/previews/orphan_prev.webp`;
+    const deletedKeys: string[] = [];
+
+    const mockList = async (_options?: R2ListOptions): Promise<R2Objects> => {
+      return {
+        objects: [
+          {
+            key: previewKey,
+            size: 5_000,
+            etag: "etag1",
+            httpEtag: "etag1",
+            version: "v1",
+            uploaded: new Date(now - 25 * 3600 * 1000), // > 24h
+          } as unknown as R2Object,
+          {
+            key: orphanPreviewKey,
+            size: 4_000,
+            etag: "etag2",
+            httpEtag: "etag2",
+            version: "v1",
+            uploaded: new Date(now - 25 * 3600 * 1000), // > 24h (huérfano)
+          } as unknown as R2Object,
+        ],
+        truncated: false,
+        delimitedPrefixes: [],
+      };
+    };
+
+    const mockDelete = async (keys: string | string[]) => {
+      const arr = Array.isArray(keys) ? keys : [keys];
+      deletedKeys.push(...arr);
+    };
+
+    const customEnv = {
+      ...env,
+      BUCKET: {
+        ...env.BUCKET,
+        list: mockList,
+        delete: mockDelete,
+      } as unknown as R2Bucket,
+    };
+
+    await runCleanup(customEnv);
+
+    // El huérfano sí fue eliminado
+    expect(deletedKeys).toContain(orphanPreviewKey);
+    // La preview válida NO fue eliminada
+    expect(deletedKeys).not.toContain(previewKey);
+
+    // Comprobar que previewSize se contabilizó en la reconciliación de cuota
+    // fileSize (10_000) + thumbSize (1_000) + previewSize (5_000) = 16_000
+    const stats = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(stats?.usedBytes).toBe(16_000);
+    expect(stats?.mediaCount).toBe(1);
+  });
+
+  it("abortStaleMultipartUploads maneja entornos sin credenciales o fallos de red sin lanzar excepciones", async () => {
+    const res = await abortStaleMultipartUploads(env);
+    expect(typeof res).toBe("number");
+    expect(res).toBe(0);
+
+    const emptyEnv = { ...env, R2_ACCOUNT_ID: "" };
+    const resEmpty = await abortStaleMultipartUploads(emptyEnv);
+    expect(resEmpty).toBe(0);
   });
 });

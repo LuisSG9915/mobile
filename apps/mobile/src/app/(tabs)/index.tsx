@@ -15,6 +15,7 @@ import {
   Play,
   Search,
   Trash2,
+  Upload,
   Wifi,
   X,
 } from "lucide-react-native";
@@ -346,6 +347,75 @@ export default function GalleryScreen() {
     });
     return () => sub.remove();
   }, [selected]);
+
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+
+    const handleDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        dragDepthRef.current += 1;
+        setIsDraggingOver(true);
+      }
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault();
+      }
+    };
+
+    const handleDragLeave = (_e: DragEvent) => {
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setIsDraggingOver(false);
+      }
+    };
+
+    const handleDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDraggingOver(false);
+
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+
+      try {
+        const { enqueueFiles } = await import("../../web/files");
+        const res = await enqueueFiles(files);
+        if (res.added > 0) {
+          toast.success(
+            res.added === 1
+              ? "1 archivo añadido a la cola de respaldo"
+              : `${res.added} archivos añadidos a la cola de respaldo`,
+          );
+          void runBackupPass({ forceScan: true }).catch(() => {});
+        }
+        if (res.skipped > 0) {
+          toast.error(t.backup.pickSkipped(res.skipped));
+        } else if (res.added === 0 && res.failed > 0) {
+          toast.error(t.backup.pickFailed(res.failed));
+        }
+      } catch {
+        toast.error("Error al procesar los archivos arrastrados.");
+      }
+    };
+
+    window.addEventListener("dragenter", handleDragEnter);
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("dragleave", handleDragLeave);
+    window.addEventListener("drop", handleDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", handleDragEnter);
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("dragleave", handleDragLeave);
+      window.removeEventListener("drop", handleDrop);
+    };
+  }, []);
+
   const [dragSelecting, setDragSelecting] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
@@ -999,6 +1069,20 @@ export default function GalleryScreen() {
         onSelect={setAlbumFilter}
         onClose={() => setAlbumModalOpen(false)}
       />
+
+      {isWeb && isDraggingOver ? (
+        <View
+          pointerEvents="none"
+          className="absolute inset-0 z-50 bg-black/60 items-center justify-center p-6"
+        >
+          <View className="rounded-2xl border-2 border-dashed border-white/80 bg-neutral-900/90 px-8 py-10 items-center max-w-sm">
+            <Upload size={48} color="#ffffff" />
+            <Text className="text-lg font-bold text-white text-center mt-4">
+              Suelta tus fotos o vídeos aquí para respaldarlos
+            </Text>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }

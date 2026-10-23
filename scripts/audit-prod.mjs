@@ -43,7 +43,8 @@ const QUERIES = [
   [
     "media_by_status",
     `select status, (deleted_at is not null) as trashed, count(*) as items,
-            coalesce(sum(file_size),0) as file_bytes, coalesce(sum(thumb_size),0) as thumb_bytes
+            coalesce(sum(file_size),0) as file_bytes, coalesce(sum(thumb_size),0) as thumb_bytes,
+            coalesce(sum(preview_size),0) as preview_bytes
      from media group by status, trashed order by status, trashed`,
   ],
   [
@@ -61,7 +62,7 @@ const QUERIES = [
   ],
   [
     "trash_backlog",
-    `select count(*) as expired_trash, coalesce(sum(file_size+thumb_size),0) as bytes
+    `select count(*) as expired_trash, coalesce(sum(file_size+thumb_size+coalesce(preview_size,0)),0) as bytes
      from media where deleted_at is not null and deleted_at < ${now - TRASH_TTL}`,
   ],
   [
@@ -93,7 +94,7 @@ const QUERIES = [
   [
     "dup_sha_cross_user",
     `select sha256, count(distinct user_id) as users, count(*) as rows_,
-            max(file_size+thumb_size) as bytes
+            max(file_size+thumb_size+coalesce(preview_size,0)) as bytes
      from media group by sha256 having users > 1 order by bytes desc limit 20`,
   ],
   [
@@ -220,7 +221,7 @@ console.log(`Usuarios: ${us.users} | Sesiones: ${us.sessions} (activas: ${us.ses
 console.log("\nMedia por estado:");
 for (const r of report.media_by_status ?? []) {
   console.log(
-    `  ${r.status}${r.trashed ? " (papelera)" : ""}: ${r.items} items, ${fmtBytes(r.file_bytes)} + thumbs ${fmtBytes(r.thumb_bytes)}`,
+    `  ${r.status}${r.trashed ? " (papelera)" : ""}: ${r.items} items, ${fmtBytes(r.file_bytes)} + thumbs ${fmtBytes(r.thumb_bytes)} + previews ${fmtBytes(r.preview_bytes)}`,
   );
 }
 

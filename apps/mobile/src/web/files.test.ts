@@ -111,4 +111,23 @@ describe("pickAndEnqueue", () => {
     await expect(promise).resolves.toEqual({ added: 0, failed: 0, skipped: 0 });
     expect(db.getQueueStats().total).toBe(0);
   });
+
+  it("enqueueFiles encola archivos válidos y omite los no soportados retornando {added: 1, skipped: 1, failed: 0}", async () => {
+    const mockPhotoFile = new File(["mock-photo-content"], "photo.jpg", {
+      type: "image/jpeg",
+      lastModified: 1_234,
+    });
+    const mockUnsupportedFile = new File(["mock-doc-content"], "doc.pdf", {
+      type: "application/pdf",
+      lastModified: 5_678,
+    });
+
+    const res = await files.enqueueFiles([mockPhotoFile, mockUnsupportedFile]);
+    expect(res).toEqual({ added: 1, skipped: 1, failed: 0 });
+
+    const items = db.getPendingItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].filename).toBe("photo.jpg");
+    expect(items[0].media_type).toBe("photo");
+  });
 });

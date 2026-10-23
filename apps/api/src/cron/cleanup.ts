@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, like, lt, or } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media, session, systemState, verification } from "../db/schema";
 import type { Bindings } from "../env";
+import { abortStaleMultipartUploads } from "../lib/s3";
 import {
   reconcileStorageStats,
   releaseStorageReservation,
@@ -117,6 +118,11 @@ export async function runCleanup(env: Bindings): Promise<void> {
 
   await reconcileStorageStats(db);
   await sweepOrphanObjects(env, db, now);
+  try {
+    await abortStaleMultipartUploads(env);
+  } catch (err) {
+    console.error("Error al purgar subidas multipart incompletas:", err);
+  }
 }
 
 /**
@@ -150,9 +156,9 @@ async function sweepOrphanObjects(
       (obj) => now - obj.uploaded.getTime() > ORPHAN_MIN_AGE_MS,
     );
 
-    // Valida existencia en D1 en trozos de 100 para no inflar la consulta
-    for (let i = 0; i < candidates.length; i += 100) {
-      const chunk = candidates.slice(i, i + 100);
+    // Valida existencia en D1 en trozos de 30 para respetar el límite de 100 variables (3 * 30 = 90)
+    for (let i = 0; i < candidates.length; i += 30) {
+      const chunk = candidates.slice(i, i + 30);
       const chunkKeys = chunk.map((c) => c.key);
       const rows = await db
         .select({

@@ -703,34 +703,6 @@ export default function MediaViewer() {
     }
   }, [isWeb, currentWebIndex, items, qc]);
 
-  // Navegación con teclado en Web
-  useEffect(() => {
-    if (!isWeb) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      if (e.key === "ArrowLeft") {
-        setWebIndex((curr) => {
-          const idx = curr ?? (foundIndex >= 0 ? foundIndex : 0);
-          return idx > 0 ? idx - 1 : idx;
-        });
-      } else if (e.key === "ArrowRight") {
-        setWebIndex((curr) => {
-          const idx = curr ?? (foundIndex >= 0 ? foundIndex : 0);
-          return idx < items.length - 1 ? idx + 1 : idx;
-        });
-      } else if (e.key === "Escape") {
-        router.back();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isWeb, items.length, foundIndex]);
-
   const filmstripRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -1009,6 +981,89 @@ export default function MediaViewer() {
       buttons,
     );
   };
+
+  const isVideo = currentMediaType === "video";
+
+  // Atajos de teclado en Web (navegación, reproducción, borrado y pantalla completa)
+  useEffect(() => {
+    if (!isWeb) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Guarda 1: Ignorar si hay teclas modificadoras para no secuestrar atajos del navegador (ej. Cmd+F)
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+
+      // Guarda 2: Ignorar si el foco está en un campo editable
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      // Guarda 3: Ignorar si hay algún modal secundario abierto
+      if (shareOpen || addToAlbumOpen || editorOpen || showInfo) {
+        return;
+      }
+
+      if (e.key === "ArrowLeft") {
+        setWebIndex((curr) => {
+          const idx = curr ?? (foundIndex >= 0 ? foundIndex : 0);
+          return idx > 0 ? idx - 1 : idx;
+        });
+      } else if (e.key === "ArrowRight") {
+        setWebIndex((curr) => {
+          const idx = curr ?? (foundIndex >= 0 ? foundIndex : 0);
+          return idx < items.length - 1 ? idx + 1 : idx;
+        });
+      } else if (e.key === "Escape") {
+        router.back();
+      } else if (e.key === " ") {
+        if (isVideo) {
+          e.preventDefault();
+          const video = typeof document !== "undefined" ? document.querySelector("video") : null;
+          if (video) {
+            const isPlaying = !video.paused || (video as any).playing === true;
+            if (isPlaying) {
+              video.pause();
+            } else {
+              void video.play().catch(() => {});
+            }
+          }
+        }
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        onDeletePress();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        if (typeof document !== "undefined") {
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen?.().catch(() => {});
+          } else {
+            document.exitFullscreen?.().catch(() => {});
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    isWeb,
+    items.length,
+    foundIndex,
+    isVideo,
+    onDeletePress,
+    shareOpen,
+    addToAlbumOpen,
+    editorOpen,
+    showInfo,
+  ]);
 
   const showSpinner = detail.isPending && !carousel && !isPureLocal;
   const onDismiss = () => router.back();

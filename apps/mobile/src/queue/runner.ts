@@ -5,7 +5,7 @@ import { AppState } from "react-native";
 import { useQueueEvents } from "../lib/events";
 import { useSettings } from "../lib/store";
 import { registerBackupTask } from "./background";
-import { getLastScanTs, getQueueStats, isBackupPaused } from "./db";
+import { getLastScanTs, getQueueStats, isBackupPaused, retryFailed } from "./db";
 import { processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
@@ -41,6 +41,83 @@ export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void>
   useQueueEvents.getState().emit();
 }
 
+let wasOffline = false;
+let resuming = false;
+
+/**
+ * Escucha cambios de conectividad para reanudar la cola automáticamente y
+ * reintentar elementos fallidos (status = 'error') cuando se restablece la red.
+ * Devuelve una función para limpiar el listener.
+ */
+export function initNetworkAutoResume(): () => void {
+  let disposed = false;
+  let subscription: { remove: () => void } | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  void Network.getNetworkStateAsync?.()
+    .then((initialState) => {
+      if (disposed || !initialState) return;
+      wasOffline = !initialState.isConnected || initialState.isInternetReachable === false;
+    })
+    .catch(() => {});
+
+  const handleStateChange = (state: Network.NetworkState | Network.NetworkStateEvent) => {
+    if (disposed) return;
+    const isOnline = Boolean(state.isConnected && state.isInternetReachable !== false);
+
+    if (!isOnline) {
+      wasOffline = true;
+      return;
+    }
+
+    if (wasOffline && isOnline) {
+      wasOffline = false;
+      if (resuming) return;
+      if (isBackupPaused()) return;
+
+      const { wifiOnly } = useSettings.getState();
+      if (
+        wifiOnly &&
+        state.type !== Network.NetworkStateType.WIFI &&
+        state.type !== Network.NetworkStateType.ETHERNET
+      ) {
+        return;
+      }
+
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        debounceTimer = null;
+        if (disposed || resuming || isBackupPaused()) return;
+        resuming = true;
+        try {
+          await retryFailed();
+          await runBackupPass({ forceScan: false });
+        } catch {
+          // Fallos transitorios ignorados; el ciclo periódico lo reintentará
+        } finally {
+          resuming = false;
+        }
+      }, 1000);
+    }
+  };
+
+  try {
+    if (typeof Network.addNetworkStateListener === "function") {
+      subscription = Network.addNetworkStateListener((state) => {
+        handleStateChange(state);
+      });
+    }
+  } catch {
+    // Si addNetworkStateListener no está disponible en este entorno
+  }
+
+  return () => {
+    disposed = true;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    subscription?.remove();
+  };
+}
+
 /**
  * Mantiene la cola viva mientras la app está en primer plano:
  * al abrir la app, al volver del background y cada 60 s.
@@ -50,9 +127,8 @@ export function useBackupRunner(enabled: boolean) {
     if (!enabled) return;
     let disposed = false;
     let librarySub: { remove: () => void } | null = null;
-    let networkSub: { remove: () => void } | null = null;
     let libraryTimer: ReturnType<typeof setTimeout> | null = null;
-    let networkTimer: ReturnType<typeof setTimeout> | null = null;
+    const cleanupAutoResume = initNetworkAutoResume();
     // Las pasadas son de mejor esfuerzo: un fallo (scan, red, permisos) no
     // debe propagarse como rechazo no manejado.
     const pass = () => {
@@ -107,38 +183,14 @@ export function useBackupRunner(enabled: boolean) {
       }
     })();
 
-    // Al recuperar red/Wi-Fi, reanudar sin esperar al timer de 60 s.
-    try {
-      networkSub = Network.addNetworkStateListener((state) => {
-        if (disposed || !state.isConnected || state.isInternetReachable === false) return;
-        const { wifiOnly } = useSettings.getState();
-        if (
-          wifiOnly &&
-          state.type !== Network.NetworkStateType.WIFI &&
-          state.type !== Network.NetworkStateType.ETHERNET
-        ) {
-          return;
-        }
-        if (isBackupPaused()) return;
-        if (networkTimer) clearTimeout(networkTimer);
-        networkTimer = setTimeout(() => {
-          networkTimer = null;
-          pass();
-        }, 1000);
-      });
-    } catch {
-      // Sin listener de red: el runner periódico sigue cubriendo el caso.
-    }
-
     return () => {
       disposed = true;
       clearTimeout(startTimer);
       sub.remove();
       clearInterval(interval);
       if (libraryTimer) clearTimeout(libraryTimer);
-      if (networkTimer) clearTimeout(networkTimer);
       librarySub?.remove();
-      networkSub?.remove();
+      cleanupAutoResume();
     };
   }, [enabled]);
 }

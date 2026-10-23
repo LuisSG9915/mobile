@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useQueueEvents } from "../lib/events";
+import { isBackupPaused, retryFailed } from "./db";
 import { processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
@@ -16,6 +17,35 @@ export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void>
   useQueueEvents.getState().emit();
 }
 
+let webResuming = false;
+
+/**
+ * Escucha el evento online en el navegador para reintentar elementos fallidos
+ * y reanudar el procesamiento de la cola automáticamente al recuperar la red.
+ */
+export function initNetworkAutoResume(): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const onOnline = async () => {
+    if (webResuming) return;
+    if (isBackupPaused()) return;
+    webResuming = true;
+    try {
+      await retryFailed();
+      await runBackupPass({ forceScan: false });
+    } catch {
+      // Ignorar fallos transitorios
+    } finally {
+      webResuming = false;
+    }
+  };
+
+  window.addEventListener("online", onOnline);
+  return () => {
+    window.removeEventListener("online", onOnline);
+  };
+}
+
 /**
  * Mantiene la cola viva mientras la pestaña está abierta:
  * al montar, al volver a la pestaña (visibilitychange), al recuperar la red
@@ -25,6 +55,7 @@ export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void>
 export function useBackupRunner(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
+    const cleanupAutoResume = initNetworkAutoResume();
     const pass = () => {
       void runBackupPass().catch(() => {});
     };
@@ -32,15 +63,13 @@ export function useBackupRunner(enabled: boolean) {
     const onVisibility = () => {
       if (document.visibilityState === "visible") pass();
     };
-    const onOnline = () => pass();
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("online", onOnline);
     const interval = setInterval(() => {
       if (document.visibilityState === "visible" && navigator.onLine) pass();
     }, 60_000);
     return () => {
+      cleanupAutoResume();
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("online", onOnline);
       clearInterval(interval);
     };
   }, [enabled]);

@@ -3,17 +3,23 @@ import { describe, expect, it } from "vitest";
 import { j } from "./helpers";
 
 describe("health", () => {
-  it("responde ok", async () => {
+  it("responde ok y adjunta cabeceras de seguridad", async () => {
     const res = await SELF.fetch("http://localhost/health");
     expect(res.status).toBe(200);
     expect(await j(res)).toEqual({ ok: true });
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
   });
 
-  it("ruta desconocida → 404 con formato de error", async () => {
+  it("ruta desconocida → 404 con formato de error y cabeceras de seguridad", async () => {
     const res = await SELF.fetch("http://localhost/nope");
     expect(res.status).toBe(404);
     const body = await j(res);
     expect(body).toHaveProperty("error");
     expect(body).toHaveProperty("message");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
   });
 });

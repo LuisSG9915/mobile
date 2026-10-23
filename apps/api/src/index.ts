@@ -30,6 +30,32 @@ app.onError((err, c) => {
 });
 app.notFound((c) => c.json({ error: "not_found", message: "Ruta no encontrada." }, 404));
 
+app.use("*", async (c, next) => {
+  await next();
+  const securityHeaders: Record<string, string> = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+  };
+  try {
+    for (const [k, v] of Object.entries(securityHeaders)) {
+      c.res.headers.set(k, v);
+    }
+  } catch {
+    // Si c.res tiene cabeceras inmutables (ej. respuestas directas de Better Auth),
+    // clonamos la respuesta para poder adjuntar las cabeceras de forma segura.
+    const headers = new Headers(c.res.headers);
+    for (const [k, v] of Object.entries(securityHeaders)) {
+      headers.set(k, v);
+    }
+    c.res = new Response(c.res.body, {
+      status: c.res.status,
+      statusText: c.res.statusText,
+      headers,
+    });
+  }
+});
+
 // CORS con allowlist: la app web usa Authorization: Bearer (sin cookies de
 // terceros), así que credentials no hace falta. Requests sin Origin (móvil,
 // CLI) pasan sin cabeceras CORS.

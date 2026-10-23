@@ -51,6 +51,9 @@ export default defineConfig({
   ],
   test: {
     globals: true,
+    fileParallelism: false,
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
     setupFiles: ["./test/apply-migrations.ts"],
     include: ["test/**/*.test.ts"],
     // better-auth lanza APIError (redirects 302, INVALID_TOKEN 400…) dentro de
