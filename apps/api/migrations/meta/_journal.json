@@ -64,6 +64,34 @@
       "when": 1791432674998,
       "tag": "0008_medical_thundra",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792684469555,
+      "tag": "0009_stale_grandmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792686297232,
+      "tag": "0010_ambiguous_agent_zero",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792688000000,
+      "tag": "0011_preview_and_multipart",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792690000000,
+      "tag": "0012_share_expiration_and_revocation",
+      "breakpoints": true
     }
   ]
 }

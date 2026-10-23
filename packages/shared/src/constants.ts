@@ -32,6 +32,12 @@ export const VIDEO_EXTENSIONS: readonly string[] = ["mp4", "mov", "m4v"];
 export const MAX_THUMB_BYTES = 50 * 1024;
 /** Lado mayor de la miniatura en px */
 export const THUMB_MAX_DIMENSION = 400;
+/** Lado mayor de la vista previa intermedia en px */
+export const PREVIEW_MAX_DIMENSION = 1600;
+/** Umbral para activar subida multipart reanudable (20 MB) */
+export const MULTIPART_THRESHOLD_BYTES = 20 * 1024 * 1024;
+/** Tamaño de parte para subida multipart (5 MB, mínimo de R2/S3) */
+export const MULTIPART_PART_SIZE = 5 * 1024 * 1024;
 /** TTL de las URLs prefirmadas de subida (15 min) */
 export const PRESIGN_PUT_TTL_SECONDS = 900;
 /** Ventana de redondeo para URLs de lectura cacheables (6 h) */

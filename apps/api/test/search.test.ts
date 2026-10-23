@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
@@ -235,5 +235,73 @@ describe("búsqueda y filtros avanzados", () => {
     expect(docJson.totalMatches).toBe(1);
     expect(docJson.items[0].id).toBe(id2);
     expect(docJson.items[0].isDocument).toBe(true);
+  });
+
+  it("FTS5 ignora acentos y diacríticos al buscar texto (cancun = Cancún)", async () => {
+    const { cookie, userId } = await createUser();
+    const ids = await seedTestMedia(userId);
+
+    // Buscar "cancun" sin tilde debe coincidir con "Cancún" (foto 1)
+    const resSinTilde = await SELF.fetch("http://localhost/v1/search?q=cancun", authed(cookie));
+    expect(resSinTilde.status).toBe(200);
+    const jsonSinTilde = await j(resSinTilde);
+    expect(jsonSinTilde.totalMatches).toBe(1);
+    expect(jsonSinTilde.items[0].id).toBe(ids[0]);
+
+    // Buscar "CANCÚN" en mayúsculas también coincide
+    const resMayus = await SELF.fetch("http://localhost/v1/search?q=CANCÚN", authed(cookie));
+    expect(resMayus.status).toBe(200);
+    const jsonMayus = await j(resMayus);
+    expect(jsonMayus.totalMatches).toBe(1);
+    expect(jsonMayus.items[0].id).toBe(ids[0]);
+  });
+
+  it("GET /v1/tags pagina etiquetas con cursor", async () => {
+    const { cookie, userId } = await createUser();
+    await seedTestMedia(userId);
+
+    // Página 1: limit 2
+    const page1Res = await SELF.fetch("http://localhost/v1/tags?limit=2", authed(cookie));
+    expect(page1Res.status).toBe(200);
+    const page1 = await j(page1Res);
+    expect(page1.tags.length).toBe(2);
+    expect(page1.nextCursor).toBeTruthy();
+
+    // Página 2: con cursor
+    const page2Res = await SELF.fetch(
+      `http://localhost/v1/tags?limit=2&cursor=${encodeURIComponent(page1.nextCursor)}`,
+      authed(cookie),
+    );
+    expect(page2Res.status).toBe(200);
+    const page2 = await j(page2Res);
+    expect(page2.tags.length).toBeGreaterThan(0);
+    // Sin duplicados entre páginas
+    const tagsP1 = page1.tags.map((t: { tag: string }) => t.tag);
+    for (const t of page2.tags) {
+      expect(tagsP1).not.toContain(t.tag);
+    }
+  });
+
+  it("EXPLAIN QUERY PLAN confirma uso de índices en media_tags y media_fts", async () => {
+    const db = getDb(env.DB);
+
+    // 1. Consulta de tags agrupados usa el índice compuesto idx_media_tags_user_tag
+    const tagsPlan = await db.all<{ id: number; parent: number; notused: number; detail: string }>(
+      sql`EXPLAIN QUERY PLAN
+          SELECT tag, count(*) as count
+          FROM media_tags
+          WHERE user_id = 'test-user'
+          GROUP BY tag
+          ORDER BY count(*) DESC, tag ASC
+          LIMIT 10`,
+    );
+
+    expect(tagsPlan.length).toBeGreaterThan(0);
+    const usesTagsIndex = tagsPlan.some(
+      (p) => p.detail.includes("SEARCH") && p.detail.includes("idx_media_tags_user_tag"),
+    );
+    expect(usesTagsIndex).toBe(true);
+    const hasTagsScan = tagsPlan.some((p) => p.detail.includes("SCAN TABLE media_tags"));
+    expect(hasTagsScan).toBe(false);
   });
 });

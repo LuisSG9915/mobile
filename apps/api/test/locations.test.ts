@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
@@ -195,5 +196,156 @@ describe("rutas de ubicación y mapa (locations)", () => {
     expect(res.status).toBe(200);
     const data = await j(res);
     expect(typeof data.geocoded).toBe("number");
+  });
+
+  it("GET /v1/locations pagina con cursor y limit acotado", async () => {
+    const { cookie, userId } = await createUser();
+    await seedLocationMedia(userId); // Hay 3 con GPS (Cancun, CDMX, Madrid)
+
+    // Página 1: limit 2
+    const resP1 = await SELF.fetch("http://localhost/v1/locations?limit=2", authed(cookie));
+    expect(resP1.status).toBe(200);
+    const p1 = await j(resP1);
+    expect(p1.items.length).toBe(2);
+    expect(p1.nextCursor).toBeTruthy();
+
+    // Página 2: con cursor
+    const resP2 = await SELF.fetch(
+      `http://localhost/v1/locations?limit=2&cursor=${encodeURIComponent(p1.nextCursor)}`,
+      authed(cookie),
+    );
+    expect(resP2.status).toBe(200);
+    const p2 = await j(resP2);
+    expect(p2.items.length).toBe(1);
+    expect(p2.nextCursor).toBeNull();
+
+    // Sin elementos solapados
+    const idsP1 = p1.items.map((i: { id: string }) => i.id);
+    expect(idsP1).not.toContain(p2.items[0].id);
+  });
+
+  it("GET /v1/locations/places pagina lugares por cursor", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+    const base = Date.now();
+
+    // Insertar 2 fotos en ciudades distintas
+    const s1 = sha(`${userId}-pl-1`);
+    await db.insert(media).values({
+      id: crypto.randomUUID(),
+      userId,
+      sha256: s1,
+      mediaType: "photo",
+      mimeType: "image/jpeg",
+      ext: "jpg",
+      takenAt: base,
+      dateGroup: "2026-06-10",
+      latitude: 21.1619,
+      longitude: -86.8515,
+      width: 1920,
+      height: 1080,
+      thumbhash: "AQAAAA==",
+      r2KeyOriginal: `users/${userId}/originals/${s1}.jpg`,
+      r2KeyThumb: `users/${userId}/thumbs/${s1}.webp`,
+      fileSize: 400_000,
+      thumbSize: 10_000,
+      status: "ready",
+      city: "Cancún",
+      country: "México",
+      locationName: "Cancún, México",
+      createdAt: base,
+      updatedAt: base,
+    });
+
+    const s2 = sha(`${userId}-pl-2`);
+    await db.insert(media).values({
+      id: crypto.randomUUID(),
+      userId,
+      sha256: s2,
+      mediaType: "photo",
+      mimeType: "image/jpeg",
+      ext: "jpg",
+      takenAt: base + 1000,
+      dateGroup: "2026-05-15",
+      latitude: 40.4168,
+      longitude: -3.7038,
+      width: 1920,
+      height: 1080,
+      thumbhash: "AQAAAA==",
+      r2KeyOriginal: `users/${userId}/originals/${s2}.jpg`,
+      r2KeyThumb: `users/${userId}/thumbs/${s2}.webp`,
+      fileSize: 500_000,
+      thumbSize: 10_000,
+      status: "ready",
+      city: "Madrid",
+      country: "España",
+      locationName: "Madrid, España",
+      createdAt: base + 1000,
+      updatedAt: base + 1000,
+    });
+
+    const resP1 = await SELF.fetch("http://localhost/v1/locations/places?limit=1", authed(cookie));
+    expect(resP1.status).toBe(200);
+    const p1 = await j(resP1);
+    expect(p1.places.length).toBe(1);
+    expect(p1.nextCursor).toBeTruthy();
+
+    const resP2 = await SELF.fetch(
+      `http://localhost/v1/locations/places?limit=1&cursor=${encodeURIComponent(p1.nextCursor)}`,
+      authed(cookie),
+    );
+    expect(resP2.status).toBe(200);
+    const p2 = await j(resP2);
+    expect(p2.places.length).toBe(1);
+
+    expect(p1.places[0].city).not.toBe(p2.places[0].city);
+  });
+
+  it("EXPLAIN QUERY PLAN confirma búsqueda por índice sin SCAN TABLE en locations y places", async () => {
+    const db = getDb(env.DB);
+
+    // 1. Plan de consulta de locations (GPS)
+    const locPlan = await db.all<{ id: number; parent: number; notused: number; detail: string }>(
+      sql`EXPLAIN QUERY PLAN
+          SELECT id, latitude, longitude FROM media
+          WHERE user_id = 'test-user'
+            AND status = 'ready'
+            AND deleted_at IS NULL
+            AND latitude IS NOT NULL
+            AND longitude IS NOT NULL
+          ORDER BY taken_at DESC, id DESC
+          LIMIT 201`,
+    );
+
+    expect(locPlan.length).toBeGreaterThan(0);
+    const hasScanTable = locPlan.some((p) => p.detail.includes("SCAN TABLE media"));
+    expect(hasScanTable).toBe(false);
+
+    // 2. Plan de agrupamiento de places
+    const placesPlan = await db.all<{
+      id: number;
+      parent: number;
+      notused: number;
+      detail: string;
+    }>(
+      sql`EXPLAIN QUERY PLAN
+          SELECT city, country, count(*) as count
+          FROM media
+          WHERE user_id = 'test-user'
+            AND status = 'ready'
+            AND deleted_at IS NULL
+            AND city IS NOT NULL
+          GROUP BY city, country
+          ORDER BY count(*) DESC, city ASC
+          LIMIT 51`,
+    );
+
+    expect(placesPlan.length).toBeGreaterThan(0);
+    const usesPlacesIndex = placesPlan.some(
+      (p) => p.detail.includes("SEARCH") && p.detail.includes("idx_media_places"),
+    );
+    expect(usesPlacesIndex).toBe(true);
+    const hasPlacesScan = placesPlan.some((p) => p.detail.includes("SCAN TABLE media"));
+    expect(hasPlacesScan).toBe(false);
   });
 });

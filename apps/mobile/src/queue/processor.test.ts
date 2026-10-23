@@ -17,6 +17,8 @@ const h = vi.hoisted(() => ({
   maxActiveUploads: 0,
   finished: [] as string[],
   queuedWithoutHashCalls: 0,
+  backupPaused: false,
+  initUploadFailures: new Map<string, { status: number; code: string; message: string }>(),
 }));
 
 vi.mock("expo-file-system", () => ({
@@ -87,12 +89,18 @@ vi.mock("../api/client", () => {
     ApiError,
     api: {
       checkHashes: async () => ({ existing: [] }),
-      initUpload: async (input: { sha256: string }) => ({
-        status: "pending",
-        id: `remote-${input.sha256}`,
-        thumb: { url: "https://r2/thumb", headers: {} },
-        original: { url: "https://r2/original", headers: {} },
-      }),
+      initUpload: async (input: { sha256: string }) => {
+        const failure = h.initUploadFailures.get(input.sha256);
+        if (failure) {
+          throw new ApiError(failure.status, failure.code, failure.message);
+        }
+        return {
+          status: "pending",
+          id: `remote-${input.sha256}`,
+          thumb: { url: "https://r2/thumb", headers: {} },
+          original: { url: "https://r2/original", headers: {} },
+        };
+      },
       completeUpload: async () => ({}),
     },
   };
@@ -122,6 +130,7 @@ vi.mock("./hash", () => ({
 
 vi.mock("./thumb", () => ({
   makeThumbAndHash: async () => ({ uri: "file:///thumb.webp", bytes: 10, thumbhash: "hash" }),
+  makePreview: async () => ({ uri: "file:///preview.webp", bytes: 20 }),
 }));
 
 vi.mock("./db", () => ({
@@ -136,11 +145,16 @@ vi.mock("./db", () => ({
     return [];
   },
   getQueuedWithSha: () => [],
-  isBackupPaused: () => false,
+  isBackupPaused: () => h.backupPaused,
   recoverInterrupted: async () => {},
-  setState: async (assetId: string, state: QueueState) => {
+  setState: async (assetId: string, state: QueueState, extra?: { last_error?: string | null }) => {
     const item = h.pending.find((i) => i.asset_id === assetId);
-    if (item) item.state = state;
+    if (item) {
+      item.state = state;
+      if (extra?.last_error !== undefined) {
+        item.last_error = extra.last_error;
+      }
+    }
     if ((state === "done" || state === "duplicate") && !h.finished.includes(assetId)) {
       h.finished.push(assetId);
     }
@@ -153,7 +167,9 @@ vi.mock("./db", () => ({
   setItemHash: async () => {},
   bumpAttempt: async () => {},
   setNextRetryAt: async () => {},
-  setBackupPaused: () => {},
+  setBackupPaused: (paused: boolean) => {
+    h.backupPaused = paused;
+  },
 }));
 
 function makeItem(id: string): MockItem {
@@ -188,6 +204,8 @@ beforeEach(() => {
   h.maxActiveUploads = 0;
   h.finished = [];
   h.queuedWithoutHashCalls = 0;
+  h.backupPaused = false;
+  h.initUploadFailures.clear();
 });
 
 describe("processQueue nativo: concurrencia", () => {
@@ -241,5 +259,27 @@ describe("processQueue nativo: concurrencia", () => {
 
     expect(h.finished).toHaveLength(2);
     expect(new Set(h.finished).size).toBe(2);
+  });
+
+  it("un vídeo > 5 GB (413 file_too_large) se marca como fallido sin pausar el resto de la cola", async () => {
+    const hugeVideo = makeItem("video-huge");
+    hugeVideo.media_type = "video";
+    const normalPhoto = makeItem("photo-normal");
+    h.pending = [hugeVideo, normalPhoto];
+
+    h.initUploadFailures.set("sha-file:///video-huge.jpg", {
+      status: 413,
+      code: "file_too_large",
+      message: "El archivo supera el máximo permitido (5 GB).",
+    });
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(hugeVideo.state).toBe("failed");
+    expect(hugeVideo.last_error).toBe("file_too_large");
+    expect(h.backupPaused).toBe(false);
+    expect(normalPhoto.state).toBe("done");
+    expect(h.finished).toContain("photo-normal");
   });
 });

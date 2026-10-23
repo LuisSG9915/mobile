@@ -1,4 +1,12 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  UploadPartCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { PRESIGN_GET_TTL_SECONDS, PRESIGN_GET_WINDOW_SECONDS } from "@photos/shared";
 import type { Bindings } from "../env";
@@ -99,4 +107,120 @@ export async function presignGetDownload(
     expiresIn: PRESIGN_GET_TTL_SECONDS,
     signingDate: getSigningDate(),
   });
+}
+
+export type MultipartPartInfo = {
+  partNumber: number;
+  etag: string;
+};
+
+/**
+ * Inicia una subida multipart para archivos grandes. Prefiere el binding R2 nativo
+ * si está disponible (entorno Cloudflare/Miniflare) o recurre a la API S3.
+ */
+export async function createMultipartUpload(
+  env: Bindings,
+  key: string,
+  contentType: string,
+): Promise<string> {
+  if (env.BUCKET && typeof env.BUCKET.createMultipartUpload === "function") {
+    try {
+      const mpu = await env.BUCKET.createMultipartUpload(key, {
+        httpMetadata: { contentType },
+      });
+      return mpu.uploadId;
+    } catch {
+      // Continuar con S3Client
+    }
+  }
+  const command = new CreateMultipartUploadCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: key,
+    ContentType: contentType,
+  });
+  const res = await getClient(env).send(command);
+  if (!res.UploadId) throw new Error("No se pudo iniciar la subida multipart");
+  return res.UploadId;
+}
+
+/**
+ * Genera una URL prefirmada para subir una parte individual (PUT).
+ */
+export async function presignUploadPart(
+  env: Bindings,
+  key: string,
+  uploadId: string,
+  partNumber: number,
+): Promise<string> {
+  const command = new UploadPartCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  const expiresIn = Number(env.PRESIGN_TTL_SECONDS) || 900;
+  return getSignedUrl(getClient(env), command, { expiresIn });
+}
+
+/**
+ * Finaliza la subida multipart ensamblando todas las partes cargadas.
+ */
+export async function completeMultipartUpload(
+  env: Bindings,
+  key: string,
+  uploadId: string,
+  parts: MultipartPartInfo[],
+): Promise<void> {
+  const sorted = parts.slice().sort((a, b) => a.partNumber - b.partNumber);
+  if (env.BUCKET && typeof env.BUCKET.resumeMultipartUpload === "function") {
+    try {
+      const mpu = env.BUCKET.resumeMultipartUpload(key, uploadId);
+      await mpu.complete(
+        sorted.map((p) => ({
+          partNumber: p.partNumber,
+          etag: p.etag.replace(/"/g, ""),
+        })),
+      );
+      return;
+    } catch {
+      // Continuar con S3Client
+    }
+  }
+  const command = new CompleteMultipartUploadCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: key,
+    UploadId: uploadId,
+    MultipartUpload: {
+      Parts: sorted.map((p) => ({
+        PartNumber: p.partNumber,
+        ETag: p.etag.startsWith('"') ? p.etag : `"${p.etag}"`,
+      })),
+    },
+  });
+  await getClient(env).send(command);
+}
+
+/**
+ * Aborta la subida multipart y descarta los fragmentos almacenados.
+ */
+export async function abortMultipartUpload(
+  env: Bindings,
+  key: string,
+  uploadId: string,
+): Promise<void> {
+  if (env.BUCKET && typeof env.BUCKET.resumeMultipartUpload === "function") {
+    try {
+      const mpu = env.BUCKET.resumeMultipartUpload(key, uploadId);
+      await mpu.abort();
+      return;
+    } catch {
+      // Continuar con S3Client
+    }
+  }
+  const command = new AbortMultipartUploadCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: key,
+    UploadId: uploadId,
+  });
+  await getClient(env).send(command);
 }

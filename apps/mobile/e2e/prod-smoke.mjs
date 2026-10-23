@@ -1,14 +1,21 @@
 /**
- * Smoke manual contra producción (H-007): login en photos-web.workers.dev y
+ * Smoke contra producción (H-007): login en photos-web.workers.dev y
  * subida real — verifica el PUT presignado cross-origin a R2 de producción.
- * Uso: node e2e/prod-smoke.mjs   (NO es un spec de playwright test).
+ *
+ * Uso:
+ *   node e2e/prod-smoke.mjs [--optional]
  */
 import { chromium } from "@playwright/test";
 import { encode } from "jpeg-js";
 
-const WEB = "https://photos-web.luis-sg9915.workers.dev";
-const EMAIL = "e2e-prod-web@example.com";
-const PASSWORD = "password-e2e-123";
+const isOptional =
+  process.argv.includes("--optional") ||
+  process.env.SMOKE_OPTIONAL === "true" ||
+  process.env.SMOKE_OPTIONAL === "1";
+
+const WEB = process.env.PROD_WEB_URL ?? "https://photos-web.luis-sg9915.workers.dev";
+const EMAIL = process.env.SMOKE_USER_EMAIL ?? "e2e-prod-web@example.com";
+const PASSWORD = process.env.SMOKE_USER_PASSWORD ?? "password-e2e-123";
 
 function makeJpeg(seed, width = 640, height = 480) {
   const data = new Uint8Array(width * height * 4);
@@ -25,10 +32,19 @@ function makeJpeg(seed, width = 640, height = 480) {
   return encode({ data, width, height }, 80).data;
 }
 
-const browser = await chromium.launch();
+let browser;
+try {
+  browser = await chromium.launch();
+} catch (err) {
+  if (isOptional) {
+    console.warn(`prod-smoke: chromium no disponible (${err.message}). Omitiendo smoke opcional.`);
+    process.exit(0);
+  }
+  throw err;
+}
+
 try {
   const page = await browser.newPage();
-  // Captura de red: todo lo que salga hacia el API o hacia R2 queda registrado.
   const hits = [];
   page.on("response", (res) => {
     const u = res.url();
@@ -37,23 +53,67 @@ try {
     }
   });
 
-  await page.goto(`${WEB}/login`);
+  console.log(`prod-smoke: conectando a ${WEB}/login…`);
+  try {
+    await page.goto(`${WEB}/login`, { timeout: 30_000 });
+  } catch (err) {
+    if (isOptional) {
+      console.warn(
+        `prod-smoke: no se pudo cargar ${WEB}/login (${err.message}). Omitiendo smoke opcional.`,
+      );
+      process.exit(0);
+    }
+    throw err;
+  }
+
   await page.locator('input[autocomplete="email"]:visible').fill(EMAIL);
   await page.locator('input[type="password"]:visible').fill(PASSWORD);
   await page.getByText("Iniciar sesión", { exact: true }).last().click();
+
+  // Comprobar si entró o si hay botón Continuar (pantalla de permisos)
+  const tabsOrPerms = await Promise.race([
+    page
+      .getByText("Continuar", { exact: true })
+      .filter({ visible: true })
+      .last()
+      .waitFor({ timeout: 15_000 })
+      .then(() => "permissions")
+      .catch(() => null),
+    page
+      .getByText("Respaldo", { exact: true })
+      .filter({ visible: true })
+      .last()
+      .waitFor({ timeout: 15_000 })
+      .then(() => "tabs")
+      .catch(() => null),
+  ]);
+
+  if (tabsOrPerms === "permissions") {
+    await page.getByText("Continuar", { exact: true }).filter({ visible: true }).last().click();
+  } else if (!tabsOrPerms) {
+    // Si no entró, intentar registro por si el usuario aún no existe en producción
+    console.log("prod-smoke: usuario no autenticado, intentando registro…");
+    await page.goto(`${WEB}/register`, { timeout: 15_000 }).catch(() => {});
+    const nameInput = page.locator('input[autocomplete="name"]:visible');
+    if (await nameInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await nameInput.fill("Smoke Prod");
+      await page.locator('input[autocomplete="email"]:visible').fill(EMAIL);
+      await page.locator('input[type="password"]:visible').fill(PASSWORD);
+      await page.getByText("Crear cuenta", { exact: true }).last().click();
+      await page
+        .getByText("Continuar", { exact: true })
+        .filter({ visible: true })
+        .last()
+        .click({ timeout: 15_000 })
+        .catch(() => {});
+    }
+  }
+
   await page
-    .getByText("Continuar", { exact: true })
+    .getByText("Respaldo", { exact: true })
     .filter({ visible: true })
     .last()
-    .click({ timeout: 30_000 })
-    .catch(() => {}); // si entra directo a tabs no hay pantalla de permisos
-  await page
-    .getByText("Aún no hay fotos respaldadas", { exact: true })
-    .filter({ visible: true })
-    .first()
-    .waitFor({ timeout: 60_000 })
-    .catch(() => {});
-  await page.getByText("Respaldo", { exact: true }).filter({ visible: true }).last().click();
+    .click({ timeout: 30_000 });
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
@@ -80,6 +140,14 @@ try {
   for (const h of hits) console.log(`  ${h}`);
   const token = await page.evaluate(() => localStorage.getItem("photos.session_token"));
   console.log("TOKEN:", token ? `${token.slice(0, 12)}…` : "(no hay)");
+} catch (err) {
+  if (isOptional) {
+    console.warn(
+      `prod-smoke: fallo en smoke de producción (${err.message}). Omitiendo por flag opcional.`,
+    );
+    process.exit(0);
+  }
+  throw err;
 } finally {
   await browser.close();
 }

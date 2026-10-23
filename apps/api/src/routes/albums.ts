@@ -1,18 +1,22 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   addAlbumMediaSchema,
+  albumDetailQuerySchema,
   albumDetailResponseSchema,
+  albumListQuerySchema,
   albumListResponseSchema,
   createAlbumSchema,
   errorSchema,
   okSchema,
+  shareAlbumRequestSchema,
   shareAlbumResponseSchema,
   updateAlbumSchema,
 } from "@photos/shared";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { album, albumMedia, media } from "../db/schema";
 import { type AppEnv, webOrigins } from "../env";
+import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { presignGet } from "../lib/s3";
 
 const err = (description: string) => ({
@@ -29,11 +33,13 @@ const listAlbumsRoute = createRoute({
   tags: ["albums"],
   summary: "Listar álbumes del usuario",
   description: "Devuelve todos los álbumes del usuario con miniatura de portada y conteo de fotos.",
+  request: { query: albumListQuerySchema },
   responses: {
     200: {
       content: { "application/json": { schema: albumListResponseSchema } },
       description: "Lista de álbumes",
     },
+    400: err("Cursor inválido"),
     401: err("Sin sesión"),
   },
 });
@@ -62,12 +68,13 @@ const getAlbumRoute = createRoute({
   path: "/albums/{id}",
   tags: ["albums"],
   summary: "Detalle y fotos de un álbum",
-  request: { params: idParam },
+  request: { params: idParam, query: albumDetailQuerySchema },
   responses: {
     200: {
       content: { "application/json": { schema: albumDetailResponseSchema } },
       description: "Detalle del álbum",
     },
+    400: err("Cursor inválido"),
     401: err("Sin sesión"),
     404: err("Álbum no encontrado"),
   },
@@ -146,7 +153,13 @@ const shareAlbumRoute = createRoute({
   path: "/albums/{id}/share",
   tags: ["albums"],
   summary: "Generar o consultar enlace público para compartir",
-  request: { params: idParam },
+  request: {
+    params: idParam,
+    body: {
+      content: { "application/json": { schema: shareAlbumRequestSchema } },
+      required: false,
+    },
+  },
   responses: {
     200: {
       content: { "application/json": { schema: shareAlbumResponseSchema } },
@@ -173,7 +186,25 @@ const unshareAlbumRoute = createRoute({
 export const albumsApp = new OpenAPIHono<AppEnv>()
   .openapi(listAlbumsRoute, async (c) => {
     const user = c.get("user");
+    const { cursor, limit } = c.req.valid("query");
     const db = getDb(c.env.DB);
+
+    let cur: { t: number; id: string } | null = null;
+    if (cursor) {
+      cur = decodeCursor(cursor);
+      if (!cur) {
+        return c.json({ error: "bad_request", message: "Cursor inválido" }, 400);
+      }
+    }
+
+    const conditions = [eq(album.userId, user.id)];
+    if (cur) {
+      const curCond = or(
+        lt(album.updatedAt, cur.t),
+        and(eq(album.updatedAt, cur.t), lt(album.id, cur.id)),
+      );
+      if (curCond) conditions.push(curCond);
+    }
 
     const albumsList = await db
       .select({
@@ -187,12 +218,23 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       })
       .from(album)
       .leftJoin(albumMedia, eq(album.id, albumMedia.albumId))
-      .where(eq(album.userId, user.id))
+      .where(and(...conditions))
       .groupBy(album.id)
-      .orderBy(desc(album.updatedAt));
+      .orderBy(desc(album.updatedAt), desc(album.id))
+      .limit(limit + 1);
+
+    const hasMore = albumsList.length > limit;
+    const pageAlbums = hasMore ? albumsList.slice(0, limit) : albumsList;
+    const nextCursor =
+      hasMore && pageAlbums.length > 0
+        ? encodeCursor({
+            t: pageAlbums[pageAlbums.length - 1].updatedAt,
+            id: pageAlbums[pageAlbums.length - 1].id,
+          })
+        : null;
 
     const result = await Promise.all(
-      albumsList.map(async (a) => {
+      pageAlbums.map(async (a) => {
         let coverThumbUrl: string | null = null;
         let coverThumbhash: string | null = null;
 
@@ -237,7 +279,7 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       }),
     );
 
-    return c.json({ albums: result }, 200);
+    return c.json({ albums: result, nextCursor }, 200);
   })
   .openapi(createAlbumRoute, async (c) => {
     const user = c.get("user");
@@ -329,6 +371,7 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
   .openapi(getAlbumRoute, async (c) => {
     const user = c.get("user");
     const { id } = c.req.valid("param");
+    const { cursor, limit } = c.req.valid("query");
     const db = getDb(c.env.DB);
 
     const a = await db
@@ -341,15 +384,43 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       return c.json({ error: "not_found", message: "Álbum no encontrado." }, 404);
     }
 
+    let cur: { t: number; id: string } | null = null;
+    if (cursor) {
+      cur = decodeCursor(cursor);
+      if (!cur) {
+        return c.json({ error: "bad_request", message: "Cursor inválido" }, 400);
+      }
+    }
+
+    const conditions = [eq(albumMedia.albumId, id), isNull(media.deletedAt)];
+    if (cur) {
+      const curCond = or(
+        lt(albumMedia.addedAt, cur.t),
+        and(eq(albumMedia.addedAt, cur.t), lt(albumMedia.mediaId, cur.id)),
+      );
+      if (curCond) conditions.push(curCond);
+    }
+
     const rows = await db
-      .select({ media })
+      .select({ media, addedAt: albumMedia.addedAt })
       .from(albumMedia)
       .innerJoin(media, eq(albumMedia.mediaId, media.id))
-      .where(and(eq(albumMedia.albumId, id), isNull(media.deletedAt)))
-      .orderBy(desc(albumMedia.addedAt));
+      .where(and(...conditions))
+      .orderBy(desc(albumMedia.addedAt), desc(albumMedia.mediaId))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor =
+      hasMore && pageRows.length > 0
+        ? encodeCursor({
+            t: pageRows[pageRows.length - 1].addedAt,
+            id: pageRows[pageRows.length - 1].media.id,
+          })
+        : null;
 
     const items = await Promise.all(
-      rows.map(async ({ media: m }) => ({
+      pageRows.map(async ({ media: m }) => ({
         id: m.id,
         sha256: m.sha256,
         mediaType: m.mediaType,
@@ -367,12 +438,38 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       })),
     );
 
+    const totalCountRes = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(albumMedia)
+      .innerJoin(media, eq(albumMedia.mediaId, media.id))
+      .where(and(eq(albumMedia.albumId, id), isNull(media.deletedAt)))
+      .get();
+    const mediaCount = Number(totalCountRes?.count ?? 0);
+
     let coverThumbUrl: string | null = null;
     let coverThumbhash: string | null = null;
-    const cover = rows.find((r) => r.media.id === a.coverMediaId)?.media ?? rows[0]?.media ?? null;
-    if (cover) {
-      coverThumbUrl = await presignGet(c.env, cover.r2KeyThumb);
-      coverThumbhash = cover.thumbhash;
+    let coverItem = null;
+    if (a.coverMediaId) {
+      coverItem = await db
+        .select()
+        .from(media)
+        .where(and(eq(media.id, a.coverMediaId), isNull(media.deletedAt)))
+        .get();
+    }
+    if (!coverItem) {
+      const firstMedia = await db
+        .select({ media })
+        .from(albumMedia)
+        .innerJoin(media, eq(albumMedia.mediaId, media.id))
+        .where(and(eq(albumMedia.albumId, a.id), isNull(media.deletedAt)))
+        .orderBy(desc(albumMedia.addedAt))
+        .limit(1)
+        .get();
+      coverItem = firstMedia?.media ?? null;
+    }
+    if (coverItem) {
+      coverThumbUrl = await presignGet(c.env, coverItem.r2KeyThumb);
+      coverThumbhash = coverItem.thumbhash;
     }
 
     return c.json(
@@ -382,12 +479,13 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
         coverMediaId: a.coverMediaId,
         coverThumbUrl,
         coverThumbhash,
-        mediaCount: items.length,
+        mediaCount,
         isShared: Boolean(a.shareToken),
         shareToken: a.shareToken,
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
         items,
+        nextCursor,
       },
       200,
     );
@@ -565,11 +663,33 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       return c.json({ error: "not_found", message: "Álbum no encontrado." }, 404);
     }
 
-    let shareToken = a.shareToken;
-    if (!shareToken) {
-      shareToken = crypto.randomUUID().replace(/-/g, "");
-      await db.update(album).set({ shareToken, updatedAt: Date.now() }).where(eq(album.id, id));
+    const body = c.req.header("content-type")?.includes("application/json")
+      ? await c.req.json().catch(() => ({}))
+      : {};
+
+    const now = Date.now();
+    let shareExpiresAt: number | null = a.shareExpiresAt ?? null;
+    if (body?.expiresIn) {
+      if (body.expiresIn === "24h") shareExpiresAt = now + 24 * 3600 * 1000;
+      else if (body.expiresIn === "7d") shareExpiresAt = now + 7 * 24 * 3600 * 1000;
+      else if (body.expiresIn === "30d") shareExpiresAt = now + 30 * 24 * 3600 * 1000;
+      else if (body.expiresIn === "never") shareExpiresAt = null;
     }
+
+    let shareToken = a.shareToken;
+    if (!shareToken || a.shareRevokedAt != null) {
+      shareToken = crypto.randomUUID().replace(/-/g, "");
+    }
+
+    await db
+      .update(album)
+      .set({
+        shareToken,
+        shareExpiresAt,
+        shareRevokedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(album.id, id));
 
     const origins = webOrigins(c.env);
     let origin = origins[0] ?? "https://photos-web.luis-sg9915.workers.dev";
@@ -582,7 +702,7 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
     }
     const shareUrl = `${origin}/shared/album/${shareToken}`;
 
-    return c.json({ shareToken, shareUrl }, 200);
+    return c.json({ shareToken, shareUrl, expiresAt: shareExpiresAt }, 200);
   })
   .openapi(unshareAlbumRoute, async (c) => {
     const user = c.get("user");
@@ -599,6 +719,9 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       return c.json({ error: "not_found", message: "Álbum no encontrado." }, 404);
     }
 
-    await db.update(album).set({ shareToken: null, updatedAt: Date.now() }).where(eq(album.id, id));
+    await db
+      .update(album)
+      .set({ shareToken: null, shareRevokedAt: Date.now(), updatedAt: Date.now() })
+      .where(eq(album.id, id));
     return c.json({ ok: true as const }, 200);
   });

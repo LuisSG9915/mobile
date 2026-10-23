@@ -9,12 +9,18 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ADMIN_EMAIL": "luis.sg9915@gmail.com"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ADMIN_EMAIL": "luis.sg9915@gmail.com"
       }
     },
     "release-apk": {
@@ -24,6 +30,7 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev",
+        "EXPO_PUBLIC_ADMIN_EMAIL": "luis.sg9915@gmail.com",
         "SENTRY_ORG": "cb-5d",
         "SENTRY_PROJECT": "photos",
         "EXPO_PUBLIC_SENTRY_DSN": "https://daef8372acd8af1f9bcabc9c9c6ef532@o4512291635200000.ingest.us.sentry.io/4512291671834624"
@@ -33,6 +40,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://photos-api.luis-sg9915.workers.dev",
+        "EXPO_PUBLIC_ADMIN_EMAIL": "luis.sg9915@gmail.com",
         "SENTRY_ORG": "cb-5d",
         "SENTRY_PROJECT": "photos",
         "EXPO_PUBLIC_SENTRY_DSN": "https://daef8372acd8af1f9bcabc9c9c6ef532@o4512291635200000.ingest.us.sentry.io/4512291671834624"

@@ -11,13 +11,20 @@ export default defineConfig({
   globalSetup: require.resolve("./e2e/global-setup.ts"),
   workers: 1,
   fullyParallel: false,
-  retries: 0,
+  retries: process.env.CI ? 1 : 0,
   timeout: 120_000,
   expect: {
     // La primera carga espera a que Metro empaquete la app web.
     timeout: 15_000,
   },
-  reporter: [["list"], ["json", { outputFile: process.env.E2E_JSON ?? "e2e/.artifacts/e2e.json" }]],
+  reporter: [
+    ["list"],
+    ["json", { outputFile: process.env.E2E_JSON ?? "e2e/.artifacts/e2e.json" }],
+    [
+      "html",
+      { open: "never", outputFolder: process.env.E2E_HTML_REPORT ?? "e2e/.artifacts/report" },
+    ],
+  ],
   use: {
     baseURL: "http://localhost:8081",
     screenshot: "only-on-failure",
@@ -31,7 +38,7 @@ export default defineConfig({
       command: "node ../../node_modules/wrangler/bin/wrangler.js dev --port 8787",
       cwd: "../api",
       url: "http://localhost:8787/health",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 180_000,
     },
     {
@@ -41,7 +48,7 @@ export default defineConfig({
         EXPO_PUBLIC_API_URL: "http://localhost:8787",
       },
       url: "http://localhost:8081",
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 180_000,
     },
   ],

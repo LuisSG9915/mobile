@@ -57,6 +57,7 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
     /\.(mp4|mov|m4v)(\?.*)?$/i.test(media.uri) ||
     media.uri.includes("video/mp4");
   const [selectedPreset, setSelectedPreset] = useState<SharePreset>("stories");
+  const [expiresIn, setExpiresIn] = useState<"24h" | "7d" | "30d" | "never">("7d");
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [showTips, setShowTips] = useState(true);
@@ -263,12 +264,20 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
       toast.info("Este archivo es local en el dispositivo");
       return;
     }
+    const expLabel =
+      expiresIn === "24h"
+        ? "válido 24 horas"
+        : expiresIn === "7d"
+          ? "válido 7 días"
+          : expiresIn === "30d"
+            ? "válido 30 días"
+            : "sin caducidad";
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       await navigator.clipboard.writeText(media.uri);
-      toast.success(t.shareModal.linkCopied);
+      toast.success(`${t.shareModal.linkCopied} (${expLabel})`);
       return;
     }
-    toast.success(t.shareModal.linkCopied);
+    toast.success(`${t.shareModal.linkCopied} (${expLabel})`);
   };
 
   return (
@@ -456,25 +465,61 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
             ) : null}
           </View>
 
-          {/* Enlace público rápido si es remoto */}
+          {/* Enlace público rápido si es remoto con selector de caducidad */}
           {!media.isLocal && media.uri.startsWith("http") ? (
-            <Pressable
-              onPress={handleCopyLink}
-              className="flex-row items-center justify-between p-3 mb-4 rounded-2xl bg-neutral-800/40 border border-neutral-700/40 active:bg-neutral-800"
-            >
-              <View className="flex-row items-center gap-2.5">
-                <Copy size={16} color="#a5b4fc" />
-                <View>
-                  <Text className="text-xs font-semibold text-neutral-200">
-                    {t.shareModal.publicLink}
-                  </Text>
-                  <Text className="text-[11px] text-neutral-400">
-                    {t.shareModal.publicLinkDesc}
-                  </Text>
-                </View>
+            <View className="mb-4 p-3 rounded-2xl bg-neutral-800/40 border border-neutral-700/40 gap-3">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs font-semibold text-neutral-200">Caducidad del enlace</Text>
+                <Text className="text-[11px] text-neutral-400">
+                  {expiresIn === "never" ? "Permanente" : `Expira en ${expiresIn}`}
+                </Text>
               </View>
-              <Text className="text-xs font-medium text-indigo-400">Copiar</Text>
-            </Pressable>
+              <View className="flex-row gap-2">
+                {(
+                  [
+                    { key: "24h", label: "24h" },
+                    { key: "7d", label: "7 días" },
+                    { key: "30d", label: "30 días" },
+                    { key: "never", label: "Nunca" },
+                  ] as const
+                ).map((opt) => (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => setExpiresIn(opt.key)}
+                    className={`flex-1 py-1.5 rounded-xl items-center border ${
+                      expiresIn === opt.key
+                        ? "bg-indigo-600 border-indigo-500"
+                        : "bg-neutral-800 border-neutral-700"
+                    }`}
+                  >
+                    <Text
+                      className={`text-xs ${
+                        expiresIn === opt.key ? "text-white font-bold" : "text-neutral-300"
+                      }`}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable
+                onPress={handleCopyLink}
+                className="flex-row items-center justify-between pt-2 border-t border-neutral-700/60 active:opacity-70"
+              >
+                <View className="flex-row items-center gap-2.5">
+                  <Copy size={16} color="#a5b4fc" />
+                  <View>
+                    <Text className="text-xs font-semibold text-neutral-200">
+                      {t.shareModal.publicLink}
+                    </Text>
+                    <Text className="text-[11px] text-neutral-400">
+                      {t.shareModal.publicLinkDesc}
+                    </Text>
+                  </View>
+                </View>
+                <Text className="text-xs font-medium text-indigo-400">Copiar</Text>
+              </Pressable>
+            </View>
           ) : null}
         </ScrollView>
 

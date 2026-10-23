@@ -30,6 +30,8 @@ export type QueueItem = {
   bytes_total: number;
   bytes_sent: number;
   updated_at: number;
+  upload_id?: string | null;
+  parts?: string | null;
 };
 
 export type QueueStats = { total: number; done: number; pending: number; failed: number };

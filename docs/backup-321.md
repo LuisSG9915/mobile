@@ -52,10 +52,14 @@ pnpm backup:r2
 
 # O especificar una ruta de destino personalizada
 node scripts/backup-r2.mjs --out "D:/Respaldos/Fotos_R2"
+
+# O validar la integridad de una muestra aleatoria sin sincronizar todo
+node scripts/backup-r2.mjs --verify-sample 20
 ```
 
 ### Características del script:
-- **Descarga incremental:** Si el archivo ya existe en tu disco local y coincide en tamaño de bytes, lo omite instantáneamente.
+- **Descarga incremental robusta:** Compara el tamaño de bytes y el hash MD5 local frente al ETag remoto del objeto en R2. Si ya coincide, lo omite instantáneamente sin descargar datos redundantes.
+- **Modo verificación de muestra (`--verify-sample [N]`):** Descarga una muestra aleatoria de `N` objetos (por defecto 10) y valida criptográficamente que el hash SHA-256 de los bytes descargados coincida exactamente con el hash del nombre del objeto (`users/{userId}/originals/{sha256}.{ext}`).
 - **Estructura idéntica:** Conserva las rutas de usuarios y originales (`users/{userId}/originals/{sha256}.{ext}`).
 - **Zero Egress:** No genera costes adicionales.
 

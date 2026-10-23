@@ -12,6 +12,15 @@ const mocks = vi.hoisted(() => ({
   getQueueItems: vi.fn<() => QueueItem[]>(() => []),
   removeQueueItems: vi.fn<(ids: string[]) => Promise<void>>(() => Promise.resolve()),
   deleteAssetsAsync: vi.fn<(ids: string[]) => Promise<boolean>>(() => Promise.resolve(true)),
+  checkHashes: vi.fn<(shas: string[]) => Promise<{ existing: { sha256: string; id: string }[] }>>(
+    async (shas) => ({ existing: shas.map((s) => ({ sha256: s, id: "r1" })) }),
+  ),
+}));
+
+vi.mock("../api/client", () => ({
+  api: {
+    checkHashes: mocks.checkHashes,
+  },
 }));
 
 vi.mock("../queue/db", () => ({
@@ -48,6 +57,9 @@ beforeEach(async () => {
   mocks.getQueueItems.mockReset().mockReturnValue([]);
   mocks.removeQueueItems.mockReset().mockResolvedValue();
   mocks.deleteAssetsAsync.mockReset().mockResolvedValue(true);
+  mocks.checkHashes.mockReset().mockImplementation(async (shas: string[]) => ({
+    existing: shas.map((s) => ({ sha256: s, id: "r1" })),
+  }));
   vi.resetModules();
   // @ts-expect-error -- ruta con extensión para saltar la resolución *.web.ts
   fs = await import("./free-space.ts");
@@ -64,7 +76,35 @@ describe("getSyncedLocal", () => {
       item({ asset_id: "A6", remote_id: null }), // completo pero sin confirmar en nube
       item({ asset_id: "A7", remote_id: "r7", sha256: null }), // sin hash confirmado
     ]);
-    expect(fs.getSyncedLocal()).toEqual({ assetIds: ["A1", "A2", "A3"], totalBytes: 600 });
+    const res = fs.getSyncedLocal();
+    expect(res.assetIds).toEqual(["A1", "A2", "A3"]);
+    expect(res.totalBytes).toBe(600);
+  });
+
+  it("filtra por antigüedad cuando olderThanDays está definido", () => {
+    const now = Date.now();
+    const fortyDaysAgo = now - 40 * 24 * 60 * 60 * 1000;
+    const tenDaysAgo = now - 10 * 24 * 60 * 60 * 1000;
+    mocks.getQueueItems.mockReturnValue([
+      item({ asset_id: "A1", created_at: fortyDaysAgo, bytes_total: 100 }),
+      item({ asset_id: "A2", created_at: tenDaysAgo, bytes_total: 200 }),
+    ]);
+    const res = fs.getSyncedLocal(30);
+    expect(res.assetIds).toEqual(["A1"]);
+    expect(res.totalBytes).toBe(100);
+  });
+});
+
+describe("verifyRemoteIntegrity", () => {
+  it("solo aprueba assets cuyo hash está confirmado como existente en el servidor", async () => {
+    mocks.checkHashes.mockResolvedValueOnce({
+      existing: [{ sha256: SHA, id: "r1" }],
+    });
+    const verified = await fs.verifyRemoteIntegrity([
+      { asset_id: "A1", sha256: SHA },
+      { asset_id: "A2", sha256: "b".repeat(64) },
+    ]);
+    expect(verified).toEqual(["A1"]);
   });
 });
 
@@ -80,6 +120,19 @@ describe("freeSyncedSpace", () => {
     expect(await fs.freeSyncedSpace()).toBe(3);
     expect(mocks.deleteAssetsAsync).toHaveBeenCalledWith(["A1", "A2", "A3"]);
     expect(mocks.removeQueueItems).toHaveBeenCalledWith(["A1", "A2", "A3"]);
+  });
+
+  it("no elimina assets cuya integridad remota no esté confirmada por el servidor", async () => {
+    mocks.getQueueItems.mockReturnValue([
+      item({ asset_id: "A1", remote_id: "r1", sha256: SHA }),
+      item({ asset_id: "A2", remote_id: "r2", sha256: "b".repeat(64) }),
+    ]);
+    mocks.checkHashes.mockResolvedValueOnce({
+      existing: [{ sha256: SHA, id: "r1" }],
+    });
+    expect(await fs.freeSyncedSpace()).toBe(1);
+    expect(mocks.deleteAssetsAsync).toHaveBeenCalledWith(["A1"]);
+    expect(mocks.removeQueueItems).toHaveBeenCalledWith(["A1"]);
   });
 
   it("devuelve 0 si el usuario cancela el diálogo del sistema", async () => {

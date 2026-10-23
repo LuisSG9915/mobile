@@ -17,7 +17,7 @@ function readResetToken(): string | null {
   for (let i = 0; i < 3; i++) {
     try {
       const out = execSync(
-        "node ../../node_modules/wrangler/bin/wrangler.js d1 execute photos-db --local --json --command \"SELECT identifier FROM verification WHERE identifier LIKE 'reset-password:%' ORDER BY rowid DESC LIMIT 1\"",
+        "node ../../node_modules/wrangler/bin/wrangler.js d1 execute photos-db --local --json -y --command \"SELECT identifier FROM verification WHERE identifier LIKE 'reset-password:%' ORDER BY rowid DESC LIMIT 1\"",
         { cwd: path.join(dirname, "../../api") },
       ).toString();
       const results = JSON.parse(out)?.[0]?.results ?? [];

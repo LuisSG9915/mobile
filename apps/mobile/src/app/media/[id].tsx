@@ -55,6 +55,7 @@ import { t } from "../../i18n/es";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import { deleteLocalAsset, hasLocalCopy } from "../../lib/free-space";
 import { hapticLight } from "../../lib/haptics";
+import { invalidateMediaLifecycleQueries } from "../../lib/query-client";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
@@ -66,15 +67,20 @@ const SWIPE_DOWN_THRESHOLD = 110;
 
 function ZoomableImage({
   uri,
+  previewUri,
+  originalUri,
   thumbhash,
   active,
   onDismiss,
   onDoubleTap,
   onSingleTap,
   onZoomChange,
+  onDeepZoom,
   backdropOpacity,
 }: {
   uri: string;
+  previewUri?: string | null;
+  originalUri?: string | null;
   thumbhash: string;
   active: boolean;
   /** Swipe-down a escala 1 → cerrar el visor (fase 7). */
@@ -84,6 +90,8 @@ function ZoomableImage({
   onSingleTap?: () => void;
   /** Zoom > 1 → el padre desactiva el scroll del carrusel (fase 19). */
   onZoomChange?: (zoomed: boolean) => void;
+  /** Zoom > 1.5x → transición al original de máxima resolución. */
+  onDeepZoom?: () => void;
   /** Opacidad del fondo durante el swipe-down. */
   backdropOpacity?: SharedValue<number>;
 }) {
@@ -99,6 +107,12 @@ function ZoomableImage({
   // Último estado de zoom notificado al padre (0 = 1x, 1 = ampliada).
   const zoomState = useSharedValue(0);
   const [isZoomed, setIsZoomed] = useState(false);
+  const [deepZoom, setDeepZoom] = useState(false);
+
+  const handleDeepZoom = useCallback(() => {
+    setDeepZoom(true);
+    onDeepZoom?.();
+  }, [onDeepZoom]);
 
   const notifyZoom = useCallback(
     (zoomed: boolean) => {
@@ -109,13 +123,17 @@ function ZoomableImage({
   );
 
   // Worklet compartido: evita cruzar el puente en cada frame del pinch.
-  const syncZoom = (zoomed: boolean) => {
+  const syncZoom = (zoomed: boolean, deep: boolean) => {
     "worklet";
     if (!active) return;
     const next = zoomed ? 1 : 0;
-    if (zoomState.value === next) return;
-    zoomState.value = next;
-    runOnJS(notifyZoom)(zoomed);
+    if (zoomState.value !== next) {
+      zoomState.value = next;
+      runOnJS(notifyZoom)(zoomed);
+    }
+    if (deep) {
+      runOnJS(handleDeepZoom)();
+    }
   };
 
   // Al pasar de página el zoom vuelve a 1: al volver atrás la foto no queda ampliada.
@@ -131,6 +149,7 @@ function ZoomableImage({
     dragScale.value = 1;
     borderRadius.value = 0;
     zoomState.value = 0;
+    setDeepZoom(false);
     if (backdropOpacity) backdropOpacity.value = 1;
     if (wasZoomed) notifyZoom(false);
   }, [
@@ -154,7 +173,7 @@ function ZoomableImage({
       dragScale.value = 1;
       borderRadius.value = 0;
       if (backdropOpacity) backdropOpacity.value = 1;
-      syncZoom(scale.value > 1.01);
+      syncZoom(scale.value > 1.01, scale.value > 1.5);
     })
     .onEnd(() => {
       saved.value = scale.value;
@@ -163,7 +182,7 @@ function ZoomableImage({
         ty.value = withTiming(0);
         savedTx.value = 0;
         savedTy.value = 0;
-        syncZoom(false);
+        syncZoom(false, false);
       }
     });
 
@@ -239,7 +258,7 @@ function ZoomableImage({
       dragScale.value = 1;
       borderRadius.value = 0;
       if (backdropOpacity) backdropOpacity.value = 1;
-      syncZoom(next > 1);
+      syncZoom(next > 1, next > 1.5);
       if (next === 1) {
         tx.value = withTiming(0);
         ty.value = withTiming(0);
@@ -265,11 +284,13 @@ function ZoomableImage({
     overflow: "hidden",
   }));
 
+  const activeImageUri = (deepZoom && originalUri) || uri || previewUri || originalUri;
+
   return (
     <GestureDetector gesture={Gesture.Simultaneous(pinch, pan, taps)}>
       <Animated.View style={[{ flex: 1 }, style]}>
         <Image
-          source={{ uri }}
+          source={activeImageUri ? { uri: activeImageUri } : undefined}
           placeholder={{ thumbhash }}
           contentFit="contain"
           style={{ flex: 1 }}
@@ -373,6 +394,7 @@ export type CarouselItem = {
   id: string;
   key: string;
   originalUrl?: string | null;
+  previewUrl?: string | null;
   thumbUrl: string;
   thumbhash: string;
   mediaType: "photo" | "video";
@@ -437,6 +459,7 @@ function MediaPage({
     // minuto evita refetch al ir y volver entre fotos.
     staleTime: 60_000,
   });
+  const previewUrl = item.previewUrl || detail.data?.previewUrl;
   const originalUrl =
     item.localUri || detail.data?.originalUrl || item.originalUrl || item.thumbUrl;
 
@@ -451,7 +474,9 @@ function MediaPage({
   }
   return originalUrl ? (
     <ZoomableImage
-      uri={originalUrl}
+      uri={item.localUri || previewUrl || originalUrl}
+      previewUri={previewUrl}
+      originalUri={originalUrl}
       thumbhash={item.thumbhash}
       active={active}
       onDismiss={onDismiss}
@@ -756,6 +781,7 @@ export default function MediaViewer() {
       latitude: null,
       longitude: null,
       locationName: null,
+      previewUrl: null as string | null,
     };
   }, [params, id]);
 
@@ -767,6 +793,7 @@ export default function MediaViewer() {
           id: activeItem.id,
           originalUrl: activeItem.localUri || activeItem.originalUrl || activeItem.thumbUrl,
           thumbUrl: activeItem.thumbUrl,
+          previewUrl: (activeItem as any).previewUrl || null,
           thumbhash: activeItem.thumbhash,
           mediaType: activeItem.mediaType,
           width: activeItem.width,
@@ -875,17 +902,13 @@ export default function MediaViewer() {
   const del = useMutation({
     mutationFn: api.deleteMedia,
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["timeline"] });
-      void qc.invalidateQueries({ queryKey: ["trash"] });
-      void qc.invalidateQueries({ queryKey: ["stats"] });
+      void invalidateMediaLifecycleQueries(qc);
       toast(t.viewer.movedToTrash, {
         action: {
           label: t.viewer.undo,
           onClick: () =>
             void api.restoreMedia(activeId).then(() => {
-              void qc.invalidateQueries({ queryKey: ["timeline"] });
-              void qc.invalidateQueries({ queryKey: ["trash"] });
-              void qc.invalidateQueries({ queryKey: ["stats"] });
+              void invalidateMediaLifecycleQueries(qc);
             }),
         },
       });
@@ -1207,7 +1230,9 @@ export default function MediaViewer() {
           <VideoPage uri={d.originalUrl} />
         ) : (
           <ZoomableImage
-            uri={d.originalUrl}
+            uri={d.previewUrl || d.originalUrl}
+            previewUri={d.previewUrl}
+            originalUri={d.originalUrl}
             thumbhash={d.thumbhash}
             active
             onDismiss={onDismiss}

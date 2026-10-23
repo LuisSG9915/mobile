@@ -7,6 +7,7 @@
  * este script diariamente o bajo demanda es 100% gratuito.
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -64,6 +65,12 @@ const outDir = path.resolve(
   getArg("--out", process.env.BACKUP_DIR || "./backups/r2-photos"),
 );
 const prefix = getArg("--prefix", "");
+const verifySampleIdx = args.indexOf("--verify-sample");
+const isVerifySample = verifySampleIdx !== -1;
+const sampleCount =
+  isVerifySample && args[verifySampleIdx + 1] && !args[verifySampleIdx + 1].startsWith("--")
+    ? parseInt(args[verifySampleIdx + 1], 10)
+    : 10;
 
 if (!accountId || !accessKeyId || !secretAccessKey) {
   console.error("❌ Faltan credenciales de Cloudflare R2.");
@@ -129,6 +136,80 @@ async function main() {
 
   console.log(`Total en R2: ${objects.length} archivos (${formatBytes(totalBytesInBucket)})\n`);
 
+  if (isVerifySample) {
+    console.log("==================================================");
+    console.log(`   🔍 Modo Verificación de Muestra (--verify-sample)`);
+    console.log(`   Muestra solicitada: ${sampleCount} objetos`);
+    console.log("==================================================\n");
+
+    const candidateObjects = objects.filter((o) =>
+      /\/originals\/([a-f0-9]{64})\.[^/]+$/i.test(o.Key),
+    );
+
+    if (candidateObjects.length === 0) {
+      console.log("No se encontraron objetos de tipo 'originals' en R2 para verificar.");
+      return;
+    }
+
+    // Seleccionar muestra aleatoria
+    const shuffled = [...candidateObjects].sort(() => 0.5 - Math.random());
+    const sample = shuffled.slice(0, Math.min(sampleCount, shuffled.length));
+
+    console.log(`Verificando ${sample.length} objetos seleccionados al azar...\n`);
+
+    let verifiedCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < sample.length; i++) {
+      const obj = sample[i];
+      const key = obj.Key;
+      const expectedSha256 = key.match(/\/originals\/([a-f0-9]{64})\.[^/]+$/i)[1].toLowerCase();
+      const progress = `[${i + 1}/${sample.length}]`;
+
+      process.stdout.write(`${progress} Descargando y verificando SHA-256 para ${key}... `);
+      try {
+        const getRes = await s3.send(
+          new GetObjectCommand({
+            Bucket: bucketName,
+            Key: key,
+          }),
+        );
+
+        const sha256Hash = crypto.createHash("sha256");
+        for await (const chunk of getRes.Body) {
+          sha256Hash.update(chunk);
+        }
+        const actualSha256 = sha256Hash.digest("hex").toLowerCase();
+
+        if (actualSha256 === expectedSha256) {
+          verifiedCount++;
+          process.stdout.write("✓ VÁLIDO\n");
+        } else {
+          failedCount++;
+          process.stdout.write(
+            `✗ ERROR: Mismatch! (esperado: ${expectedSha256}, obtenido: ${actualSha256})\n`,
+          );
+        }
+      } catch (err) {
+        failedCount++;
+        process.stdout.write(`✗ ERROR al descargar: ${err.message}\n`);
+      }
+    }
+
+    console.log("\n==================================================");
+    console.log("   Resultado de Verificación de Integridad        ");
+    console.log("==================================================");
+    console.log(`Total analizados:  ${sample.length}`);
+    console.log(`Válidos (SHA-256): ${verifiedCount}`);
+    console.log(`Fallidos:          ${failedCount}`);
+    console.log("==================================================\n");
+
+    if (failedCount > 0) {
+      process.exit(1);
+    }
+    return;
+  }
+
   let downloadedCount = 0;
   let downloadedBytes = 0;
   let skippedCount = 0;
@@ -143,12 +224,26 @@ async function main() {
     const localFilePath = path.join(outDir, ...key.split("/"));
     const localDir = path.dirname(localFilePath);
 
-    // Verificación incremental: si el archivo ya existe y coincide el tamaño, omitir descarga
+    // Verificación incremental: comparar tamaño y hash MD5 / ETag
     if (fs.existsSync(localFilePath)) {
       const stat = fs.statSync(localFilePath);
       if (stat.size === size) {
-        skippedCount++;
-        continue;
+        let md5Matches = true;
+        if (obj.ETag) {
+          const remoteEtag = obj.ETag.replace(/"/g, "").toLowerCase();
+          if (remoteEtag.length === 32 && !remoteEtag.includes("-")) {
+            const localMd5 = crypto
+              .createHash("md5")
+              .update(fs.readFileSync(localFilePath))
+              .digest("hex")
+              .toLowerCase();
+            md5Matches = localMd5 === remoteEtag;
+          }
+        }
+        if (md5Matches) {
+          skippedCount++;
+          continue;
+        }
       }
     }
 

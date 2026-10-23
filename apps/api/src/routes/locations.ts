@@ -3,12 +3,14 @@ import {
   errorSchema,
   locationsQuerySchema,
   locationsResponseSchema,
+  placesQuerySchema,
   placesResponseSchema,
 } from "@photos/shared";
-import { and, desc, eq, gte, isNotNull, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
+import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { geocodeMediaItem } from "../lib/geo";
 import { presignGet } from "../lib/s3";
 
@@ -30,6 +32,7 @@ const locationsRoute = createRoute({
       content: { "application/json": { schema: locationsResponseSchema } },
       description: "Puntos geolocalizados",
     },
+    400: err("Cursor inválido"),
     401: err("Sin sesión"),
   },
 });
@@ -41,6 +44,7 @@ const placesRoute = createRoute({
   summary: "Listar lugares/ciudades agrupadas del usuario",
   description:
     "Devuelve ciudades y países únicos con cantidad de fotos y miniatura más reciente para explorar lugares estilo Google Fotos.",
+  request: { query: placesQuerySchema },
   responses: {
     200: {
       content: { "application/json": { schema: placesResponseSchema } },
@@ -75,7 +79,7 @@ const geocodeBatchRoute = createRoute({
 export const locationsApp = new OpenAPIHono<AppEnv>()
   .openapi(locationsRoute, async (c) => {
     const user = c.get("user");
-    const { minLat, maxLat, minLng, maxLng, city, filter } = c.req.valid("query");
+    const { minLat, maxLat, minLng, maxLng, city, filter, cursor, limit } = c.req.valid("query");
     const db = getDb(c.env.DB);
 
     const conditions = [
@@ -96,15 +100,38 @@ export const locationsApp = new OpenAPIHono<AppEnv>()
     if (minLng != null) conditions.push(gte(media.longitude, minLng));
     if (maxLng != null) conditions.push(lte(media.longitude, maxLng));
 
+    let cur: { t: number; id: string } | null = null;
+    if (cursor) {
+      cur = decodeCursor(cursor);
+      if (!cur) {
+        return c.json({ error: "bad_request", message: "Cursor inválido" }, 400);
+      }
+      const curCond = or(
+        lt(media.takenAt, cur.t),
+        and(eq(media.takenAt, cur.t), lt(media.id, cur.id)),
+      );
+      if (curCond) conditions.push(curCond);
+    }
+
     const rows = await db
       .select()
       .from(media)
       .where(and(...conditions))
-      .orderBy(desc(media.takenAt))
-      .limit(1000);
+      .orderBy(desc(media.takenAt), desc(media.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor =
+      hasMore && pageRows.length > 0
+        ? encodeCursor({
+            t: pageRows[pageRows.length - 1].takenAt,
+            id: pageRows[pageRows.length - 1].id,
+          })
+        : null;
 
     const items = await Promise.all(
-      rows.map(async (row) => ({
+      pageRows.map(async (row) => ({
         id: row.id,
         // biome-ignore lint/style/noNonNullAssertion: validado por isNotNull en la consulta
         latitude: row.latitude!,
@@ -123,75 +150,99 @@ export const locationsApp = new OpenAPIHono<AppEnv>()
       })),
     );
 
-    return c.json({ items, totalWithGps: items.length }, 200);
+    return c.json({ items, totalWithGps: items.length, nextCursor }, 200);
   })
   .openapi(placesRoute, async (c) => {
     const user = c.get("user");
+    const { cursor, limit } = c.req.valid("query");
     const db = getDb(c.env.DB);
 
-    const rows = await db
-      .select({
-        city: media.city,
-        country: media.country,
-        locationName: media.locationName,
-        r2KeyThumb: media.r2KeyThumb,
-        thumbhash: media.thumbhash,
-      })
-      .from(media)
-      .where(
-        and(
-          eq(media.userId, user.id),
-          eq(media.status, "ready"),
-          isNull(media.deletedAt),
-          isNotNull(media.city),
-        ),
-      )
-      .orderBy(desc(media.takenAt));
-
-    const placesMap = new Map<
-      string,
-      {
-        city: string;
-        country: string;
-        locationName: string;
-        count: number;
-        r2KeyThumb: string;
-        thumbhash: string;
-      }
-    >();
-
-    for (const r of rows) {
-      if (!r.city) continue;
-      const key = `${r.city.toLowerCase()}__${(r.country ?? "").toLowerCase()}`;
-      const existing = placesMap.get(key);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        placesMap.set(key, {
-          city: r.city,
-          country: r.country ?? "",
-          locationName: r.locationName ?? r.city,
-          count: 1,
-          r2KeyThumb: r.r2KeyThumb,
-          thumbhash: r.thumbhash,
-        });
-      }
+    let cur: { c: number; city: string; country: string } | null = null;
+    if (cursor) {
+      try {
+        const decoded = JSON.parse(atob(cursor));
+        if (
+          typeof decoded.c === "number" &&
+          typeof decoded.city === "string" &&
+          typeof decoded.country === "string"
+        ) {
+          cur = decoded;
+        }
+      } catch {}
     }
 
+    const query = cur
+      ? sql`SELECT
+              city,
+              coalesce(country, '') as country,
+              coalesce(location_name, city) as location_name,
+              r2_key_thumb,
+              thumbhash,
+              max(taken_at) as max_taken_at,
+              count(*) as count
+            FROM media
+            WHERE user_id = ${user.id}
+              AND status = 'ready'
+              AND deleted_at IS NULL
+              AND city IS NOT NULL
+            GROUP BY city, country
+            HAVING (count(*) < ${cur.c})
+               OR (count(*) = ${cur.c} AND city > ${cur.city})
+               OR (count(*) = ${cur.c} AND city = ${cur.city} AND coalesce(country, '') > ${cur.country})
+            ORDER BY count(*) DESC, city ASC, country ASC
+            LIMIT ${limit + 1}`
+      : sql`SELECT
+              city,
+              coalesce(country, '') as country,
+              coalesce(location_name, city) as location_name,
+              r2_key_thumb,
+              thumbhash,
+              max(taken_at) as max_taken_at,
+              count(*) as count
+            FROM media
+            WHERE user_id = ${user.id}
+              AND status = 'ready'
+              AND deleted_at IS NULL
+              AND city IS NOT NULL
+            GROUP BY city, country
+            ORDER BY count(*) DESC, city ASC, country ASC
+            LIMIT ${limit + 1}`;
+
+    const res = await db.all<{
+      city: string;
+      country: string;
+      location_name: string;
+      r2_key_thumb: string;
+      thumbhash: string;
+      count: number;
+    }>(query);
+
+    const hasMore = res.length > limit;
+    const page = hasMore ? res.slice(0, limit) : res;
+    const last = page[page.length - 1];
+    const nextCursor =
+      hasMore && last
+        ? btoa(
+            JSON.stringify({
+              c: Number(last.count),
+              city: last.city,
+              country: last.country ?? "",
+            }),
+          )
+        : null;
+
     const places = await Promise.all(
-      Array.from(placesMap.values())
-        .sort((a, b) => b.count - a.count)
-        .map(async (p) => ({
-          city: p.city,
-          country: p.country,
-          locationName: p.locationName,
-          count: p.count,
-          thumbUrl: await presignGet(c.env, p.r2KeyThumb),
-          thumbhash: p.thumbhash,
-        })),
+      page.map(async (p) => ({
+        city: p.city,
+        country: p.country,
+        locationName: p.location_name,
+        count: Number(p.count),
+        thumbUrl: await presignGet(c.env, p.r2_key_thumb),
+        thumbhash: p.thumbhash,
+      })),
     );
 
-    return c.json({ places }, 200);
+    return c.json({ places, nextCursor }, 200);
   })
   .openapi(geocodeBatchRoute, async (c) => {
     const user = c.get("user");

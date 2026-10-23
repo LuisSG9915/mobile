@@ -22,6 +22,10 @@ vi.mock("../web/thumb", () => ({
     width: 10,
     height: 8,
   })),
+  makeWebPreview: vi.fn(async () => ({
+    blob: new Blob(["p"], { type: "image/webp" }),
+    bytes: 2,
+  })),
 }));
 vi.mock("../web/upload", () => ({ uploadBlob: vi.fn(async () => {}) }));
 vi.mock("../lib/query-client", () => ({
@@ -81,7 +85,7 @@ beforeEach(async () => {
   processor = await import("./processor");
   filesMock = (await import("../web/files")) as unknown as FilesModuleMock;
   apiMock = (await import("../api/client")) as unknown as ApiClientMock;
-  uploadBlobMock = ((await import("../web/upload")) as { uploadBlob: Mock }).uploadBlob;
+  uploadBlobMock = ((await import("../web/upload")) as unknown as { uploadBlob: Mock }).uploadBlob;
   queryClientMock = (
     (await import("../lib/query-client")) as unknown as {
       queryClient: { invalidateQueries: Mock };
@@ -144,6 +148,7 @@ describe("processQueue", () => {
         mimeType: "image/png",
         fileSize: file.size,
         thumbSize: 1,
+        previewSize: 2,
         takenAt: 12_345,
         width: 10,
         height: 8,
@@ -192,7 +197,7 @@ describe("processQueue", () => {
       existing: [{ sha256: "a".repeat(64), id: "r9" }],
     });
     // El mock persiste entre tests (las factorías no se re-ejecutan): limpiar.
-    const makeThumb = ((await import("../web/thumb")) as { makeThumb: Mock }).makeThumb;
+    const makeThumb = ((await import("../web/thumb")) as unknown as { makeThumb: Mock }).makeThumb;
     makeThumb.mockClear();
 
     await processor.processQueue();
@@ -227,7 +232,7 @@ describe("processQueue", () => {
     });
     apiMock.api.initUpload.mockResolvedValue(initRespuestaUpload("r2"));
     apiMock.api.completeUpload.mockResolvedValue({ id: "r2", status: "ready" });
-    const makeThumb = ((await import("../web/thumb")) as { makeThumb: Mock }).makeThumb;
+    const makeThumb = ((await import("../web/thumb")) as unknown as { makeThumb: Mock }).makeThumb;
     makeThumb.mockClear();
 
     await processor.processQueue();
@@ -451,5 +456,37 @@ describe("processQueue", () => {
     } finally {
       requestSpy.mockRestore();
     }
+  });
+
+  it("un vídeo > 5 GB (413 file_too_large) se marca como fallido sin pausar el resto de la cola", async () => {
+    const hugeVideo = new File(["huge-content"], "video-huge.mp4", { type: "video/mp4" });
+    const normalPhoto = new File(["normal-content"], "photo.jpg", { type: "image/jpeg" });
+    await encolar("web-huge", "video-huge.mp4", 1, hugeVideo);
+    await encolar("web-normal", "photo.jpg", 2, normalPhoto);
+    filesMock.__files.set("web-huge", hugeVideo);
+    filesMock.__files.set("web-normal", normalPhoto);
+
+    apiMock.api.initUpload.mockImplementation(async (body: { ext: string }) => {
+      if (body.ext === "mp4") {
+        throw new apiMock.ApiError(
+          413,
+          "file_too_large",
+          "El archivo supera el máximo permitido (5 GB).",
+        );
+      }
+      return initRespuestaUpload("r-normal");
+    });
+    apiMock.api.completeUpload.mockResolvedValue({ id: "r-normal", status: "ready" });
+
+    await processor.processQueue();
+
+    const items = db.getQueueItems();
+    const hugeRow = items.find((i) => i.asset_id === "web-huge");
+    const normalRow = items.find((i) => i.asset_id === "web-normal");
+
+    expect(hugeRow?.state).toBe("failed");
+    expect(hugeRow?.last_error).toBe("file_too_large");
+    expect(db.isBackupPaused()).toBe(false);
+    expect(normalRow?.state).toBe("done");
   });
 });

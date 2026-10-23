@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { runCleanup } from "../src/cron/cleanup";
 import { getDb } from "../src/db/client";
-import { media, session, userStorageStats } from "../src/db/schema";
+import { media, session, systemState, userStorageStats } from "../src/db/schema";
 import { createUser, sha } from "./helpers";
 
 const DAY = 24 * 3600 * 1000;
@@ -184,5 +184,109 @@ describe("cron cleanup", () => {
     await runCleanup(env);
 
     expect(await env.BUCKET.head(`users/${userId}/originals/${sha("huefano")}.jpg`)).not.toBeNull();
+  });
+
+  it("simula más de 5.000 objetos en R2 y verifica que dos ejecuciones consecutivas avanzan el cursor y eliminan huérfanos del final", async () => {
+    const { userId } = await createUser();
+    const db = getDb(env.DB);
+    const now = Date.now();
+
+    // Clave huérfana ubicada en la página 6 (> 5.000 objetos)
+    const orphanKey = `users/${userId}/originals/${sha("orphanend")}.jpg`;
+    const deletedKeys: string[] = [];
+
+    // Mock de R2Bucket que simula 6 páginas (5.500 objetos en total)
+    const mockList = async (options?: R2ListOptions): Promise<R2Objects> => {
+      const cursor = options?.cursor;
+      let pageNum = 1;
+      if (cursor?.startsWith("cur_")) {
+        pageNum = parseInt(cursor.replace("cur_", ""), 10) + 1;
+      }
+
+      if (pageNum <= 5) {
+        // Páginas 1 a 5: 1.000 objetos cada una (recientes para no ser clasificados como huérfanos)
+        const objects: R2Object[] = Array.from(
+          { length: 1000 },
+          (_, i) =>
+            ({
+              key: `users/${userId}/originals/p${pageNum}_${i}.jpg`,
+              size: 100,
+              etag: "etag",
+              httpEtag: "etag",
+              version: "v1",
+              uploaded: new Date(now),
+            }) as unknown as R2Object,
+        );
+        return {
+          objects,
+          truncated: true,
+          cursor: `cur_${pageNum}`,
+          delimitedPrefixes: [],
+        };
+      } else {
+        // Página 6: 500 objetos, incluyendo el huérfano con más de 24 horas
+        const objects: R2Object[] = Array.from(
+          { length: 499 },
+          (_, i) =>
+            ({
+              key: `users/${userId}/originals/p6_${i}.jpg`,
+              size: 100,
+              etag: "etag",
+              httpEtag: "etag",
+              version: "v1",
+              uploaded: new Date(now),
+            }) as unknown as R2Object,
+        );
+        objects.push({
+          key: orphanKey,
+          size: 100,
+          etag: "etag",
+          httpEtag: "etag",
+          version: "v1",
+          uploaded: new Date(now - 25 * 3600 * 1000), // > 24 horas
+        } as unknown as R2Object);
+        return {
+          objects,
+          truncated: false,
+          delimitedPrefixes: [],
+        };
+      }
+    };
+
+    const mockDelete = async (keys: string | string[]) => {
+      const arr = Array.isArray(keys) ? keys : [keys];
+      deletedKeys.push(...arr);
+    };
+
+    const customEnv = {
+      ...env,
+      BUCKET: {
+        ...env.BUCKET,
+        list: mockList,
+        delete: mockDelete,
+      } as unknown as R2Bucket,
+    };
+
+    // Primera ejecución: debe barrer 5 páginas (5.000 objetos) y persistir 'cur_5'
+    await runCleanup(customEnv);
+
+    const stateRow1 = await db
+      .select()
+      .from(systemState)
+      .where(eq(systemState.key, "r2_orphan_sweep_cursor"))
+      .get();
+    expect(stateRow1?.value).toBe("cur_5");
+    expect(deletedKeys).not.toContain(orphanKey);
+
+    // Segunda ejecución: arranca desde 'cur_5', procesa la página 6, elimina el huérfano y pone el cursor en null
+    await runCleanup(customEnv);
+
+    const stateRow2 = await db
+      .select()
+      .from(systemState)
+      .where(eq(systemState.key, "r2_orphan_sweep_cursor"))
+      .get();
+    expect(stateRow2?.value).toBeNull();
+    expect(deletedKeys).toContain(orphanKey);
   });
 });

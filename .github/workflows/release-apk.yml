@@ -9,6 +9,15 @@ on:
         description: 'Tag de la release (ej: v1.0.0). Vacío = v<appVersion>-b<versionCode>'
         required: false
         type: string
+      promote_stable:
+        description: 'Exigir checklist nativo validado (todos los casos ok) para marcar release estable'
+        required: false
+        type: boolean
+        default: false
+      checklist_path:
+        description: 'Ruta al checklist completado (opcional, ej: docs/testing/releases/v1.0.0.json)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -69,12 +78,73 @@ jobs:
       - name: Download APK
         run: curl -L -o photos-${{ steps.tag.outputs.name }}.apk "${{ steps.build.outputs.apk_url }}"
 
-      - name: Create GitHub Release
+      - name: Generate & Verify Native Checklist
+        id: checklist
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          mkdir -p test-results
+          OUT_CHECKLIST="test-results/checklist-${TAG}.json"
+          
+          # Determinar origen del checklist
+          SRC_CHECKLIST="${{ inputs.checklist_path }}"
+          if [ -z "$SRC_CHECKLIST" ] && [ -f "docs/testing/releases/${TAG}.json" ]; then
+            SRC_CHECKLIST="docs/testing/releases/${TAG}.json"
+          fi
+          
+          if [ -n "$SRC_CHECKLIST" ] && [ -f "$SRC_CHECKLIST" ]; then
+            echo "Usando checklist existente desde $SRC_CHECKLIST"
+            cp "$SRC_CHECKLIST" "$OUT_CHECKLIST"
+          else
+            echo "Generando instancia de checklist para $TAG a partir de la plantilla"
+            node scripts/verify-native-checklist.mjs docs/testing/native-checklist.template.json --generate "$OUT_CHECKLIST" --tag "$TAG"
+          fi
+          
+          # Generar tabla markdown
+          node scripts/verify-native-checklist.mjs "$OUT_CHECKLIST" --markdown > test-results/checklist-summary.md
+          
+          # Verificar si cumple criterios de release estable
+          IS_PRERELEASE="true"
+          if node scripts/verify-native-checklist.mjs "$OUT_CHECKLIST" --strict; then
+            echo "Checklist 100% verificado."
+            IS_PRERELEASE="false"
+          else
+            echo "Checklist tiene casos pendientes o fallidos."
+            if [ "${{ inputs.promote_stable }}" = "true" ]; then
+              echo "Error: se solicitó promover a estable pero el checklist no está 100% verificado."
+              exit 1
+            fi
+          fi
+          
+          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "checklist_file=${OUT_CHECKLIST}" >> "$GITHUB_OUTPUT"
+        working-directory: .
+
+      - name: Upload Checklist Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-checklist-${{ steps.tag.outputs.name }}
+          path: ${{ steps.checklist.outputs.checklist_file }}
+
+      - name: Create or Update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.tag.outputs.name }}" \
-            --title "Photos ${{ steps.tag.outputs.name }}" \
-            --notes "APK de Android (build EAS ${{ steps.build.outputs.build_version }}). Instalación directa o vía Obtainium: https://github.com/${{ github.repository }}/releases" \
-            "apps/mobile/photos-${{ steps.tag.outputs.name }}.apk"
+          TAG="${{ steps.tag.outputs.name }}"
+          IS_PRE="${{ steps.checklist.outputs.is_prerelease }}"
+          
+          PRERELEASE_FLAG=""
+          HEADER_NOTE="### 🚀 Release Estable\n\nAPK de Android listo para producción."
+          if [ "$IS_PRE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+            HEADER_NOTE="> ⚠️ **Pre-release**: Requiere validación del checklist nativo en dispositivo físico antes de promoverse a release estable.\n> \n> Descarga `checklist-${TAG}.json`, valida los casos y reporta los resultados.\n"
+          fi
+          
+          NOTES="${HEADER_NOTE}\n\nBuild EAS ${{ steps.build.outputs.build_version }} (App v${{ steps.build.outputs.app_version }}).\nInstalación directa o vía Obtainium: https://github.com/${{ github.repository }}/releases\n\n$(cat test-results/checklist-summary.md)"
+          
+          gh release create "${TAG}" \
+            --title "Photos ${TAG}" \
+            --notes "$(echo -e "$NOTES")" \
+            $PRERELEASE_FLAG \
+            "apps/mobile/photos-${TAG}.apk" \
+            "${{ steps.checklist.outputs.checklist_file }}"
         working-directory: .

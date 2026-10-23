@@ -16,6 +16,11 @@ import type {
   LocationsResponse,
   MediaDetail,
   MemoriesResponse,
+  MultipartAbortInput,
+  MultipartCompleteInput,
+  MultipartInitResponse,
+  MultipartPresignPartsInput,
+  MultipartPresignPartsResponse,
   PlacesResponse,
   PublicAlbumResponse,
   SearchQuery,
@@ -32,6 +37,9 @@ import type {
   UpdateMediaInput,
   UploadInitInput,
   UploadInitResponse,
+  UserAccountDeleteResponse,
+  UserExportResponse,
+  UserSessionsResponse,
 } from "@photos/shared";
 import { API_URL, getAuthHeaders } from "../auth/client";
 
@@ -76,7 +84,7 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
     let message = "Algo salió mal.";
     try {
       const body = await res.json();
-      code = body.error ?? code;
+      code = body.code ?? body.error ?? code;
       message = body.message ?? message;
     } catch {}
     throw new ApiError(res.status, code, message);
@@ -90,6 +98,46 @@ export const api = {
     opts?: { signal?: AbortSignal },
   ): Promise<UploadInitResponse> =>
     apiFetch("/v1/uploads/init", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: opts?.signal,
+    }).then((r) => r.json()),
+
+  multipartInit: (
+    body: UploadInitInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<MultipartInitResponse> =>
+    apiFetch("/v1/uploads/multipart/init", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: opts?.signal,
+    }).then((r) => r.json()),
+
+  multipartPresignParts: (
+    body: MultipartPresignPartsInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<MultipartPresignPartsResponse> =>
+    apiFetch("/v1/uploads/multipart/presign-parts", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: opts?.signal,
+    }).then((r) => r.json()),
+
+  multipartComplete: (
+    body: MultipartCompleteInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ id: string; status: "ready" }> =>
+    apiFetch("/v1/uploads/multipart/complete", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: opts?.signal,
+    }).then((r) => r.json()),
+
+  multipartAbort: (
+    body: MultipartAbortInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ ok: true }> =>
+    apiFetch("/v1/uploads/multipart/abort", {
       method: "POST",
       body: JSON.stringify(body),
       signal: opts?.signal,
@@ -114,18 +162,22 @@ export const api = {
     cursor?: string,
     limit = 60,
     filter: TimelineFilter = "all",
+    before?: string,
   ): Promise<TimelineResponse> => {
     const q = new URLSearchParams({ limit: String(limit), filter });
     if (cursor) q.set("cursor", cursor);
+    if (before) q.set("before", before);
     return apiFetch(`/v1/timeline?${q}`).then((r) => r.json());
   },
 
   timelineMonths: (): Promise<TimelineMonthsResponse> =>
     apiFetch("/v1/timeline/months").then((r) => r.json()),
 
-  memories: (monthDay?: string): Promise<MemoriesResponse> => {
+  memories: (monthDay?: string, cursor?: string, limit?: number): Promise<MemoriesResponse> => {
     const q = new URLSearchParams();
     if (monthDay) q.set("monthDay", monthDay);
+    if (cursor) q.set("cursor", cursor);
+    if (limit != null) q.set("limit", String(limit));
     const qs = q.toString();
     return apiFetch(`/v1/timeline/memories${qs ? `?${qs}` : ""}`).then((r) => r.json());
   },
@@ -151,7 +203,13 @@ export const api = {
   autoTagBatch: (): Promise<AutoTagBatchResponse> =>
     apiFetch("/v1/media/auto-tag-batch", { method: "POST" }).then((r) => r.json()),
 
-  trash: (): Promise<TrashResponse> => apiFetch("/v1/trash").then((r) => r.json()),
+  trash: (params?: { cursor?: string; limit?: number }): Promise<TrashResponse> => {
+    const q = new URLSearchParams();
+    if (params?.cursor) q.set("cursor", params.cursor);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch(`/v1/trash${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  },
 
   emptyTrash: (): Promise<EmptyTrashResponse> =>
     apiFetch("/v1/trash/empty", { method: "POST" }).then((r) => r.json()),
@@ -164,13 +222,27 @@ export const api = {
     apiFetch("/v1/admin/storage").then((r) => r.json()),
 
   // Álbumes y Compartir
-  albums: (): Promise<AlbumListResponse> => apiFetch("/v1/albums").then((r) => r.json()),
+  albums: (params?: { cursor?: string; limit?: number }): Promise<AlbumListResponse> => {
+    const q = new URLSearchParams();
+    if (params?.cursor) q.set("cursor", params.cursor);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch(`/v1/albums${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  },
 
   createAlbum: (body: CreateAlbumInput): Promise<AlbumDetailResponse> =>
     apiFetch("/v1/albums", { method: "POST", body: JSON.stringify(body) }).then((r) => r.json()),
 
-  albumDetail: (id: string): Promise<AlbumDetailResponse> =>
-    apiFetch(`/v1/albums/${id}`).then((r) => r.json()),
+  albumDetail: (
+    id: string,
+    params?: { cursor?: string; limit?: number },
+  ): Promise<AlbumDetailResponse> => {
+    const q = new URLSearchParams();
+    if (params?.cursor) q.set("cursor", params.cursor);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch(`/v1/albums/${id}${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  },
 
   updateAlbum: (id: string, body: UpdateAlbumInput): Promise<AlbumDetailResponse> =>
     apiFetch(`/v1/albums/${id}`, { method: "PATCH", body: JSON.stringify(body) }).then((r) =>
@@ -188,8 +260,14 @@ export const api = {
   removeAlbumMedia: (id: string, mediaId: string): Promise<{ ok: true }> =>
     apiFetch(`/v1/albums/${id}/media/${mediaId}`, { method: "DELETE" }).then((r) => r.json()),
 
-  shareAlbum: (id: string): Promise<ShareAlbumResponse> =>
-    apiFetch(`/v1/albums/${id}/share`, { method: "POST" }).then((r) => r.json()),
+  shareAlbum: (
+    id: string,
+    body?: { expiresIn?: "24h" | "7d" | "30d" | "never" },
+  ): Promise<ShareAlbumResponse> =>
+    apiFetch(`/v1/albums/${id}/share`, {
+      method: "POST",
+      body: body ? JSON.stringify(body) : undefined,
+    }).then((r) => r.json()),
 
   unshareAlbum: (id: string): Promise<{ ok: true }> =>
     apiFetch(`/v1/albums/${id}/share`, { method: "DELETE" }).then((r) => r.json()),
@@ -217,7 +295,13 @@ export const api = {
     return apiFetch(`/v1/search?${q}`).then((r) => r.json());
   },
 
-  tags: (): Promise<TagsResponse> => apiFetch("/v1/tags").then((r) => r.json()),
+  tags: (params?: { cursor?: string; limit?: number }): Promise<TagsResponse> => {
+    const q = new URLSearchParams();
+    if (params?.cursor) q.set("cursor", params.cursor);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch(`/v1/tags${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  },
 
   locations: (query?: LocationsQuery): Promise<LocationsResponse> => {
     const q = new URLSearchParams();
@@ -225,12 +309,21 @@ export const api = {
     if (query?.maxLat != null) q.set("maxLat", String(query.maxLat));
     if (query?.minLng != null) q.set("minLng", String(query.minLng));
     if (query?.maxLng != null) q.set("maxLng", String(query.maxLng));
+    if (query?.city) q.set("city", query.city);
     if (query?.filter && query.filter !== "all") q.set("filter", query.filter);
+    if (query?.cursor) q.set("cursor", query.cursor);
+    if (query?.limit != null) q.set("limit", String(query.limit));
     const qs = q.toString();
     return apiFetch(`/v1/locations${qs ? `?${qs}` : ""}`).then((r) => r.json());
   },
 
-  places: (): Promise<PlacesResponse> => apiFetch("/v1/locations/places").then((r) => r.json()),
+  places: (params?: { cursor?: string; limit?: number }): Promise<PlacesResponse> => {
+    const q = new URLSearchParams();
+    if (params?.cursor) q.set("cursor", params.cursor);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch(`/v1/locations/places${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  },
 
   geocodeBatch: (): Promise<{ geocoded: number }> =>
     apiFetch("/v1/locations/geocode-batch", { method: "POST" }).then((r) => r.json()),
@@ -242,4 +335,17 @@ export const api = {
     apiFetch("/v1/cleaner/cleanup", { method: "POST", body: JSON.stringify(body) }).then((r) =>
       r.json(),
     ),
+
+  // Sesiones, exportación y borrado de cuenta
+  userSessions: (): Promise<UserSessionsResponse> =>
+    apiFetch("/v1/user/sessions").then((r) => r.json()),
+
+  revokeSession: (id: string): Promise<{ ok: true }> =>
+    apiFetch(`/v1/user/sessions/${id}`, { method: "DELETE" }).then((r) => r.json()),
+
+  exportUserData: (): Promise<UserExportResponse> =>
+    apiFetch("/v1/user/export").then((r) => r.json()),
+
+  deleteAccount: (): Promise<UserAccountDeleteResponse> =>
+    apiFetch("/v1/user/account", { method: "DELETE" }).then((r) => r.json()),
 };

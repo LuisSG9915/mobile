@@ -17,7 +17,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
-import { deleteLocalAssets } from "../lib/free-space";
+import { formatBytes } from "../lib/format";
+import { deleteLocalAssets, freeSyncedSpace, getSyncedLocal } from "../lib/free-space";
+import { invalidateMediaLifecycleQueries } from "../lib/query-client";
 import { getQueueItems } from "../queue/db";
 import { Button, EmptyState } from "../ui";
 
@@ -73,9 +75,7 @@ export default function CleanerScreen() {
     onSuccess: (data, deleteIds) => {
       toast.success(t.cleaner.cleanSuccess(data.trashedCount));
       void qc.invalidateQueries({ queryKey: ["cleaner-bursts"] });
-      void qc.invalidateQueries({ queryKey: ["timeline"] });
-      void qc.invalidateQueries({ queryKey: ["stats"] });
-      void qc.invalidateQueries({ queryKey: ["storage"] });
+      void invalidateMediaLifecycleQueries(qc);
       offerLocalCleanup(deleteIds);
     },
     onError: (err: Error) => toast.error(err.message || t.auth.genericError),
@@ -113,6 +113,7 @@ export default function CleanerScreen() {
 
   const clusters = query.data?.clusters ?? [];
   const totalPhotos = query.data?.totalPhotos ?? 0;
+  const syncedOlder = Platform.OS === "web" ? { assetIds: [], totalBytes: 0 } : getSyncedLocal(30);
 
   // Tamaño de las miniaturas en la cuadrícula horizontal
   const thumbSize = Math.min(180, (width - 48) / 2.5);
@@ -171,6 +172,32 @@ export default function CleanerScreen() {
                   {`${totalPhotos} fotos en total. Revisa cuáles quieres conservar.`}
                 </Text>
               </View>
+            </View>
+          ) : null}
+
+          {/* Sugerencia de liberación de espacio local (> 30 días) */}
+          {syncedOlder.assetIds.length > 0 ? (
+            <View className="mx-4 mb-4 p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 flex-row items-center justify-between">
+              <View className="flex-1 mr-3">
+                <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
+                  {`Liberar ${formatBytes(syncedOlder.totalBytes)} en tu dispositivo`}
+                </Text>
+                <Text className="text-xs text-neutral-500">
+                  {`${syncedOlder.assetIds.length} fotos con más de 30 días ya respaldadas en la nube.`}
+                </Text>
+              </View>
+              <Button
+                size="sm"
+                label="Liberar"
+                onPress={() => {
+                  void freeSyncedSpace(30, true).then((n) => {
+                    if (n > 0) {
+                      toast.success(`Se liberaron ${n} fotos locales.`);
+                      void invalidateMediaLifecycleQueries(qc);
+                    }
+                  });
+                }}
+              />
             </View>
           ) : null}
 

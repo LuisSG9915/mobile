@@ -1,5 +1,5 @@
 import type { LocationItem, SearchFilter } from "@photos/shared";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -60,12 +60,17 @@ export default function MapScreen() {
   }));
   const [selectedPin, setSelectedPin] = useState<LocationItem | null>(null);
 
-  const locationsQuery = useQuery({
+  const locationsQuery = useInfiniteQuery({
     queryKey: ["locations", filter],
-    queryFn: () => api.locations({ filter }),
+    queryFn: ({ pageParam }) => api.locations({ filter, cursor: pageParam, limit: 500 }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 
-  const items = locationsQuery.data?.items ?? [];
+  const items = useMemo(
+    () => locationsQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [locationsQuery.data],
+  );
 
   // Al cargar los datos, si no venimos con una foto fija, centrar en el promedio de las fotos del usuario
   const hasInitializedCenter = useRef(Boolean(initLat && initLng));

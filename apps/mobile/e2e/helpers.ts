@@ -74,11 +74,12 @@ export async function apiGet<T>(path: string, token: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-// Mismo parser de .dev.vars que apps/api/vitest.config.ts.
+// Mismo parser de .dev.vars que apps/api/vitest.config.ts (con fallback a process.env).
 function loadDevVars(): Record<string, string> {
+  let fileVars: Record<string, string> = {};
   try {
     const raw = readFileSync(path.join(dirname, "../../api/.dev.vars"), "utf8");
-    return Object.fromEntries(
+    fileVars = Object.fromEntries(
       raw
         .split("\n")
         .map((l) => l.trim())
@@ -89,8 +90,15 @@ function loadDevVars(): Record<string, string> {
         }),
     );
   } catch {
-    return {};
+    // Si no existe el archivo, se confía en process.env
   }
+  return {
+    R2_BUCKET_NAME: process.env.R2_BUCKET_NAME || fileVars.R2_BUCKET_NAME || "photos-media-dev",
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID || fileVars.R2_ACCOUNT_ID || "",
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID || fileVars.R2_ACCESS_KEY_ID || "",
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY || fileVars.R2_SECRET_ACCESS_KEY || "",
+    ...fileVars,
+  };
 }
 
 type SessionResponse = { user?: { id?: string } | null } | null;

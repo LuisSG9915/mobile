@@ -102,11 +102,21 @@ describe("uploads/init", () => {
     const res = await init(cookie, initBody({ fileSize: 1_000_000, thumbSize: 8_000 }));
     expect(res.status).toBe(413);
     const json = await j(res);
+    expect(json.code).toBe("quota_exceeded");
     expect(json.error).toBe("quota_exceeded");
     // No se emitieron URLs ni se materializó fila pending extra.
     expect(json.thumb).toBeUndefined();
     const rows = await db.select().from(media).where(eq(media.userId, userId)).all();
     expect(rows.filter((r) => r.status === "pending")).toHaveLength(0);
+  });
+
+  it("rechaza con 413 file_too_large cuando el archivo supera 5 GB", async () => {
+    const { cookie } = await createUser();
+    const res = await init(cookie, initBody({ fileSize: 5_368_709_121 }));
+    expect(res.status).toBe(413);
+    const json = await j(res);
+    expect(json.code).toBe("file_too_large");
+    expect(json.error).toBe("file_too_large");
   });
 
   it("re-iniciar una subida de algo en la papelera lo restaura sin re-subir", async () => {
@@ -154,6 +164,40 @@ describe("uploads/init", () => {
       .get();
     expect(stats?.usedBytes).toBe(101_000);
     expect(stats?.mediaCount).toBe(1);
+  });
+
+  it("dos POST /uploads/init concurrentes que exceden la cuota → exactamente uno 201 y uno 413", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+    // Establecer cuota con 4 GB usados (quedan 6 GB disponibles de 10 GB)
+    await db.insert(userStorageStats).values({
+      userId,
+      usedBytes: 4 * 1024 * 1024 * 1024,
+      reservedBytes: 0,
+      mediaCount: 1,
+      updatedAt: Date.now(),
+    });
+
+    // Dos archivos de 4 GB cada uno: individualmente caben (4 + 4 = 8 <= 10 GB), pero juntos suman 4 + 4 + 4 = 12 GB > 10 GB
+    const bodyA = initBody({ sha256: sha("ca11"), fileSize: 4 * 1024 * 1024 * 1024 });
+    const bodyB = initBody({ sha256: sha("cb22"), fileSize: 4 * 1024 * 1024 * 1024 });
+
+    const [resA, resB] = await Promise.all([init(cookie, bodyA), init(cookie, bodyB)]);
+
+    const statuses = [resA.status, resB.status].sort();
+    expect(statuses).toEqual([201, 413]);
+
+    const res413 = resA.status === 413 ? resA : resB;
+    const json413 = await j(res413);
+    expect(json413.code).toBe("quota_exceeded");
+
+    // Verificar que reservedBytes solo tiene la reserva del que tuvo éxito
+    const stats = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(stats?.reservedBytes).toBe(4 * 1024 * 1024 * 1024 + 8_000); // 4 GB + thumbSize
   });
 });
 
@@ -295,6 +339,81 @@ describe("date_group", () => {
     const item = json.items.find((i: { sha256: string }) => i.sha256 === body.sha256);
     expect(item).toBeTruthy();
     expect(item.dateGroup).toBe("2024-01-15");
+  });
+});
+
+describe("uploads con preview", () => {
+  it("crea subida con preview → 201 con preview presignada", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({ sha256: sha("ee11"), previewSize: 120_000 });
+    const res = await init(cookie, body);
+    expect(res.status).toBe(201);
+    const json = await j(res);
+    expect(json.status).toBe("upload");
+    expect(json.preview).toBeTruthy();
+    expect(json.preview.url).toContain("X-Amz-Signature");
+    expect(json.preview.url).toContain(`users/${userId}/previews/${body.sha256}.webp`);
+  });
+});
+
+describe("uploads/multipart", () => {
+  it("inicia subida multipart → 201 con uploadId y totalParts", async () => {
+    const { cookie } = await createUser();
+    const body = initBody({
+      sha256: sha("ff22"),
+      fileSize: 25 * 1024 * 1024,
+      previewSize: 150_000,
+    });
+    const res = await SELF.fetch(
+      "http://localhost/v1/uploads/multipart/init",
+      authed(cookie, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const json = await j(res);
+    expect(json.status).toBe("upload");
+    expect(json.uploadId).toBeTruthy();
+    expect(json.totalParts).toBe(5); // 25 MB / 5 MB = 5
+    expect(json.thumb).toBeTruthy();
+    expect(json.preview).toBeTruthy();
+
+    // Presign parts
+    const presignRes = await SELF.fetch(
+      "http://localhost/v1/uploads/multipart/presign-parts",
+      authed(cookie, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: json.id,
+          uploadId: json.uploadId,
+          partNumbers: [1, 2],
+        }),
+      }),
+    );
+    expect(presignRes.status).toBe(200);
+    const presignJson = await j(presignRes);
+    expect(presignJson.parts.length).toBe(2);
+    expect(presignJson.parts[0].partNumber).toBe(1);
+    expect(presignJson.parts[0].url).toContain("X-Amz-Signature");
+
+    // Abort
+    const abortRes = await SELF.fetch(
+      "http://localhost/v1/uploads/multipart/abort",
+      authed(cookie, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: json.id,
+          uploadId: json.uploadId,
+        }),
+      }),
+    );
+    expect(abortRes.status).toBe(200);
+    const abortJson = await j(abortRes);
+    expect(abortJson.ok).toBe(true);
   });
 });
 

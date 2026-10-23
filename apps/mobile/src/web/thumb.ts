@@ -1,4 +1,4 @@
-import { MAX_THUMB_BYTES, THUMB_MAX_DIMENSION } from "@photos/shared";
+import { MAX_THUMB_BYTES, PREVIEW_MAX_DIMENSION, THUMB_MAX_DIMENSION } from "@photos/shared";
 import { rgbaToThumbHash } from "thumbhash";
 
 export type WebThumb = {
@@ -159,4 +159,27 @@ export async function makeThumb(mediaType: "photo" | "video", file: File): Promi
     width: Math.max(1, Math.round(frame.width)),
     height: Math.max(1, Math.round(frame.height)),
   };
+}
+
+export type WebPreview = {
+  blob: Blob;
+  bytes: number;
+};
+
+/**
+ * Genera la vista previa intermedia WebP (~1600 px lado mayor) para el visor web.
+ */
+export async function makeWebPreview(
+  mediaType: "photo" | "video",
+  file: File,
+): Promise<WebPreview | null> {
+  try {
+    const frame = mediaType === "video" ? await frameForVideo(file) : await frameForPhoto(file);
+    const canvas = drawScaled(frame, PREVIEW_MAX_DIMENSION);
+    const blob = await canvasToBlob(canvas, 0.8);
+    if (!blob || blob.size <= 0) return null;
+    return { blob, bytes: blob.size };
+  } catch {
+    return null;
+  }
 }

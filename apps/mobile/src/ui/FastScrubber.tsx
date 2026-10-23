@@ -6,11 +6,25 @@ import type { GalleryRow } from "../lib/gallery";
 import { type GridGeometry, lineAtY, scrubLabel } from "../lib/grid-geometry";
 import { hapticSelection } from "../lib/haptics";
 
+export function ymToEndOfMonthIso(ym: string): string {
+  const [year, month] = ym.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)).toISOString();
+}
+
+const monthLabel = (ym: string) =>
+  new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("es", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
 type Props = {
   geometry: GridGeometry;
   rows: GalleryRow[];
   /** Índice en `rows` al que saltar (encabezado o primera foto de línea). */
   onScrub: (rowIndex: number) => void;
+  months?: Array<{ ym: string; count: number }>;
+  onJumpBefore?: (beforeIso: string) => void;
 };
 
 /**
@@ -19,16 +33,71 @@ type Props = {
  * total del contenido para saltar al grupo de fecha más cercano mientras
  * una burbuja flotante muestra el mes y año bajo el dedo.
  */
-export function FastScrubber({ geometry, rows, onScrub }: Props) {
+export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: Props) {
   const [trackH, setTrackH] = useState(0);
   const [bubble, setBubble] = useState<{ y: number; label: string } | null>(null);
   const lastIndex = useRef(-1);
   const lastLabel = useRef("");
+  const pendingJumpIso = useRef<string | null>(null);
 
   const scrub = useCallback(
     (y: number) => {
-      if (trackH <= 0 || geometry.height <= 0) return;
+      if (trackH <= 0) return;
       const frac = Math.min(1, Math.max(0, y / trackH));
+
+      // Si tenemos la lista completa de meses y el usuario arrastra a una zona no cargada:
+      if (months && months.length > 0) {
+        const mIdx = Math.min(months.length - 1, Math.max(0, Math.floor(frac * months.length)));
+        const targetMonth = months[mIdx];
+        if (targetMonth) {
+          // Buscar si el mes ya está en las filas cargadas
+          let foundRowIndex = -1;
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            if (
+              r.type === "photo" &&
+              new Date(r.photo.takenAt).toISOString().slice(0, 7) === targetMonth.ym
+            ) {
+              foundRowIndex = i;
+              break;
+            }
+          }
+
+          if (foundRowIndex >= 0) {
+            pendingJumpIso.current = null;
+            let target = foundRowIndex;
+            for (let i = foundRowIndex; i >= 0; i--) {
+              if (rows[i].type === "header") {
+                target = i;
+                break;
+              }
+            }
+            if (target !== lastIndex.current) {
+              lastIndex.current = target;
+              onScrub(target);
+            }
+            const label = monthLabel(targetMonth.ym);
+            if (label !== lastLabel.current) {
+              lastLabel.current = label;
+              hapticSelection();
+            }
+            setBubble({ y: Math.min(Math.max(y, 20), trackH - 20), label });
+            return;
+          }
+
+          // El mes no está cargado en memoria -> mostrar etiqueta y preparar salto directo
+          pendingJumpIso.current = ymToEndOfMonthIso(targetMonth.ym);
+          const label = monthLabel(targetMonth.ym);
+          if (label !== lastLabel.current) {
+            lastLabel.current = label;
+            hapticSelection();
+          }
+          setBubble({ y: Math.min(Math.max(y, 20), trackH - 20), label });
+          return;
+        }
+      }
+
+      if (geometry.height <= 0) return;
       const targetY = frac * geometry.height;
       const line = lineAtY(geometry, targetY);
       if (!line) return;
@@ -44,14 +113,18 @@ export function FastScrubber({ geometry, rows, onScrub }: Props) {
       }
       setBubble({ y: Math.min(Math.max(y, 20), trackH - 20), label });
     },
-    [trackH, geometry, rows, onScrub],
+    [trackH, geometry, rows, onScrub, months],
   );
 
   const endScrub = useCallback(() => {
+    if (pendingJumpIso.current && onJumpBefore) {
+      onJumpBefore(pendingJumpIso.current);
+      pendingJumpIso.current = null;
+    }
     lastIndex.current = -1;
     lastLabel.current = "";
     setBubble(null);
-  }, []);
+  }, [onJumpBefore]);
 
   const pan = useMemo(
     () =>

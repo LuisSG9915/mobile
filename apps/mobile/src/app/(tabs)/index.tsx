@@ -60,7 +60,7 @@ import { allowUploadOnCellularOnce, isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
 import { EmptyState, SelectAlbumsModal, SyncBadge } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
-import { FastScrubber } from "../../ui/FastScrubber";
+import { FastScrubber, ymToEndOfMonthIso } from "../../ui/FastScrubber";
 import { MemoriesBar } from "../../ui/MemoriesBar";
 import { SyncStatusAvatar } from "../../ui/SyncStatusAvatar";
 
@@ -290,7 +290,12 @@ export default function GalleryScreen() {
   const [albumModalOpen, setAlbumModalOpen] = useState(false);
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.
-  const { photos, rows, query, refreshLocal } = useHybridGallery(timelineFilter, albumFilter);
+  const [timelineBefore, setTimelineBefore] = useState<string | undefined>(undefined);
+  const { photos, rows, query, refreshLocal } = useHybridGallery(
+    timelineFilter,
+    albumFilter,
+    timelineBefore,
+  );
 
   const listRef = useRef<FlashListRef<GalleryRow>>(null);
   const gridRef = useRef<View>(null);
@@ -344,16 +349,43 @@ export default function GalleryScreen() {
   const [dragSelecting, setDragSelecting] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
-  // Salto temporal: mes elegido en el modal; el efecto de abajo va trayendo
-  // páginas del timeline hasta localizar la primera foto de ese mes.
+  // Salto temporal directo (?before=): mes elegido en el modal o scrubber.
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpYm, setJumpYm] = useState<string | null>(null);
   const months = useQuery({
     queryKey: ["timeline-months"],
     queryFn: api.timelineMonths,
-    enabled: jumpOpen,
+    enabled: true,
     staleTime: 60_000,
   });
+
+  const jumpToMonth = useCallback(
+    (ym: string) => {
+      let idx = -1;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (r.type === "photo" && new Date(r.photo.takenAt).toISOString().slice(0, 7) === ym) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        let target = idx;
+        for (let i = idx; i >= 0; i--) {
+          if (rows[i].type === "header") {
+            target = i;
+            break;
+          }
+        }
+        listRef.current?.scrollToIndex({ index: target, animated: true });
+        setJumpYm(null);
+      } else {
+        setJumpYm(ym);
+        setTimelineBefore(ymToEndOfMonthIso(ym));
+      }
+    },
+    [rows],
+  );
 
   useEffect(() => {
     if (!jumpYm) return;
@@ -375,12 +407,8 @@ export default function GalleryScreen() {
       }
       listRef.current?.scrollToIndex({ index: target, animated: true });
       setJumpYm(null);
-    } else if (query.hasNextPage && !query.isFetchingNextPage) {
-      void query.fetchNextPage();
-    } else if (!query.hasNextPage) {
-      setJumpYm(null);
     }
-  }, [jumpYm, rows, query.hasNextPage, query.isFetchingNextPage]);
+  }, [jumpYm, rows]);
 
   const sticky = useMemo(
     () => rows.map((r, i) => (r.type === "header" ? i : -1)).filter((i) => i >= 0),
@@ -864,6 +892,7 @@ export default function GalleryScreen() {
                 <RefreshControl
                   refreshing={query.isRefetching}
                   onRefresh={() => {
+                    setTimelineBefore(undefined);
                     void query.refetch();
                     void refreshLocal();
                   }}
@@ -911,6 +940,8 @@ export default function GalleryScreen() {
               <FastScrubber
                 geometry={geometry}
                 rows={rows}
+                months={months.data?.months?.map((m) => ({ ym: m.month, count: m.count }))}
+                onJumpBefore={(iso) => setTimelineBefore(iso)}
                 onScrub={(i) => listRef.current?.scrollToIndex({ index: i, animated: false })}
               />
             ) : null}
@@ -942,7 +973,7 @@ export default function GalleryScreen() {
                 className="flex-row justify-between items-center py-3 border-b border-neutral-100 dark:border-neutral-800"
                 onPress={() => {
                   setJumpOpen(false);
-                  setJumpYm(item.month);
+                  jumpToMonth(item.month);
                 }}
               >
                 <Text className="text-base text-neutral-900 dark:text-white capitalize">

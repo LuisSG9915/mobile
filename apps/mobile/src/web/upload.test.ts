@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { uploadBlob } from "./upload";
+import { uploadBlob, uploadPartBlob } from "./upload";
 
 type ProgressPayload = { lengthComputable: boolean; loaded: number; total: number };
 
@@ -16,6 +16,7 @@ class FakeXHR {
   method = "";
   url = "";
   headers = new Map<string, string>();
+  responseHeaders = new Map<string, string>();
   body: unknown;
   aborted = false;
 
@@ -30,6 +31,10 @@ class FakeXHR {
 
   setRequestHeader(key: string, value: string) {
     this.headers.set(key, value);
+  }
+
+  getResponseHeader(key: string): string | null {
+    return this.responseHeaders.get(key.toLowerCase()) ?? null;
   }
 
   send(body?: unknown) {
@@ -169,5 +174,43 @@ describe("uploadBlob", () => {
     xhr.status = 204;
     xhr.onload?.();
     await promise;
+  });
+});
+
+describe("uploadPartBlob", () => {
+  it("sube una parte con PUT y devuelve el ETag retornado por R2", async () => {
+    const url = "https://r2.example.com/part?partNumber=1";
+    const blob = new Blob(["part-content"]);
+
+    const promise = uploadPartBlob(url, blob);
+    const xhr = FakeXHR.instances[0];
+    expect(xhr.method).toBe("PUT");
+    expect(xhr.url).toBe(url);
+    expect(xhr.body).toBe(blob);
+
+    xhr.status = 200;
+    xhr.responseHeaders.set("etag", '"etag-part-1"');
+    xhr.onload?.();
+
+    const etag = await promise;
+    expect(etag).toBe('"etag-part-1"');
+  });
+
+  it("rechaza si el status HTTP es de error", async () => {
+    const url = "https://r2.example.com/part?partNumber=2";
+    const promise = uploadPartBlob(url, new Blob(["x"]));
+    const xhr = FakeXHR.instances[0];
+    xhr.status = 500;
+    xhr.onload?.();
+
+    await expect(promise).rejects.toThrow("La subida de la parte falló (HTTP 500).");
+  });
+
+  it("rechaza de inmediato si la señal ya venía cancelada", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      uploadPartBlob("https://r2.example.com/part", new Blob(["x"]), undefined, controller.signal),
+    ).rejects.toThrow("Subida cancelada.");
   });
 });

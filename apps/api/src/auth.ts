@@ -4,7 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./db/schema";
-import { passwordResetEmail, sendEmail } from "./email";
+import { passwordResetEmail, sendEmail, verificationEmail } from "./email";
 import { type Bindings, webOrigins } from "./env";
 
 /**
@@ -29,6 +29,14 @@ export function createAuth(env: Bindings) {
         // o a la web con ?token=…/ ?error=INVALID_TOKEN.
         const ok = await sendEmail(env, { to: user.email, ...passwordResetEmail(url) });
         if (!ok) console.error(`[auth] reset email falló para ${user.id}`);
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url }) => {
+        const ok = await sendEmail(env, { to: user.email, ...verificationEmail(url) });
+        if (!ok) console.error(`[auth] verification email falló para ${user.id}`);
       },
     },
     // El freno de fuerza bruta lo hace el binding AUTH_LIMITER en index.ts

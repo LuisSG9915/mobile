@@ -38,6 +38,16 @@ const candidates = [
 
 const found = candidates.find(([, value]) => value);
 if (!found) {
+  const isOptional =
+    process.argv.includes("--optional") ||
+    process.env.SENTRY_OPTIONAL === "true" ||
+    process.env.SENTRY_OPTIONAL === "1";
+  if (isOptional) {
+    console.log(
+      "check-sentry: DSN no configurado (opcional en este entorno). Saltando verificación.",
+    );
+    process.exit(0);
+  }
   console.error(
     "check-sentry: no hay DSN. Define EXPO_PUBLIC_SENTRY_DSN en apps/mobile/.env " +
       "o SENTRY_DSN en apps/api/.dev.vars.",

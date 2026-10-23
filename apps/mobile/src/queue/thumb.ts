@@ -1,4 +1,4 @@
-import { MAX_THUMB_BYTES, THUMB_MAX_DIMENSION } from "@photos/shared";
+import { MAX_THUMB_BYTES, PREVIEW_MAX_DIMENSION, THUMB_MAX_DIMENSION } from "@photos/shared";
 import { Directory, File, Paths } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as VideoThumbnails from "expo-video-thumbnails";
@@ -77,4 +77,33 @@ export async function makeThumbAndHash(
   new File(last.uri).move(dest);
 
   return { uri: dest.uri, bytes: last.bytes, thumbhash };
+}
+
+export type PreviewResult = {
+  uri: string;
+  bytes: number;
+};
+
+/**
+ * Genera una vista previa intermedia WebP (~1600 px lado mayor) para el visor progresivo.
+ */
+export async function makePreview(
+  mediaType: "photo" | "video",
+  uri: string,
+): Promise<PreviewResult | null> {
+  try {
+    const frame = await frameUriFor(mediaType, uri);
+    const saved = await resizeTo(frame, PREVIEW_MAX_DIMENSION, SaveFormat.WEBP, 0.75);
+    const bytes = new File(saved.uri).size ?? 0;
+    if (bytes <= 0) return null;
+
+    const previewsDir = new Directory(Paths.cache, "previews");
+    if (!previewsDir.exists) previewsDir.create({ intermediates: true });
+    const dest = new File(previewsDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.webp`);
+    new File(saved.uri).move(dest);
+
+    return { uri: dest.uri, bytes };
+  } catch {
+    return null;
+  }
 }

@@ -171,6 +171,7 @@ describe("reset email delivery", () => {
     env.RESEND_API_KEY = "re_test_123";
 
     await signUp("resend@test.dev", PASSWORD);
+    sent.length = 0; // limpiar el correo de verificación enviado al registrarse
     const res = await requestReset("resend@test.dev");
     expect(res.status).toBe(200);
 

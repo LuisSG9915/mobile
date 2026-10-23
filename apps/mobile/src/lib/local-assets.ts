@@ -65,12 +65,11 @@ export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
 }
 
 /**
- * Lista los assets locales del dispositivo para la galería híbrida. A
- * diferencia del scanner (que encola), esto solo lee — y siempre incluye
- * videos: `includeVideos` es una preferencia de respaldo, no de la vista.
+ * Lista los assets locales del dispositivo para la galería híbrida. Paginación
+ * incremental sin tope artificial de 2.000 fotos (soporta bibliotecas completas).
  */
 export async function listLocalAssets(
-  limit = 2000,
+  limit = 20_000,
   albumId?: string | null,
   syncedAlbumIds?: string[] | null,
   onFirstPage?: (assets: LocalAsset[]) => void,
@@ -151,4 +150,54 @@ export async function listLocalAssets(
   }
 
   return out;
+}
+
+export type LocalAssetsPage = {
+  assets: LocalAsset[];
+  nextCursor: string | null;
+  hasNextPage: boolean;
+};
+
+/**
+ * Consulta paginada por cursor (`after`) para carga bajo demanda en scroll infinito.
+ */
+export async function listLocalAssetsPage(
+  first = 100,
+  after?: string,
+  albumId?: string | null,
+): Promise<LocalAssetsPage> {
+  const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
+  if (!perm.granted) return { assets: [], nextCursor: null, hasNextPage: false };
+
+  const page = await MediaLibrary.getAssetsAsync({
+    first,
+    after,
+    mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+    sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+    ...(albumId ? { album: albumId } : {}),
+  });
+
+  const assets: LocalAsset[] = page.assets.map((a) => {
+    const rawTime =
+      a.creationTime > 0 ? a.creationTime : (a.modificationTime ?? 0) > 0 ? a.modificationTime : 0;
+    const creationTime =
+      rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableTimestampFromId(a.id);
+    const isVideo = a.mediaType === MediaLibrary.MediaType.video;
+    return {
+      id: a.id,
+      uri: a.uri,
+      mediaType: isVideo ? "video" : "photo",
+      creationTime,
+      width: a.width,
+      height: a.height,
+      durationMs: isVideo ? Math.round(a.duration * 1000) : null,
+      albumId: a.albumId ?? albumId ?? null,
+    };
+  });
+
+  return {
+    assets,
+    nextCursor: page.hasNextPage ? page.endCursor : null,
+    hasNextPage: page.hasNextPage,
+  };
 }

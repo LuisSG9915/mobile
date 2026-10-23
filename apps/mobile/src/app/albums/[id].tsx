@@ -1,5 +1,5 @@
 import type { TimelineItem } from "@photos/shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -49,9 +49,11 @@ export default function AlbumDetailScreen() {
   const [addPhotosModalVisible, setAddPhotosModalVisible] = useState(false);
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([]);
 
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ["album", albumId],
-    queryFn: () => api.albumDetail(albumId),
+    queryFn: ({ pageParam }) => api.albumDetail(albumId, { cursor: pageParam, limit: 60 }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: Boolean(albumId),
   });
 
@@ -61,7 +63,7 @@ export default function AlbumDetailScreen() {
     enabled: addPhotosModalVisible,
   });
 
-  const album = query.data;
+  const album = query.data?.pages[0];
 
   // Mutación: editar título
   const updateMut = useMutation({
@@ -88,7 +90,8 @@ export default function AlbumDetailScreen() {
 
   // Mutación: compartir álbum
   const shareMut = useMutation({
-    mutationFn: () => api.shareAlbum(albumId),
+    mutationFn: (expiresIn?: "24h" | "7d" | "30d" | "never") =>
+      api.shareAlbum(albumId, expiresIn ? { expiresIn } : undefined),
     onSuccess: async (data) => {
       void qc.invalidateQueries({ queryKey: ["album", albumId] });
       void qc.invalidateQueries({ queryKey: ["albums"] });
@@ -115,6 +118,20 @@ export default function AlbumDetailScreen() {
     },
     onError: (err: Error) => toast.error(err.message || t.auth.genericError),
   });
+
+  const handleShareAlbum = () => {
+    if (Platform.OS === "web") {
+      shareMut.mutate("7d");
+      return;
+    }
+    Alert.alert("Compartir álbum", "Elige la caducidad del enlace público:", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "24 horas", onPress: () => shareMut.mutate("24h") },
+      { text: "7 días (recomendado)", onPress: () => shareMut.mutate("7d") },
+      { text: "30 días", onPress: () => shareMut.mutate("30d") },
+      { text: "Sin caducidad", onPress: () => shareMut.mutate("never") },
+    ]);
+  };
 
   // Mutación: revocar compartir
   const unshareMut = useMutation({
@@ -196,7 +213,7 @@ export default function AlbumDetailScreen() {
   const gap = 3;
   const itemSize = (width - gap * (numColumns - 1)) / numColumns;
 
-  const items = album?.items ?? [];
+  const items = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
   const existingIds = new Set(items.map((i) => i.id));
   const availableToAdd = (timelineQuery.data?.items ?? []).filter((m) => !existingIds.has(m.id));
 
@@ -239,7 +256,7 @@ export default function AlbumDetailScreen() {
           </Pressable>
 
           <Pressable
-            onPress={() => shareMut.mutate()}
+            onPress={handleShareAlbum}
             disabled={shareMut.isPending}
             hitSlop={8}
             className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 active:opacity-70"
@@ -278,6 +295,10 @@ export default function AlbumDetailScreen() {
           keyExtractor={(item) => item.id}
           numColumns={numColumns}
           key={numColumns}
+          onEndReached={() => {
+            if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
+          }}
+          onEndReachedThreshold={0.5}
           refreshControl={
             <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} />
           }

@@ -7,29 +7,35 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
+import { invalidateMediaLifecycleQueries } from "../lib/query-client";
 import { Button, EmptyState } from "../ui";
 
 export default function TrashScreen() {
   const qc = useQueryClient();
-  const query = useQuery({ queryKey: ["trash"], queryFn: api.trash });
+  const query = useQuery({ queryKey: ["trash"], queryFn: () => api.trash() });
   const restore = useMutation({
     mutationFn: api.restoreMedia,
     onSuccess: () => {
       toast.success(t.trash.restored);
-      void qc.invalidateQueries({ queryKey: ["trash"] });
-      void qc.invalidateQueries({ queryKey: ["timeline"] });
-      void qc.invalidateQueries({ queryKey: ["stats"] });
+      void invalidateMediaLifecycleQueries(qc);
     },
   });
 
   const emptyTrashMut = useMutation({
-    mutationFn: api.emptyTrash,
+    mutationFn: async () => {
+      let totalDeleted = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const res = await api.emptyTrash();
+        totalDeleted += res.deletedCount;
+        hasMore = res.hasMore ?? false;
+        if (res.deletedCount === 0) break;
+      }
+      return { ok: true as const, deletedCount: totalDeleted };
+    },
     onSuccess: () => {
       toast.success(t.trash.emptySuccess);
-      void qc.invalidateQueries({ queryKey: ["trash"] });
-      void qc.invalidateQueries({ queryKey: ["timeline"] });
-      void qc.invalidateQueries({ queryKey: ["stats"] });
-      void qc.invalidateQueries({ queryKey: ["user-storage"] });
+      void invalidateMediaLifecycleQueries(qc);
     },
     onError: (err: Error) => toast.error(err.message || t.auth.genericError),
   });

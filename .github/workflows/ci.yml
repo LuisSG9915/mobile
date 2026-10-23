@@ -1,14 +1,18 @@
-name: CI
+name: CI/CD
 
 on:
   push:
-    branches: [master]
+    branches: [master, main]
   pull_request:
-    branches: [master]
+    branches: [master, main]
+  schedule:
+    # Nightly E2E run diario a las 04:00 UTC
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -43,3 +47,102 @@ jobs:
 
       - name: Pipeline Selftest
         run: pnpm test:pipeline
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    needs: [verify]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium & OS deps
+        run: pnpm --filter @photos/mobile exec playwright install chromium --with-deps
+
+      - name: Apply Local D1 Migrations
+        run: pnpm --filter @photos/api db:migrate:local
+
+      - name: Run Playwright E2E Suite
+        env:
+          CI: "1"
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID || '461d52ab67ae2435c8dde9a0887f27cb' }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: photos-media-dev
+          E2E_HTML_REPORT: e2e/.artifacts/playwright-report
+        run: pnpm --filter @photos/mobile test:e2e
+
+      - name: Upload E2E Traces & Report Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-artifacts
+          path: |
+            apps/mobile/e2e/.artifacts
+          retention-days: 14
+
+  deploy:
+    name: CD Deploy (API + Web) & Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [verify, e2e]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || '461d52ab67ae2435c8dde9a0887f27cb' }}
+      EXPO_PUBLIC_API_URL: https://photos-api.luis-sg9915.workers.dev
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply Remote D1 Migrations
+        run: pnpm --filter @photos/api db:migrate:remote
+
+      - name: Deploy API Worker
+        run: pnpm --filter @photos/api deploy
+
+      - name: Deploy Web Worker
+        run: pnpm --filter @photos/mobile deploy:web
+
+      - name: Observability Healthcheck (Sentry)
+        run: node scripts/check-sentry.mjs --optional
+
+      - name: Install Playwright Chromium for Smoke Test
+        run: pnpm --filter @photos/mobile exec playwright install chromium --with-deps
+
+      - name: Production Smoke Tests (Upload & Presigned R2)
+        env:
+          PROD_WEB_URL: https://photos-web.luis-sg9915.workers.dev
+          SMOKE_OPTIONAL: "1"
+        run: node apps/mobile/e2e/prod-smoke.mjs --optional
+
+      - name: Production Integrity Audit (D1 / R2)
+        run: node scripts/audit-prod.mjs

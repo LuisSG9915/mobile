@@ -229,6 +229,9 @@ export default function SharedAlbumScreen() {
                 month: "long",
                 day: "numeric",
               })}
+              {album.expiresAt
+                ? ` · Expira el ${new Date(album.expiresAt).toLocaleDateString("es")}`
+                : ""}
             </Text>
           </View>
 

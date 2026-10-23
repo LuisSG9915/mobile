@@ -17,10 +17,10 @@
 
 Las especificaciones detalladas viven en `docs/fases/`; el tablero maestro con estado y commit es `docs/PLAN_GENERAL.md`.
 
-- [ ] **Fase 1: Esquema de Datos Optimizado, Deduplicación y Cuota en D1** — `docs/fases/01_d1_dedup_cuotas.md`
-- [ ] **Fase 2: Optimización de R2, Streaming y Descarga de Archivos** — `docs/fases/02_r2_descargas_cache.md`
-- [ ] **Fase 3: Pausa Persistente (sin auto-resume) y Anillo de Sincronización** — `docs/fases/03_pausa_y_progreso_sync.md`
-- [ ] **Fase 4: Liberar Espacio y Purga de Papelera a 30 días** — `docs/fases/04_liberar_espacio_papelera.md`
-- [ ] **Fase 5: Favoritos, Chips de Filtro y Salto Temporal** — `docs/fases/05_filtros_favoritos_busqueda.md`
-- [ ] **Fase 6: Panel Admin de Almacenamiento R2 (luis.sg9915@gmail.com)** — `docs/fases/06_admin_r2_storage.md`
-- [ ] **Fase 7: Gestos (Zoom, Scrubber, Swipe) y Tests Finales** — `docs/fases/07_ux_gestos_pipeline.md`
+- [x] **Fase 1: Esquema de Datos Optimizado, Deduplicación y Cuota en D1** — `docs/fases/01_d1_dedup_cuotas.md` (Commit: dcdec0f)
+- [x] **Fase 2: Optimización de R2, Streaming y Descarga de Archivos** — `docs/fases/02_r2_descargas_cache.md` (Commit: 9befaf6)
+- [x] **Fase 3: Pausa Persistente (sin auto-resume) y Anillo de Sincronización** — `docs/fases/03_pausa_y_progreso_sync.md` (Commit: 3fa2eba)
+- [x] **Fase 4: Liberar Espacio y Purga de Papelera a 30 días** — `docs/fases/04_liberar_espacio_papelera.md` (Commit: bd67afa)
+- [x] **Fase 5: Favoritos, Chips de Filtro y Salto Temporal** — `docs/fases/05_filtros_favoritos_busqueda.md` (Commit: 6ed25ed)
+- [x] **Fase 6: Panel Admin de Almacenamiento R2 (luis.sg9915@gmail.com)** — `docs/fases/06_admin_r2_storage.md` (Commit: 423f7fe)
+- [x] **Fase 7: Gestos (Zoom, Scrubber, Swipe) y Tests Finales** — `docs/fases/07_ux_gestos_pipeline.md` (Commit: c171624)

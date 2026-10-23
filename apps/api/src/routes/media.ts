@@ -13,11 +13,12 @@ import {
   trashResponseSchema,
   updateMediaSchema,
 } from "@photos/shared";
-import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { tagMediaItem } from "../lib/ai";
+import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { presignGet, presignGetDownload } from "../lib/s3";
 import { removeStorageUsage } from "../lib/storage-stats";
 
@@ -178,11 +179,18 @@ const trashRoute = createRoute({
   summary: "Elementos en la papelera",
   description:
     "Elementos con borrado suave, ordenados por fecha de borrado. Se purgan definitivamente a los 30 días.",
+  request: {
+    query: z.object({
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(100),
+    }),
+  },
   responses: {
     200: {
       content: { "application/json": { schema: trashResponseSchema } },
       description: "Elementos en papelera",
     },
+    400: err("Cursor inválido"),
     401: err("Sin sesión"),
   },
 });
@@ -193,11 +201,11 @@ const emptyTrashRoute = createRoute({
   tags: ["media"],
   summary: "Vaciar la papelera (purga permanente inmediata)",
   description:
-    "Elimina definitivamente todos los elementos en la papelera del usuario, borrando sus objetos de R2 y liberando su cuota de almacenamiento.",
+    "Elimina definitivamente elementos en la papelera del usuario en lotes acotados (máx. 250), borrando sus objetos de R2 y liberando su cuota de almacenamiento.",
   responses: {
     200: {
       content: { "application/json": { schema: emptyTrashResponseSchema } },
-      description: "Papelera vaciada",
+      description: "Lote de papelera vaciado",
     },
     401: err("Sin sesión"),
   },
@@ -227,9 +235,10 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
     if (row?.status !== "ready") {
       return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
     }
-    const [thumbUrl, originalUrl] = await Promise.all([
+    const [thumbUrl, originalUrl, previewUrl] = await Promise.all([
       presignGet(c.env, row.r2KeyThumb),
       presignGet(c.env, row.r2KeyOriginal),
+      row.r2KeyPreview ? presignGet(c.env, row.r2KeyPreview) : Promise.resolve(null),
     ]);
     return c.json(
       {
@@ -246,6 +255,7 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         isDocument: Boolean(row.isDocument),
         thumbhash: row.thumbhash,
         thumbUrl,
+        previewUrl,
         mimeType: row.mimeType,
         ext: row.ext,
         fileSize: row.fileSize,
@@ -303,9 +313,10 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
     }
 
-    const [thumbUrl, originalUrl] = await Promise.all([
+    const [thumbUrl, originalUrl, previewUrl] = await Promise.all([
       presignGet(c.env, updatedRow.r2KeyThumb),
       presignGet(c.env, updatedRow.r2KeyOriginal),
+      updatedRow.r2KeyPreview ? presignGet(c.env, updatedRow.r2KeyPreview) : Promise.resolve(null),
     ]);
 
     return c.json(
@@ -323,6 +334,7 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         isDocument: Boolean(updatedRow.isDocument),
         thumbhash: updatedRow.thumbhash,
         thumbUrl,
+        previewUrl,
         mimeType: updatedRow.mimeType,
         ext: updatedRow.ext,
         fileSize: updatedRow.fileSize,
@@ -453,15 +465,50 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
   })
   .openapi(trashRoute, async (c) => {
     const user = c.get("user");
+    const { cursor, limit } = c.req.valid("query");
+
+    let cur: { t: number; id: string } | null = null;
+    if (cursor) {
+      cur = decodeCursor(cursor);
+      if (!cur) {
+        return c.json(
+          { error: "invalid_cursor", message: "El cursor de paginación es inválido." },
+          400,
+        );
+      }
+    }
+
     const db = getDb(c.env.DB);
+    const conditions = [
+      eq(media.userId, user.id),
+      eq(media.status, "ready"),
+      isNotNull(media.deletedAt),
+    ];
+
+    if (cur) {
+      const cond = or(
+        lt(media.deletedAt, cur.t),
+        and(eq(media.deletedAt, cur.t), lt(media.id, cur.id)),
+      );
+      if (cond) conditions.push(cond);
+    }
+
     const rows = await db
       .select()
       .from(media)
-      .where(and(eq(media.userId, user.id), eq(media.status, "ready"), isNotNull(media.deletedAt)))
-      .orderBy(desc(media.deletedAt))
-      .limit(500);
+      .where(and(...conditions))
+      .orderBy(desc(media.deletedAt), desc(media.id))
+      .limit(limit + 1);
+
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    const nextCursor =
+      rows.length > limit && last && last.deletedAt != null
+        ? encodeCursor({ t: last.deletedAt, id: last.id })
+        : null;
+
     const items = await Promise.all(
-      rows.map(async (m) => ({
+      page.map(async (m) => ({
         id: m.id,
         sha256: m.sha256,
         mediaType: m.mediaType,
@@ -478,37 +525,60 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         deletedAt: m.deletedAt ?? 0,
       })),
     );
-    return c.json({ items, nextCursor: null }, 200);
+    return c.json({ items, nextCursor }, 200);
   })
   .openapi(emptyTrashRoute, async (c) => {
     const user = c.get("user");
     const db = getDb(c.env.DB);
+    const BATCH_SIZE = 250;
+
     const trashItems = await db
       .select()
       .from(media)
-      .where(and(eq(media.userId, user.id), isNotNull(media.deletedAt)));
+      .where(and(eq(media.userId, user.id), isNotNull(media.deletedAt)))
+      .limit(BATCH_SIZE);
 
     if (trashItems.length === 0) {
-      return c.json({ ok: true as const, deletedCount: 0 }, 200);
+      return c.json({ ok: true as const, deletedCount: 0, remainingCount: 0, hasMore: false }, 200);
     }
 
     const keys = trashItems.flatMap((m) => [m.r2KeyThumb, m.r2KeyOriginal]);
-    for (let i = 0; i < keys.length; i += 1000) {
-      await c.env.BUCKET.delete(keys.slice(i, i + 1000));
+    if (keys.length > 0) {
+      await c.env.BUCKET.delete(keys);
     }
 
     const ids = trashItems.map((m) => m.id);
-    for (let i = 0; i < ids.length; i += 500) {
-      await db.delete(media).where(inArray(media.id, ids.slice(i, i + 500)));
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      await db.delete(media).where(inArray(media.id, chunk));
     }
 
+    let bytesFreed = 0;
     for (const m of trashItems) {
       if (m.status === "ready") {
-        await removeStorageUsage(db, m.userId, m.fileSize + m.thumbSize);
+        bytesFreed += m.fileSize + m.thumbSize;
       }
     }
+    if (bytesFreed > 0) {
+      await removeStorageUsage(db, user.id, bytesFreed);
+    }
 
-    return c.json({ ok: true as const, deletedCount: trashItems.length }, 200);
+    const countRow = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(media)
+      .where(and(eq(media.userId, user.id), isNotNull(media.deletedAt)))
+      .get();
+    const remainingCount = countRow?.count ?? 0;
+
+    return c.json(
+      {
+        ok: true as const,
+        deletedCount: trashItems.length,
+        remainingCount,
+        hasMore: remainingCount > 0,
+      },
+      200,
+    );
   })
   .openapi(statsRoute, async (c) => {
     const user = c.get("user");

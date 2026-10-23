@@ -43,6 +43,7 @@ function localScopeKey(albumId: string | null | undefined, synced: string[] | nu
 export function useHybridGallery(
   filter: TimelineFilter = "all",
   albumFilter: AlbumFilter | null = null,
+  before?: string,
 ) {
   const tick = useQueueEvents((s) => s.tick);
   // Solo se re-lista MediaLibrary al montar, al refrescar a mano y cuando la
@@ -73,8 +74,8 @@ export function useHybridGallery(
     };
     try {
       // Primera página (60) en cuanto MediaLibrary la entrega; el resto sigue
-      // paginando en segundo plano sin bloquear el primer render.
-      const assets = await listLocalAssets(2000, localAlbumId, syncedAlbumIds, commit);
+      // paginando en segundo plano sin bloquear el primer render (sin tope fijo de 2.000).
+      const assets = await listLocalAssets(20_000, localAlbumId, syncedAlbumIds, commit);
       commit(assets);
     } catch {
       // Sin permisos o error de MediaLibrary: galería solo remota/cola.
@@ -85,7 +86,7 @@ export function useHybridGallery(
     void refreshLocal();
   }, [refreshLocal, libTick]);
 
-  const query = useTimeline(filter);
+  const query = useTimeline(filter, before);
 
   // Consulta de fotos si hay un álbum remoto activo
   const remoteAlbumQuery = useQuery({

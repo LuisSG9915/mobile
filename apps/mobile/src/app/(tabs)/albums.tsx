@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import {
@@ -52,10 +52,12 @@ export default function AlbumsScreen() {
   const syncNoAlbums = useSettings((s) => s.syncNoAlbums);
   const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
 
-  // Consulta de álbumes en la nube
-  const cloudQuery = useQuery({
+  // Consulta de álbumes en la nube con paginación por cursor
+  const cloudQuery = useInfiniteQuery({
     queryKey: ["albums"],
-    queryFn: api.albums,
+    queryFn: ({ pageParam }) => api.albums({ cursor: pageParam, limit: 50 }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 
   // Consulta de álbumes locales (solo nativo)
@@ -79,7 +81,10 @@ export default function AlbumsScreen() {
     },
   });
 
-  const cloudAlbums = cloudQuery.data?.albums ?? [];
+  const cloudAlbums = useMemo(
+    () => cloudQuery.data?.pages.flatMap((p) => p.albums) ?? [],
+    [cloudQuery.data],
+  );
   const localAlbums = localQuery.data ?? [];
   const allLocalIds = useMemo(() => localAlbums.map((a) => a.id), [localAlbums]);
 
@@ -318,6 +323,17 @@ export default function AlbumsScreen() {
                 ))}
               </View>
             )}
+            {cloudQuery.hasNextPage ? (
+              <View className="items-center mt-2">
+                <Button
+                  label={cloudQuery.isFetchingNextPage ? "Cargando…" : "Cargar más álbumes"}
+                  variant="secondary"
+                  size="sm"
+                  loading={cloudQuery.isFetchingNextPage}
+                  onPress={() => void cloudQuery.fetchNextPage()}
+                />
+              </View>
+            ) : null}
           </View>
         ) : null}
 

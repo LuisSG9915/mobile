@@ -12,7 +12,7 @@ Si D1 se pierde, las fotos siguen existiendo en R2 pero la app no puede mostrarl
 | Frecuencia | Diario, 03:30 UTC (después del cron de limpieza de las 03:00) |
 | Destino | `r2://photos-media/backups/d1/d1-<timestamp>.sql` |
 | Integridad | `.sha256` junto a cada export |
-| Validación | El workflow falla si el export está vacío o no contiene `CREATE TABLE` |
+| Validación | Dry-run en SQLite efímero (`sqlite3 :memory: < backup.sql`), `PRAGMA integrity_check;` y conteo de tablas; falla si está vacío o no contiene `CREATE TABLE` |
 | Retención | 90 días vía lifecycle rule (ver abajo) |
 
 El respaldo incluye esquema y datos (`wrangler d1 export` por defecto). No incluye

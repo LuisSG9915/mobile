@@ -201,6 +201,123 @@ describe("media", () => {
     expect((await j(otherTrash)).items.length).toBe(1);
   });
 
+  it("GET /v1/trash pagina correctamente con cursor (deletedAt, id)", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+    const now = Date.now();
+    // Insertar 5 elementos en papelera con deletedAt distintos
+    for (let i = 0; i < 5; i++) {
+      const s = sha(`trashpage${i}`);
+      await db.insert(media).values({
+        id: crypto.randomUUID(),
+        userId,
+        sha256: s,
+        mediaType: "photo",
+        mimeType: "image/jpeg",
+        ext: "jpg",
+        takenAt: now,
+        width: 4000,
+        height: 3000,
+        thumbhash: "AQAAAA==",
+        r2KeyOriginal: `users/${userId}/originals/${s}.jpg`,
+        r2KeyThumb: `users/${userId}/thumbs/${s}.webp`,
+        fileSize: 10_000,
+        thumbSize: 1_000,
+        status: "ready",
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: now - (5 - i) * 1000, // orden descendente de deletedAt
+      });
+    }
+
+    // Página 1 (límite 2)
+    const res1 = await SELF.fetch("http://localhost/v1/trash?limit=2", authed(cookie));
+    expect(res1.status).toBe(200);
+    const json1 = await j(res1);
+    expect(json1.items.length).toBe(2);
+    expect(json1.nextCursor).toBeTruthy();
+
+    // Página 2 (límite 2)
+    const res2 = await SELF.fetch(
+      `http://localhost/v1/trash?limit=2&cursor=${encodeURIComponent(json1.nextCursor)}`,
+      authed(cookie),
+    );
+    expect(res2.status).toBe(200);
+    const json2 = await j(res2);
+    expect(json2.items.length).toBe(2);
+    expect(json2.nextCursor).toBeTruthy();
+
+    // Página 3 (límite 2, solo queda 1)
+    const res3 = await SELF.fetch(
+      `http://localhost/v1/trash?limit=2&cursor=${encodeURIComponent(json2.nextCursor)}`,
+      authed(cookie),
+    );
+    expect(res3.status).toBe(200);
+    const json3 = await j(res3);
+    expect(json3.items.length).toBe(1);
+    expect(json3.nextCursor).toBeNull();
+  });
+
+  it("POST /v1/trash/empty vacía en lotes de 250 más de 1.000 ítems de papelera", async () => {
+    const { cookie, userId } = await createUser();
+    const now = Date.now();
+    const TOTAL_ITEMS = 1050;
+
+    // Insertar 1.050 elementos usando prepared statements con env.DB.batch
+    const stmts: D1PreparedStatement[] = [];
+    for (let i = 0; i < TOTAL_ITEMS; i++) {
+      const s = sha(`b${i.toString().padStart(6, "0")}`);
+      const id = crypto.randomUUID();
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO media (id, user_id, sha256, media_type, mime_type, ext, taken_at, date_group, width, height, thumbhash, r2_key_original, r2_key_thumb, file_size, thumb_size, status, created_at, updated_at, deleted_at)
+           VALUES (?, ?, ?, 'photo', 'image/jpeg', 'jpg', ?, '2026-10-22', 4000, 3000, 'AQAAAA==', ?, ?, 10000, 1000, 'ready', ?, ?, ?)`,
+        ).bind(
+          id,
+          userId,
+          s,
+          now,
+          `users/${userId}/originals/${s}.jpg`,
+          `users/${userId}/thumbs/${s}.webp`,
+          now,
+          now,
+          now - i * 100,
+        ),
+      );
+    }
+
+    for (let b = 0; b < stmts.length; b += 100) {
+      await env.DB.batch(stmts.slice(b, b + 100));
+    }
+
+    let totalDeleted = 0;
+    let calls = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      calls++;
+      const res = await SELF.fetch("http://localhost/v1/trash/empty", {
+        method: "POST",
+        headers: { cookie },
+      });
+      expect(res.status).toBe(200);
+      const json = await j(res);
+      expect(json.ok).toBe(true);
+      totalDeleted += json.deletedCount;
+      hasMore = json.hasMore ?? false;
+      if (hasMore) {
+        expect(json.deletedCount).toBe(250);
+      }
+    }
+
+    expect(totalDeleted).toBe(TOTAL_ITEMS);
+    expect(calls).toBe(5); // 250 * 4 + 50 = 1050
+
+    // Verificar que la papelera quedó completamente vacía
+    const trash = await SELF.fetch("http://localhost/v1/trash", authed(cookie));
+    expect((await j(trash)).items.length).toBe(0);
+  });
+
   it("detalle expone metadatos fotográficos EXIF", async () => {
     const { cookie, userId } = await createUser();
     const db = getDb(env.DB);

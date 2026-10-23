@@ -26,7 +26,8 @@ const getSharedAlbumRoute = createRoute({
       content: { "application/json": { schema: publicAlbumResponseSchema } },
       description: "Contenido del álbum compartido",
     },
-    404: err("Álbum compartido no encontrado o revocado"),
+    404: err("Álbum compartido no encontrado"),
+    410: err("Enlace caducado o revocado"),
   },
 });
 
@@ -36,13 +37,24 @@ export const sharedApp = new OpenAPIHono<AppEnv>().openapi(getSharedAlbumRoute, 
 
   const a = await db.select().from(album).where(eq(album.shareToken, token)).get();
 
-  if (!a) {
+  if (!a?.shareToken) {
     return c.json(
       {
         error: "not_found",
-        message: "El álbum compartido no existe o el enlace ha sido revocado.",
+        message: "El álbum compartido no existe o la dirección no es válida.",
       },
       404,
+    );
+  }
+
+  const now = Date.now();
+  if (a.shareRevokedAt != null || (a.shareExpiresAt != null && a.shareExpiresAt <= now)) {
+    return c.json(
+      {
+        error: "expired",
+        message: "Este enlace compartido ha caducado o ha sido revocado.",
+      },
+      410,
     );
   }
 
@@ -73,6 +85,7 @@ export const sharedApp = new OpenAPIHono<AppEnv>().openapi(getSharedAlbumRoute, 
       title: a.title,
       mediaCount: items.length,
       createdAt: a.createdAt,
+      expiresAt: a.shareExpiresAt ?? null,
       items,
     },
     200,

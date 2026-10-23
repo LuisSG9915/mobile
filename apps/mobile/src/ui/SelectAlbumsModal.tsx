@@ -22,7 +22,7 @@ export function SelectAlbumsModal({ visible, activeFilter, onSelect, onClose }: 
   // Álbumes en la nube
   const cloudAlbumsQuery = useQuery({
     queryKey: ["albums"],
-    queryFn: api.albums,
+    queryFn: () => api.albums(),
     enabled: visible,
   });
 

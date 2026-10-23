@@ -346,3 +346,63 @@ test("check-web-env: build:web y deploy:web pasan por el gate", () => {
     );
   }
 });
+
+// ---------------------------------------------------- check-sentry & verify-native-checklist
+
+const CHECK_SENTRY = path.join(ROOT, "scripts/check-sentry.mjs");
+const VERIFY_CHECKLIST = path.join(ROOT, "scripts/verify-native-checklist.mjs");
+
+test("check-sentry: con --optional y sin DSN sale con 0", () => {
+  const env = { ...process.env };
+  delete env.EXPO_PUBLIC_SENTRY_DSN;
+  delete env.SENTRY_DSN;
+  const res = spawnSync(process.execPath, [CHECK_SENTRY, "--optional"], { env, encoding: "utf8" });
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /opcional/);
+});
+
+test("verify-native-checklist: --generate crea archivo con tag y casos", () => {
+  const tDir = tmp();
+  try {
+    const out = path.join(tDir, "release-checklist.json");
+    const template = path.join(ROOT, "docs/testing/native-checklist.template.json");
+    const res = spawnSync(
+      process.execPath,
+      [VERIFY_CHECKLIST, template, "--generate", out, "--tag", "v1.2.3"],
+      { encoding: "utf8" },
+    );
+    assert.equal(res.status, 0);
+    const parsed = JSON.parse(readFileSync(out, "utf8"));
+    assert.ok(Array.isArray(parsed));
+    assert.ok(parsed.length > 0);
+    assert.equal(parsed[0].tag, "v1.2.3");
+  } finally {
+    rmSync(tDir, { recursive: true, force: true });
+  }
+});
+
+test("verify-native-checklist: --strict falla si hay casos pendientes y pasa si todos ok", () => {
+  const tDir = tmp();
+  try {
+    const pendingFile = path.join(tDir, "pending.json");
+    writeJson(pendingFile, "", [{ id: "N-01", status: "pendiente" }]);
+    const resPending = spawnSync(process.execPath, [VERIFY_CHECKLIST, pendingFile, "--strict"], {
+      encoding: "utf8",
+    });
+    assert.equal(resPending.status, 1);
+    assert.match(resPending.stderr, /Validación estricta fallida/);
+
+    const okFile = path.join(tDir, "ok.json");
+    writeJson(okFile, "", [
+      { id: "N-01", status: "ok" },
+      { id: "N-02", status: "ok" },
+    ]);
+    const resOk = spawnSync(process.execPath, [VERIFY_CHECKLIST, okFile, "--strict"], {
+      encoding: "utf8",
+    });
+    assert.equal(resOk.status, 0);
+    assert.match(resOk.stdout, /verificados exitosamente/);
+  } finally {
+    rmSync(tDir, { recursive: true, force: true });
+  }
+});

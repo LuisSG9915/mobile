@@ -1,4 +1,4 @@
-import { MIME_BY_EXT } from "@photos/shared";
+import { MIME_BY_EXT, MULTIPART_THRESHOLD_BYTES } from "@photos/shared";
 import { ApiError, api } from "../api/client";
 import { useQueueEvents } from "../lib/events";
 import { queryClient } from "../lib/query-client";
@@ -6,8 +6,8 @@ import { useItemProgress } from "../lib/store";
 import { getFile } from "../web/files";
 import { sha256File } from "../web/hash";
 import { getActiveContext } from "../web/queue-store";
-import { makeThumb } from "../web/thumb";
-import { uploadBlob } from "../web/upload";
+import { makeThumb, makeWebPreview } from "../web/thumb";
+import { uploadBlob, uploadPartBlob } from "../web/upload";
 import {
   bumpAttempt,
   finishItem,
@@ -130,8 +130,126 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   throwIfAborted(signal);
   if (!thumb.thumbhash) throw new Error("No se pudo generar la huella de la miniatura.");
 
+  const preview = await makeWebPreview(mediaType, file);
+  throwIfAborted(signal);
+
   await setState(item.asset_id, "init", { sha256 });
   emitStructure();
+
+  // Subida multipart para archivos grandes (> 20 MB)
+  if (file.size > MULTIPART_THRESHOLD_BYTES) {
+    const init = await api.multipartInit(
+      {
+        sha256,
+        mediaType,
+        mimeType,
+        ext,
+        fileSize: file.size,
+        thumbSize: thumb.bytes,
+        previewSize: preview?.bytes,
+        takenAt: item.created_at,
+        width: thumb.width,
+        height: thumb.height,
+        durationMs: null,
+        thumbhash: thumb.thumbhash,
+      },
+      { signal },
+    );
+    throwIfAborted(signal);
+
+    if (init.status === "duplicate") {
+      await finishItem(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: file.size });
+      useItemProgress.getState().clearItemProgress(item.asset_id);
+      refreshRemoteData();
+      emitStructure();
+      return;
+    }
+
+    await setState(item.asset_id, "uploading_thumb", {
+      remote_id: init.id,
+      upload_id: init.uploadId,
+    });
+    emitStructure();
+    await uploadBlob(init.thumb, thumb.blob, undefined, signal);
+    throwIfAborted(signal);
+
+    if (init.preview && preview) {
+      await uploadBlob(init.preview, preview.blob, undefined, signal);
+      throwIfAborted(signal);
+    }
+
+    await setState(item.asset_id, "uploading_original");
+    emitStructure();
+
+    // Partes ya subidas en intentos previos (reanudación)
+    let completedParts: { partNumber: number; etag: string }[] = [];
+    try {
+      if (item.parts) completedParts = JSON.parse(item.parts);
+    } catch {}
+
+    const completedMap = new Map(completedParts.map((p) => [p.partNumber, p.etag]));
+    const missingPartNumbers: number[] = [];
+    for (let p = 1; p <= init.totalParts; p++) {
+      if (!completedMap.has(p)) missingPartNumbers.push(p);
+    }
+
+    if (missingPartNumbers.length > 0) {
+      const { parts: presignedParts } = await api.multipartPresignParts(
+        {
+          id: init.id,
+          uploadId: init.uploadId,
+          partNumbers: missingPartNumbers,
+        },
+        { signal },
+      );
+      throwIfAborted(signal);
+
+      const partSize = init.partSize;
+      let bytesSent = completedParts.length * partSize;
+
+      for (const part of presignedParts) {
+        throwIfAborted(signal);
+        const start = (part.partNumber - 1) * partSize;
+        const end = Math.min(file.size, start + partSize);
+        const slice = file.slice(start, end);
+
+        const etag = await uploadPartBlob(
+          part.url,
+          slice,
+          (loaded) => {
+            publishByteTick(item.asset_id, bytesSent + loaded, file.size);
+          },
+          signal,
+        );
+
+        bytesSent += end - start;
+        completedParts.push({ partNumber: part.partNumber, etag });
+        await setState(item.asset_id, "uploading_original", {
+          parts: JSON.stringify(completedParts),
+          bytes_sent: bytesSent,
+        });
+        publishByteTick(item.asset_id, bytesSent, file.size);
+      }
+    }
+
+    await setState(item.asset_id, "completing", { bytes_sent: file.size });
+    emitStructure();
+    await api.multipartComplete(
+      {
+        id: init.id,
+        uploadId: init.uploadId,
+        parts: completedParts,
+      },
+      { signal },
+    );
+    await finishItem(item.asset_id, "done", { remote_id: init.id, bytes_sent: file.size });
+    useItemProgress.getState().clearItemProgress(item.asset_id);
+    refreshRemoteData();
+    emitStructure();
+    return;
+  }
+
+  // Subida estándar para archivos ≤ 20 MB
   const init = await api.initUpload(
     {
       sha256,
@@ -140,6 +258,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
       ext,
       fileSize: file.size,
       thumbSize: thumb.bytes,
+      previewSize: preview?.bytes,
       takenAt: item.created_at,
       width: thumb.width,
       height: thumb.height,
@@ -163,6 +282,11 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
   emitStructure();
   await uploadBlob(init.thumb, thumb.blob, undefined, signal);
   throwIfAborted(signal);
+
+  if (init.preview && preview) {
+    await uploadBlob(init.preview, preview.blob, undefined, signal);
+    throwIfAborted(signal);
+  }
 
   await setState(item.asset_id, "uploading_original");
   emitStructure();
@@ -354,11 +478,15 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
             }
             try {
               // 4xx definitivos no arreglan solos reintentando: failed directo.
-              // 413 quota_exceeded además pausa el respaldo para no quemar
-              // intentos en el resto de la cola — el usuario libera y reanuda.
+              // 413 file_too_large: falla únicamente ese ítem y la cola continúa.
+              // 413 quota_exceeded: además pausa el respaldo global para no quemar intentos.
               if (e instanceof ApiError && e.status === 413) {
-                await setState(item.asset_id, "failed", { last_error: message });
-                setBackupPaused(true);
+                if (e.code === "file_too_large") {
+                  await setState(item.asset_id, "failed", { last_error: "file_too_large" });
+                } else {
+                  await setState(item.asset_id, "failed", { last_error: message });
+                  setBackupPaused(true);
+                }
               } else if (e instanceof ApiError && e.status === 400) {
                 await setState(item.asset_id, "failed", { last_error: message });
               } else {

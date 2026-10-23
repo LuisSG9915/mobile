@@ -71,3 +71,63 @@ export function uploadBlob(
     xhr.send(blob);
   });
 }
+
+/**
+ * PUT de una parte individual a su URL prefirmada de S3/R2 multipart.
+ * Devuelve el ETag recibido en los encabezados de respuesta de R2.
+ */
+export function uploadPartBlob(
+  url: string,
+  blob: Blob,
+  onProgress?: (sent: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(CANCELLED_MSG));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    let lastProgressAt = Date.now();
+    let stalled = false;
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastProgressAt > STALL_MS) {
+        stalled = true;
+        xhr.abort();
+      }
+    }, WATCHDOG_TICK_MS);
+    const onAbortSignal = () => xhr.abort();
+    const stopListening = () => {
+      clearInterval(watchdog);
+      signal?.removeEventListener("abort", onAbortSignal);
+    };
+    xhr.open("PUT", url);
+    xhr.upload.onprogress = (e) => {
+      lastProgressAt = Date.now();
+      if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      stopListening();
+      if (xhr.status === 200 || xhr.status === 204) {
+        const rawEtag = xhr.getResponseHeader("ETag") || `"${Date.now()}"`;
+        resolve(rawEtag);
+      } else {
+        reject(new Error(`La subida de la parte falló (HTTP ${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => {
+      stopListening();
+      reject(new Error("Error de red al subir la parte."));
+    };
+    xhr.ontimeout = () => {
+      stopListening();
+      reject(new Error("La subida tardó demasiado."));
+    };
+    xhr.onabort = () => {
+      stopListening();
+      reject(new Error(stalled || !signal?.aborted ? STALLED_MSG : CANCELLED_MSG));
+    };
+    signal?.addEventListener("abort", onAbortSignal);
+    xhr.send(blob);
+  });
+}

@@ -244,12 +244,12 @@ export default function SearchScreen() {
 
   const tagsQuery = useQuery({
     queryKey: ["tags"],
-    queryFn: api.tags,
+    queryFn: () => api.tags(),
   });
 
   const placesQuery = useQuery({
     queryKey: ["places"],
-    queryFn: api.places,
+    queryFn: () => api.places(),
   });
 
   const minBytes =

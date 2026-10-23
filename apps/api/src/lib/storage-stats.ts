@@ -4,28 +4,61 @@ import type { Db } from "../db/client";
 import { media, userStorageStats } from "../db/schema";
 
 /**
- * Suma bytes (original + miniatura) y un medio a la cuota del usuario.
- * Upsert atómico: seguro aunque dos /complete corran en paralelo.
+ * Pasa bytes reservados a usados al confirmarse la subida (/uploads/{id}/complete).
+ * Atómico: reduce reservedBytes e incrementa usedBytes y mediaCount.
+ */
+export async function confirmStorageUsage(db: Db, userId: string, bytes: number): Promise<void> {
+  const now = Date.now();
+  await db.run(
+    sql`UPDATE user_storage_stats
+        SET reserved_bytes = max(0, reserved_bytes - ${bytes}),
+            used_bytes = used_bytes + ${bytes},
+            media_count = media_count + 1,
+            updated_at = ${now}
+        WHERE user_id = ${userId}`,
+  );
+}
+
+/**
+ * Alias de compatibilidad para sumar uso confirmado de cuota.
  */
 export async function addStorageUsage(db: Db, userId: string, bytes: number): Promise<void> {
+  return confirmStorageUsage(db, userId, bytes);
+}
+
+/**
+ * Reserva bytes en la cuota del usuario de forma atómica (/uploads/init).
+ * Si (used_bytes + reserved_bytes + bytes) > max_bytes, el WHERE falla y changes === 0,
+ * rechazando la reserva para evitar sobrepasar la cuota concurrentemente.
+ */
+export async function reserveStorageQuota(db: Db, userId: string, bytes: number): Promise<boolean> {
+  await getUsageBytes(db, userId);
   const now = Date.now();
-  await db
-    .insert(userStorageStats)
-    .values({
-      userId,
-      usedBytes: bytes,
-      maxBytes: STORAGE_QUOTA_BYTES,
-      mediaCount: 1,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: userStorageStats.userId,
-      set: {
-        usedBytes: sql`${userStorageStats.usedBytes} + ${bytes}`,
-        mediaCount: sql`${userStorageStats.mediaCount} + 1`,
-        updatedAt: now,
-      },
-    });
+  const res = await db.run(
+    sql`UPDATE user_storage_stats
+        SET reserved_bytes = reserved_bytes + ${bytes},
+            updated_at = ${now}
+        WHERE user_id = ${userId}
+          AND (used_bytes + reserved_bytes + ${bytes}) <= max_bytes`,
+  );
+  return (res.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Libera bytes reservados cuando una subida pendiente expira o se cancela.
+ */
+export async function releaseStorageReservation(
+  db: Db,
+  userId: string,
+  bytes: number,
+): Promise<void> {
+  const now = Date.now();
+  await db.run(
+    sql`UPDATE user_storage_stats
+        SET reserved_bytes = max(0, reserved_bytes - ${bytes}),
+            updated_at = ${now}
+        WHERE user_id = ${userId}`,
+  );
 }
 
 /**
@@ -52,34 +85,52 @@ export async function removeStorageUsage(db: Db, userId: string, bytes: number):
 export async function getUsageBytes(
   db: Db,
   userId: string,
-): Promise<{ usedBytes: number; maxBytes: number }> {
+): Promise<{ usedBytes: number; reservedBytes: number; maxBytes: number }> {
   const row = await db
     .select()
     .from(userStorageStats)
     .where(eq(userStorageStats.userId, userId))
     .get();
-  if (row) return { usedBytes: row.usedBytes, maxBytes: row.maxBytes };
+  if (row) {
+    return {
+      usedBytes: row.usedBytes,
+      reservedBytes: row.reservedBytes,
+      maxBytes: row.maxBytes,
+    };
+  }
 
-  const agg = await db
-    .select({
-      bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize}), 0)`,
-      cnt: sql<number>`count(*)`,
-    })
-    .from(media)
-    .where(and(eq(media.userId, userId), eq(media.status, "ready")))
-    .get();
-  const usedBytes = agg?.bytes ?? 0;
+  const [aggReady, aggPending] = await Promise.all([
+    db
+      .select({
+        bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+        cnt: sql<number>`count(*)`,
+      })
+      .from(media)
+      .where(and(eq(media.userId, userId), eq(media.status, "ready")))
+      .get(),
+    db
+      .select({
+        bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+      })
+      .from(media)
+      .where(and(eq(media.userId, userId), eq(media.status, "pending")))
+      .get(),
+  ]);
+
+  const usedBytes = aggReady?.bytes ?? 0;
+  const reservedBytes = aggPending?.bytes ?? 0;
   await db
     .insert(userStorageStats)
     .values({
       userId,
       usedBytes,
+      reservedBytes,
       maxBytes: STORAGE_QUOTA_BYTES,
-      mediaCount: agg?.cnt ?? 0,
+      mediaCount: aggReady?.cnt ?? 0,
       updatedAt: Date.now(),
     })
     .onConflictDoNothing();
-  return { usedBytes, maxBytes: STORAGE_QUOTA_BYTES };
+  return { usedBytes, reservedBytes, maxBytes: STORAGE_QUOTA_BYTES };
 }
 
 /**
@@ -91,19 +142,22 @@ export async function setStorageUsage(
   userId: string,
   bytes: number,
   count: number,
+  reservedBytes = 0,
 ): Promise<void> {
+  const now = Date.now();
   await db
     .insert(userStorageStats)
     .values({
       userId,
       usedBytes: bytes,
+      reservedBytes,
       maxBytes: STORAGE_QUOTA_BYTES,
       mediaCount: count,
-      updatedAt: Date.now(),
+      updatedAt: now,
     })
     .onConflictDoUpdate({
       target: userStorageStats.userId,
-      set: { usedBytes: bytes, mediaCount: count, updatedAt: Date.now() },
+      set: { usedBytes: bytes, reservedBytes, mediaCount: count, updatedAt: now },
     });
 }
 
@@ -114,25 +168,47 @@ export async function setStorageUsage(
  * verdad; esta pasada auto-corrige drift de bugs o histórico.
  */
 export async function reconcileStorageStats(db: Db): Promise<number> {
-  const agg = await db
-    .select({
-      userId: media.userId,
-      bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize}), 0)`,
-      cnt: sql<number>`count(*)`,
-    })
-    .from(media)
-    .where(eq(media.status, "ready"))
-    .groupBy(media.userId);
+  const [aggReady, aggPending] = await Promise.all([
+    db
+      .select({
+        userId: media.userId,
+        bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+        cnt: sql<number>`count(*)`,
+      })
+      .from(media)
+      .where(eq(media.status, "ready"))
+      .groupBy(media.userId),
+    db
+      .select({
+        userId: media.userId,
+        bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+      })
+      .from(media)
+      .where(eq(media.status, "pending"))
+      .groupBy(media.userId),
+  ]);
 
-  for (const row of agg) {
-    await setStorageUsage(db, row.userId, row.bytes, row.cnt);
+  const pendingByUser = new Map(aggPending.map((r) => [r.userId, r.bytes]));
+  const allUserIds = new Set<string>();
+
+  for (const row of aggReady) {
+    allUserIds.add(row.userId);
+    const reserved = pendingByUser.get(row.userId) ?? 0;
+    await setStorageUsage(db, row.userId, row.bytes, row.cnt, reserved);
   }
 
-  const userIds = agg.map((r) => r.userId);
+  for (const row of aggPending) {
+    if (!allUserIds.has(row.userId)) {
+      allUserIds.add(row.userId);
+      await setStorageUsage(db, row.userId, 0, 0, row.bytes);
+    }
+  }
+
+  const userIds = Array.from(allUserIds);
   await db
     .update(userStorageStats)
-    .set({ usedBytes: 0, mediaCount: 0, updatedAt: Date.now() })
+    .set({ usedBytes: 0, reservedBytes: 0, mediaCount: 0, updatedAt: Date.now() })
     .where(userIds.length ? notInArray(userStorageStats.userId, userIds) : undefined);
 
-  return agg.length;
+  return allUserIds.size;
 }

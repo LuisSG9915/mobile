@@ -20,11 +20,21 @@
     "typecheck": "turbo run typecheck",
     "format": "biome format --write .",
     "backup:r2": "node scripts/backup-r2.mjs",
-    "check:sentry": "node scripts/check-sentry.mjs"
+    "check:sentry": "node scripts/check-sentry.mjs",
+    "check:native": "node scripts/verify-native-checklist.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "turbo": "^2.11.7",
     "typescript": "~5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "@sentry/cli",
+      "esbuild",
+      "unrs-resolver",
+      "workerd"
+    ]
   }
 }

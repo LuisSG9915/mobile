@@ -63,6 +63,19 @@ jobs:
           echo "OUT=$OUT" >> "$GITHUB_ENV"
           ls -lh "$OUT"
 
+      - name: Verify backup integrity (SQLite dry-run)
+        run: |
+          set -euo pipefail
+          echo "Verificando integridad del SQL exportado en instancia efímera de SQLite..."
+          # Validar que el dump SQL sea ejecutable sin errores de sintaxis
+          sqlite3 :memory: < "$OUT"
+          # Ejecutar chequeo de integridad y conteo de tablas
+          CHECK_OUTPUT=$( { cat "$OUT"; echo "PRAGMA integrity_check; SELECT 'TABLE_COUNT=' || count(*) FROM sqlite_master WHERE type='table';"; } | sqlite3 :memory: )
+          echo "$CHECK_OUTPUT"
+          echo "$CHECK_OUTPUT" | grep -q "ok"
+          echo "$CHECK_OUTPUT" | grep -q "TABLE_COUNT=[1-9]"
+          echo "✓ Validación de integridad superada con éxito."
+
       - name: Upload to R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

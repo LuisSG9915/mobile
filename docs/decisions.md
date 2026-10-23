@@ -10,27 +10,22 @@ futuras sesiones no tengan que reconstruir el porqué.
 
 ## API
 
-### Cuota (`/uploads/init`)
+### Cuota atómica y reserva (`/uploads/init` y `/uploads/{id}/complete`)
 
-- Se chequea `used_bytes + fileSize + thumbSize > max_bytes` **antes** de
-  presignar → `413 quota_exceeded`.
-- `used_bytes` cuenta solo media `ready` **incluyendo papelera** (sigue
-  ocupando R2 hasta la purga). Los `pending` NO cuentan.
-- **Limitación conocida:** el chequeo no es atómico bajo concurrencia — dos
-  inits paralelos que caben individualmente pueden completar ambos y superar
-  la cuota. Se aceptó la versión laxa (a esta escala el riesgo es bajo);
-  endurecerla exigiría contar `pending` o una columna de reserva.
-- `getUsageBytes` materializa la fila de `user_storage_stats` de forma
-  perezosa (SUM sobre media) si no existe — sana usuarios pre-stats sin
-  backfill.
+- Reserva atómica en `/uploads/init`: se ejecuta un `UPDATE user_storage_stats SET reserved_bytes = reserved_bytes + :bytes WHERE (used_bytes + reserved_bytes + :bytes) <= max_bytes`. Si `changes === 0`, se rechaza de inmediato con `413 quota_exceeded`.
+- **Condición de carrera eliminada:** ya no existe carrera bajo concurrencia. Múltiples inits paralelos reservan su cuota de forma atómica en SQLite/D1; el que supere el límite es rechazado de inmediato.
+- Transición en `/uploads/{id}/complete`: se ejecuta `confirmStorageUsage`, que decrementa atómicamente `reserved_bytes` e incrementa `used_bytes` y `media_count`.
+- Liberación de reserva: si `/uploads/init` falla durante el presignado o inserción, libera la reserva en el bloque `catch`. Asimismo, el cron diario (`cron/cleanup.ts`) libera los `reserved_bytes` de los uploads `pending` que hayan expirado o quedado abandonados.
+- `used_bytes` cuenta media `ready` **incluyendo papelera** (sigue ocupando R2 hasta la purga física).
+- `getUsageBytes` materializa la fila de `user_storage_stats` de forma perezosa (SUM sobre media) si no existe — sana usuarios pre-stats sin backfill.
 
 ### `/uploads/{id}/complete`
 
 - Flip atómico: `UPDATE … SET status='ready' WHERE status='pending'`; la
-  cuota solo se suma si `changes > 0`. Dos completes concurrentes cuentan
+  cuota solo se confirma (`confirmStorageUsage`) si `changes > 0`. Dos completes concurrentes cuentan
   una vez; la respuesta repetida sigue siendo 200 idempotente.
-- Si `addStorageUsage` fallara tras el flip (raro), la reconciliación del
-  cron lo corrige en la próxima corrida.
+- Si fallara tras el flip (raro), la reconciliación del cron recalcula tanto
+  `used_bytes` como `reserved_bytes` en la próxima corrida.
 
 ### Restore desde papelera
 
@@ -38,20 +33,22 @@ Re-init de un sha cuyo `ready` está soft-deleted → UPDATE `deleted_at=NULL`
 y respuesta `duplicate`. No re-sube bytes ni re-cuenta cuota (los objetos
 R2 ya existen bajo la misma clave sha256).
 
+### Papelera acotada y paginación (`GET /trash` y `POST /trash/empty`)
+
+- `GET /trash`: paginación por cursor opaco `(deletedAt, id)` codificado en base64 con límite por página (por defecto 100, máx 200) y `nextCursor`.
+- `POST /trash/empty`: acotado a un lote de hasta 250 elementos por invocación (`BATCH_SIZE`), eliminando objetos en R2 en lote (`BUCKET.delete(keys)`) y filas en D1 (`inArray`), descontando la cuota utilizada. Devuelve `{ ok: true, deletedCount, remainingCount, hasMore }`. El cliente itera secuencialmente hasta vaciar toda la papelera sin agotar subrequests ni tiempo de CPU del Worker.
+
 ### Cron diario (`0 3 * * *`)
 
 1. Purga `pending` inactivos por `updated_at` > 24 h (no `created_at`: un
-   re-init activo refresca `updated_at` y no debe purgarse en pleno vuelo).
+   re-init activo refresca `updated_at` y no debe purgarse en pleno vuelo), liberando sus `reserved_bytes` de la cuota.
 2. Purga papelera > 30 días: objetos R2 + fila + decremento de cuota solo
    para los que fueron `ready`.
 3. Borra `session` y `verification` expiradas (better-auth no las limpia).
 4. **Reconcilia `user_storage_stats`**: recalcula desde `media`
-   (`status='ready'`, incluye papelera) con SET por usuario y pone a 0 las
-   filas de usuarios sin media. Auto-corrige drift — el drift de prod se
-   arregló solo en la primera corrida tras el deploy, sin backfill manual.
-5. **Barrido de huérfanos R2**: lista `users/` (tope 5000 claves/corrida) y
-   borra objetos sin fila en media con `uploaded` > 24 h. El margen protege
-   PUTs en vuelo; el tope drena backlogs grandes en varias noches.
+   (`status='ready'`, incluye papelera para `used_bytes`, y `status='pending'` para `reserved_bytes`) con SET por usuario y pone a 0 las
+   filas de usuarios sin media ni reservas. Auto-corrige drift.
+5. **Barrido de huérfanos R2 con cursor persistente**: guarda y lee el cursor en la tabla `system_state` (`r2_orphan_sweep_cursor`). Procesa hasta 5 páginas (5.000 claves) por corrida a partir del cursor guardado y persiste el nuevo cursor (o `null` al llegar al final). Esto asegura que todo el bucket es barrido ciclo tras ciclo sin estancarse en las primeras 5.000 claves.
 6. Lotes de 500 filas por pasada, hasta 10 rondas por corrida (límites del
    Worker); `BUCKET.delete` en trozos de 1000 claves.
 

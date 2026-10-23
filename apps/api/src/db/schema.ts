@@ -85,8 +85,10 @@ export const media = sqliteTable(
     thumbhash: text("thumbhash").notNull(), // base64
     r2KeyOriginal: text("r2_key_original").notNull(),
     r2KeyThumb: text("r2_key_thumb").notNull(),
+    r2KeyPreview: text("r2_key_preview"),
     fileSize: integer("file_size").notNull(),
     thumbSize: integer("thumb_size").notNull(),
+    previewSize: integer("preview_size"),
     status: text("status", { enum: ["pending", "ready"] })
       .notNull()
       .default("pending"),
@@ -142,9 +144,18 @@ export const userStorageStats = sqliteTable("user_storage_stats", {
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
   usedBytes: integer("used_bytes").notNull().default(0),
+  reservedBytes: integer("reserved_bytes").notNull().default(0),
   maxBytes: integer("max_bytes").notNull().default(10_737_418_240), // 10 GB
   mediaCount: integer("media_count").notNull().default(0),
   updatedAt: integer("updated_at").notNull(), // epoch ms
+});
+
+// ---------- Estado del sistema ----------
+
+export const systemState = sqliteTable("system_state", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updatedAt: integer("updated_at").notNull(),
 });
 
 // ---------- Álbumes ----------
@@ -159,6 +170,8 @@ export const album = sqliteTable(
     title: text("title").notNull(),
     coverMediaId: text("cover_media_id").references(() => media.id, { onDelete: "set null" }),
     shareToken: text("share_token"),
+    shareExpiresAt: integer("share_expires_at"),
+    shareRevokedAt: integer("share_revoked_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
@@ -183,5 +196,24 @@ export const albumMedia = sqliteTable(
     primaryKey({ columns: [t.albumId, t.mediaId] }),
     index("idx_album_media_album").on(t.albumId, t.addedAt),
     index("idx_album_media_media").on(t.mediaId),
+  ],
+);
+
+// ---------- Etiquetas normalizadas ----------
+
+export const mediaTags = sqliteTable(
+  "media_tags",
+  {
+    mediaId: text("media_id")
+      .notNull()
+      .references(() => media.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tag: text("tag").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.mediaId, t.tag] }),
+    index("idx_media_tags_user_tag").on(t.userId, t.tag, t.mediaId),
   ],
 );

@@ -1,25 +1,57 @@
 import * as MediaLibrary from "expo-media-library/legacy";
+import { api } from "../api/client";
 import { getQueueItems, removeQueueItems } from "../queue/db";
 import { useLibraryEvents, useQueueEvents } from "./events";
 
 /**
  * "Liberar espacio": fotos con respaldo confirmado (done/duplicate con
  * remote_id y sha256 registrado) cuya copia local sigue ocupando espacio
- * en el dispositivo. Tras borrarlas, mergeGallery las refleja como
- * REMOTE_ONLY (la fila de la cola queda como vínculo asset_id ↔ remote_id).
+ * en el dispositivo. Opcionalmente filtradas por antigüedad en días.
  */
-export function getSyncedLocal(): { assetIds: string[]; totalBytes: number } {
+export function getSyncedLocal(olderThanDays?: number): {
+  assetIds: string[];
+  totalBytes: number;
+  items: { asset_id: string; sha256: string | null; bytes_total: number }[];
+} {
+  const cutoffMs = olderThanDays != null ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000 : null;
   const items = getQueueItems().filter(
     (i) =>
       (i.state === "done" || i.state === "duplicate") &&
       i.remote_id != null &&
       i.sha256 != null &&
-      i.asset_id,
+      i.asset_id &&
+      (cutoffMs == null || i.created_at <= cutoffMs),
   );
   return {
     assetIds: items.map((i) => i.asset_id),
     totalBytes: items.reduce((s, i) => s + (i.bytes_total || 0), 0),
+    items: items.map((i) => ({
+      asset_id: i.asset_id,
+      sha256: i.sha256,
+      bytes_total: i.bytes_total || 0,
+    })),
   };
+}
+
+/**
+ * Verifica la existencia e integridad remota en R2/D1 mediante el endpoint
+ * /uploads/check-hashes antes de borrar cualquier archivo local.
+ * Devuelve solo los assetIds cuyos hashes están confirmados en el servidor.
+ */
+export async function verifyRemoteIntegrity(
+  items: { asset_id: string; sha256: string | null }[],
+): Promise<string[]> {
+  const valid = items.filter((i) => Boolean(i.sha256 && i.asset_id));
+  if (!valid.length) return [];
+  const hashes = Array.from(new Set(valid.map((i) => i.sha256 as string)));
+  try {
+    const res = await api.checkHashes(hashes);
+    const existingSet = new Set(res.existing.map((e) => e.sha256));
+    return valid.filter((i) => existingSet.has(i.sha256 as string)).map((i) => i.asset_id);
+  } catch {
+    // Si la API no está disponible o falla la verificación, abortamos para proteger los archivos
+    return [];
+  }
 }
 
 /**
@@ -72,12 +104,22 @@ export async function deleteLocalCopy(remoteId: string): Promise<boolean> {
 }
 
 /**
- * Borra las copias locales de los elementos ya respaldados. Devuelve cuántos
- * assets eliminó MediaLibrary (0 si el usuario cancela el diálogo del
- * sistema o no hay nada que liberar).
+ * Borra las copias locales de los elementos ya respaldados con verificación
+ * de integridad remota obligatoria. Devuelve cuántos assets eliminó MediaLibrary
+ * (0 si el usuario cancela el diálogo del sistema o no hay nada que liberar).
  */
-export async function freeSyncedSpace(): Promise<number> {
-  const { assetIds } = getSyncedLocal();
-  if (!assetIds.length) return 0;
-  return deleteLocalAssets(assetIds);
+export async function freeSyncedSpace(
+  olderThanDays?: number,
+  verifyIntegrity = true,
+): Promise<number> {
+  const { items } = getSyncedLocal(olderThanDays);
+  if (!items.length) return 0;
+
+  let idsToDelete = items.map((i) => i.asset_id);
+  if (verifyIntegrity) {
+    idsToDelete = await verifyRemoteIntegrity(items);
+  }
+  if (!idsToDelete.length) return 0;
+
+  return deleteLocalAssets(idsToDelete);
 }

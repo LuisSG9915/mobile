@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
@@ -229,5 +229,113 @@ describe("timeline", () => {
     expect(json.memories[1].yearsAgo).toBe(2);
     expect(json.memories[1].title).toBe("Hace 2 años");
     expect(json.memories[1].items.length).toBe(1);
+  });
+
+  it("salta directamente con ?before=<iso> sin escanear páginas anteriores", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+
+    const mk = async (takenAt: number) => {
+      const s = sha(`before-${userId}-${takenAt}`);
+      await db.insert(media).values({
+        id: crypto.randomUUID(),
+        userId,
+        sha256: s,
+        mediaType: "photo",
+        mimeType: "image/jpeg",
+        ext: "jpg",
+        takenAt,
+        dateGroup: new Date(takenAt).toISOString().slice(0, 10),
+        width: 100,
+        height: 100,
+        thumbhash: "AQAAAA==",
+        r2KeyOriginal: `users/${userId}/originals/${s}.jpg`,
+        r2KeyThumb: `users/${userId}/thumbs/${s}.webp`,
+        fileSize: 100,
+        thumbSize: 50,
+        status: "ready",
+        createdAt: takenAt,
+        updatedAt: takenAt,
+        deletedAt: null,
+      });
+    };
+
+    // Crear fotos en Junio, Mayo y Abril 2026
+    const tJune = Date.UTC(2026, 5, 15);
+    const tMay = Date.UTC(2026, 4, 15);
+    const tApril = Date.UTC(2026, 3, 15);
+    await mk(tJune);
+    await mk(tMay);
+    await mk(tApril);
+
+    // Salto directo a antes del 31 de mayo
+    const beforeIso = new Date(Date.UTC(2026, 4, 31, 23, 59, 59, 999)).toISOString();
+    const res = await SELF.fetch(
+      `http://localhost/v1/timeline?before=${encodeURIComponent(beforeIso)}&limit=10`,
+      authed(cookie),
+    );
+    expect(res.status).toBe(200);
+    const json = await j(res);
+
+    // Debe contener las fotos de Mayo y Abril, pero excluir la de Junio
+    expect(json.items.length).toBe(2);
+    expect(json.items[0].takenAt).toBe(tMay);
+    expect(json.items[1].takenAt).toBe(tApril);
+  });
+
+  it("EXPLAIN QUERY PLAN confirma búsqueda por índice sin SCAN TABLE en timeline y memories", async () => {
+    const db = getDb(env.DB);
+
+    // 1. Plan de consulta paginada del timeline con filtro before
+    const timelinePlan = await db.all<{
+      id: number;
+      parent: number;
+      notused: number;
+      detail: string;
+    }>(
+      sql`EXPLAIN QUERY PLAN
+          SELECT id, taken_at FROM media
+          WHERE user_id = 'test-user'
+            AND status = 'ready'
+            AND deleted_at IS NULL
+            AND taken_at <= 1700000000000
+          ORDER BY taken_at DESC, id DESC
+          LIMIT 61`,
+    );
+
+    expect(timelinePlan.length).toBeGreaterThan(0);
+    // Debe usar búsqueda por índice (SEARCH) y cero SCAN TABLE
+    const usesTimelineIndex = timelinePlan.some((p) => p.detail.includes("SEARCH"));
+    expect(usesTimelineIndex).toBe(true);
+    // Cero escaneos completos de tabla
+    const hasScanTable = timelinePlan.some((p) => p.detail.includes("SCAN TABLE media"));
+    expect(hasScanTable).toBe(false);
+
+    // 2. Plan de consulta de recuerdos (memories) con índice por mes y día
+    const memoriesPlan = await db.all<{
+      id: number;
+      parent: number;
+      notused: number;
+      detail: string;
+    }>(
+      sql`EXPLAIN QUERY PLAN
+          SELECT id, taken_at, date_group FROM media
+          WHERE user_id = 'test-user'
+            AND status = 'ready'
+            AND deleted_at IS NULL
+            AND substr(date_group, 6, 5) = '10-15'
+            AND substr(date_group, 1, 4) < '2026'
+          ORDER BY taken_at DESC, id DESC
+          LIMIT 51`,
+    );
+
+    expect(memoriesPlan.length).toBeGreaterThan(0);
+    // Debe usar el índice de expresión idx_media_user_month_day
+    const usesMemoriesIndex = memoriesPlan.some(
+      (p) => p.detail.includes("SEARCH") && p.detail.includes("idx_media_user_month_day"),
+    );
+    expect(usesMemoriesIndex).toBe(true);
+    const hasMemoriesScan = memoriesPlan.some((p) => p.detail.includes("SCAN TABLE media"));
+    expect(hasMemoriesScan).toBe(false);
   });
 });

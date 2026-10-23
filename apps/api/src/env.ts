@@ -37,6 +37,9 @@ export type Bindings = {
   /** Remitente de correos transaccionales (ej. "Photos <no-reply@dominio.com>"). */
   EMAIL_FROM?: string;
 
+  /** Días de gracia para verificar el email antes de bloquear subidas (por defecto "7"). */
+  EMAIL_VERIFICATION_GRACE_DAYS?: string;
+
   /** DSN de Sentry (secret). Sin él la telemetría queda desactivada. */
   SENTRY_DSN?: string;
   /** Entorno de Sentry; por defecto "production". */
@@ -55,6 +58,8 @@ export type SessionUser = {
   email: string;
   name: string;
   image?: string | null;
+  emailVerified?: boolean;
+  createdAt?: Date | number;
 };
 
 export type Variables = {

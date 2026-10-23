@@ -1,5 +1,5 @@
 import type { MemoryGroup } from "@photos/shared";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { Play, Sparkles, X } from "lucide-react-native";
@@ -217,13 +217,15 @@ function MemoryModal({ group, onClose }: MemoryModalProps) {
 export const MemoriesBar = memo(function MemoriesBar() {
   const [selectedGroup, setSelectedGroup] = useState<MemoryGroup | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     queryKey: ["memories"],
-    queryFn: () => api.memories(),
+    queryFn: ({ pageParam }) => api.memories(undefined, pageParam, 50),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 5 * 60_000,
   });
 
-  const memories = data?.memories ?? [];
+  const memories = data?.pages.flatMap((p) => p.memories) ?? [];
   if (isLoading || memories.length === 0) {
     return null;
   }
@@ -242,6 +244,10 @@ export const MemoriesBar = memo(function MemoriesBar() {
         showsHorizontalScrollIndicator={false}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ gap: 10 }}
+        onEndReached={() => {
+          if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+        }}
+        onEndReachedThreshold={0.5}
         renderItem={({ item }) => {
           const cover = item.items[0];
           return (

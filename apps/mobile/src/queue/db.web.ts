@@ -84,7 +84,10 @@ function applyRow(row: store.QueueRow): void {
 }
 
 type StateExtra = Partial<
-  Pick<QueueItem, "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent">
+  Pick<
+    QueueItem,
+    "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent" | "upload_id" | "parts"
+  >
 >;
 
 /** Misma semántica que el UPDATE con coalesce de db.ts. */
@@ -95,6 +98,8 @@ function applyState(row: store.QueueRow, state: QueueState, extra: StateExtra): 
   row.last_error = extra.last_error ?? null;
   if (extra.bytes_total != null) row.bytes_total = extra.bytes_total;
   if (extra.bytes_sent != null) row.bytes_sent = extra.bytes_sent;
+  if (extra.upload_id != null) row.upload_id = extra.upload_id;
+  if (extra.parts != null) row.parts = extra.parts;
   row.updated_at = Date.now();
   return row;
 }
@@ -432,8 +437,10 @@ export function getPendingItems(limit = 100): QueueItem[] {
     .slice(0, limit);
 }
 
-export function getQueueItems(limit = 2000): QueueItem[] {
-  return [...queue.values()].sort((a, b) => b.created_at - a.created_at).slice(0, limit);
+export function getQueueItems(limit = 20_000, offset = 0): QueueItem[] {
+  return [...queue.values()]
+    .sort((a, b) => b.created_at - a.created_at)
+    .slice(offset, offset + limit);
 }
 
 export function getFailed(limit = 50): QueueItem[] {

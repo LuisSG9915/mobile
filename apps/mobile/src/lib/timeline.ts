@@ -8,10 +8,10 @@ import { api } from "../api/client";
  * ya cargada por la cuadrícula. El filtro forma parte de la queryKey — cada
  * chip de la galería tiene su propia caché paginada.
  */
-export function useTimeline(filter: TimelineFilter = "all") {
+export function useTimeline(filter: TimelineFilter = "all", before?: string) {
   return useInfiniteQuery({
-    queryKey: ["timeline", filter],
-    queryFn: ({ pageParam }) => api.timeline(pageParam, 60, filter),
+    queryKey: ["timeline", filter, before],
+    queryFn: ({ pageParam }) => api.timeline(pageParam, 60, filter, before),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });

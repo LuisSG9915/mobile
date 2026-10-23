@@ -3,15 +3,15 @@ import {
   errorSchema,
   searchQuerySchema,
   searchResponseSchema,
+  tagsQuerySchema,
   tagsResponseSchema,
 } from "@photos/shared";
-import { and, desc, eq, gte, isNotNull, isNull, like, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { presignGet } from "../lib/s3";
-import { parseTags } from "./media";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -24,7 +24,7 @@ const searchRoute = createRoute({
   tags: ["search"],
   summary: "Búsqueda y filtros avanzados de contenido",
   description:
-    "Busca por texto libre (pie de foto, tags, extensión), etiqueta específica, tipo (foto/video/favorito), rango de fechas y tamaño de archivo con paginación por cursor.",
+    "Busca por texto libre mediante FTS5 (pie de foto, tags, ciudad, país, ubicación, extensión), etiqueta normalizada, tipo (foto/video/favorito), rango de fechas y tamaño de archivo con paginación por cursor.",
   request: { query: searchQuerySchema },
   responses: {
     200: {
@@ -42,11 +42,13 @@ const tagsRoute = createRoute({
   tags: ["search"],
   summary: "Listar etiquetas de usuario y conteo",
   description: "Devuelve todas las etiquetas únicas del usuario ordenadas por frecuencia de uso.",
+  request: { query: tagsQuerySchema },
   responses: {
     200: {
       content: { "application/json": { schema: tagsResponseSchema } },
       description: "Lista de etiquetas",
     },
+    400: err("Cursor inválido"),
     401: err("Sin sesión"),
   },
 });
@@ -54,32 +56,43 @@ const tagsRoute = createRoute({
 export const searchApp = new OpenAPIHono<AppEnv>()
   .openapi(tagsRoute, async (c) => {
     const user = c.get("user");
+    const { cursor, limit } = c.req.valid("query");
     const db = getDb(c.env.DB);
 
-    const rows = await db
-      .select({ tags: media.tags })
-      .from(media)
-      .where(
-        and(
-          eq(media.userId, user.id),
-          eq(media.status, "ready"),
-          isNull(media.deletedAt),
-          isNotNull(media.tags),
-        ),
-      );
-
-    const counts = new Map<string, number>();
-    for (const row of rows) {
-      for (const tag of parseTags(row.tags)) {
-        counts.set(tag, (counts.get(tag) ?? 0) + 1);
-      }
+    let cur: { c: number; tag: string } | null = null;
+    if (cursor) {
+      try {
+        const decoded = JSON.parse(atob(cursor));
+        if (typeof decoded.c === "number" && typeof decoded.tag === "string") {
+          cur = decoded;
+        }
+      } catch {}
     }
 
-    const tags = Array.from(counts.entries())
-      .map(([tag, count]) => ({ tag, count }))
-      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    const query = cur
+      ? sql`SELECT tag, count(*) as count
+            FROM media_tags
+            WHERE user_id = ${user.id}
+            GROUP BY tag
+            HAVING (count(*) < ${cur.c}) OR (count(*) = ${cur.c} AND tag > ${cur.tag})
+            ORDER BY count(*) DESC, tag ASC
+            LIMIT ${limit + 1}`
+      : sql`SELECT tag, count(*) as count
+            FROM media_tags
+            WHERE user_id = ${user.id}
+            GROUP BY tag
+            ORDER BY count(*) DESC, tag ASC
+            LIMIT ${limit + 1}`;
 
-    return c.json({ tags }, 200);
+    const res = await db.all<{ tag: string; count: number }>(query);
+    const hasMore = res.length > limit;
+    const page = hasMore ? res.slice(0, limit) : res;
+    const last = page[page.length - 1];
+    const nextCursor =
+      hasMore && last ? btoa(JSON.stringify({ c: Number(last.count), tag: last.tag })) : null;
+
+    const tags = page.map((r) => ({ tag: r.tag, count: Number(r.count) }));
+    return c.json({ tags, nextCursor }, 200);
   })
   .openapi(searchRoute, async (c) => {
     const user = c.get("user");
@@ -117,31 +130,35 @@ export const searchApp = new OpenAPIHono<AppEnv>()
     if (maxBytes != null) baseConditions.push(lte(media.fileSize, maxBytes));
 
     if (tag) {
-      baseConditions.push(like(media.tags, `%"${tag}"%`));
+      baseConditions.push(
+        sql`${media.id} IN (SELECT media_id FROM media_tags WHERE user_id = ${user.id} AND tag = ${tag.toLowerCase()})`,
+      );
     }
 
     if (q) {
-      const pattern = `%${q.toLowerCase()}%`;
-      const textMatch = or(
-        sql`lower(${media.caption}) like ${pattern}`,
-        sql`lower(${media.tags}) like ${pattern}`,
-        sql`lower(${media.city}) like ${pattern}`,
-        sql`lower(${media.country}) like ${pattern}`,
-        sql`lower(${media.locationName}) like ${pattern}`,
-        sql`lower(${media.ext}) like ${pattern}`,
-      );
-      if (textMatch) {
-        baseConditions.push(textMatch);
+      const tokens = q
+        .trim()
+        .split(/\s+/)
+        .map((t) => t.replace(/[^\p{L}\p{N}]/gu, ""))
+        .filter(Boolean);
+      if (tokens.length > 0) {
+        const ftsMatch = tokens.map((t) => `"${t}"*`).join(" AND ");
+        baseConditions.push(
+          sql`${media.id} IN (SELECT media_id FROM media_fts WHERE media_fts MATCH ${ftsMatch} AND user_id = ${user.id})`,
+        );
       }
     }
 
-    // Conteo total de coincidencias antes de aplicar cursor
-    const countRes = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(media)
-      .where(and(...baseConditions))
-      .get();
-    const totalMatches = countRes?.count ?? 0;
+    // Solo se cuenta en la primera página (!cur) para evitar COUNT(*) por página
+    let totalMatches: number | undefined;
+    if (!cur) {
+      const countRes = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(media)
+        .where(and(...baseConditions))
+        .get();
+      totalMatches = countRes?.count ?? 0;
+    }
 
     // Condiciones para paginación
     const pagedConditions = [...baseConditions];

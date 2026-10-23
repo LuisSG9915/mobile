@@ -26,7 +26,7 @@ export function AddToAlbumModal({
 
   const query = useQuery({
     queryKey: ["albums"],
-    queryFn: api.albums,
+    queryFn: () => api.albums(),
     enabled: visible,
   });
 

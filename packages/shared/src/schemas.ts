@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { ALLOWED_EXTENSIONS, MAX_THUMB_BYTES, SYNC_STATUSES } from "./constants";
+import {
+  ALLOWED_EXTENSIONS,
+  MAX_THUMB_BYTES,
+  SYNC_STATUSES,
+  TIMELINE_MAX_LIMIT,
+} from "./constants";
 
 export const sha256Hex = z
   .string()
@@ -18,6 +23,7 @@ export const extSchema = z
 
 export const errorSchema = z.object({
   error: z.string(),
+  code: z.string().optional(),
   message: z.string(),
 });
 
@@ -34,6 +40,7 @@ export const uploadInitSchema = z.object({
     .int()
     .positive()
     .max(MAX_THUMB_BYTES, "La miniatura no puede pesar más de 50 KB"),
+  previewSize: z.number().int().positive().optional(),
   takenAt: z.number().int().positive(),
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
@@ -64,6 +71,7 @@ export const uploadInitResponseSchema = z.discriminatedUnion("status", [
     id: z.string(),
     expiresAt: z.string(),
     thumb: presignedTargetSchema,
+    preview: presignedTargetSchema.optional(),
     original: presignedTargetSchema,
   }),
 ]);
@@ -71,6 +79,56 @@ export const uploadInitResponseSchema = z.discriminatedUnion("status", [
 export const uploadCompleteResponseSchema = z.object({
   id: z.string(),
   status: z.literal("ready"),
+});
+
+// ---------- uploads multipart ----------
+
+export const multipartInitSchema = uploadInitSchema;
+
+export const multipartInitResponseSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("duplicate"), id: z.string() }),
+  z.object({
+    status: z.literal("upload"),
+    id: z.string(),
+    uploadId: z.string(),
+    key: z.string(),
+    partSize: z.number().int().positive(),
+    totalParts: z.number().int().positive(),
+    expiresAt: z.string(),
+    thumb: presignedTargetSchema,
+    preview: presignedTargetSchema.optional(),
+  }),
+]);
+
+export const multipartPresignPartsSchema = z.object({
+  id: z.string(),
+  uploadId: z.string(),
+  partNumbers: z.array(z.number().int().positive()).min(1).max(1000),
+});
+
+export const multipartPresignPartItemSchema = z.object({
+  partNumber: z.number().int().positive(),
+  url: z.string(),
+});
+
+export const multipartPresignPartsResponseSchema = z.object({
+  parts: z.array(multipartPresignPartItemSchema),
+});
+
+export const multipartPartInputSchema = z.object({
+  partNumber: z.number().int().positive(),
+  etag: z.string().min(1),
+});
+
+export const multipartCompleteSchema = z.object({
+  id: z.string(),
+  uploadId: z.string(),
+  parts: z.array(multipartPartInputSchema).min(1),
+});
+
+export const multipartAbortSchema = z.object({
+  id: z.string(),
+  uploadId: z.string(),
 });
 
 export const checkHashesRequestSchema = z.object({
@@ -110,6 +168,7 @@ export const timelineItemSchema = z.object({
   isDocument: z.boolean().default(false),
   thumbhash: z.string(),
   thumbUrl: z.string(),
+  previewUrl: z.string().nullable().optional(),
 });
 
 export const timelineResponseSchema = z.object({
@@ -124,12 +183,14 @@ export const trashItemSchema = timelineItemSchema.extend({
 
 export const trashResponseSchema = z.object({
   items: z.array(trashItemSchema),
-  nextCursor: z.null(),
+  nextCursor: z.string().nullable(),
 });
 
 export const emptyTrashResponseSchema = z.object({
   ok: z.literal(true),
   deletedCount: z.number(),
+  remainingCount: z.number().optional(),
+  hasMore: z.boolean().optional(),
 });
 
 export const timelineMonthSchema = z.object({
@@ -142,6 +203,14 @@ export const timelineMonthsResponseSchema = z.object({
   months: z.array(timelineMonthSchema),
 });
 
+export const timelineQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(TIMELINE_MAX_LIMIT).default(60),
+  filter: timelineFilterSchema.default("all"),
+  before: z.string().optional(),
+});
+export type TimelineQueryInput = z.infer<typeof timelineQuerySchema>;
+
 export const memoryGroupSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -152,6 +221,7 @@ export const memoryGroupSchema = z.object({
 
 export const memoriesResponseSchema = z.object({
   memories: z.array(memoryGroupSchema),
+  nextCursor: z.string().nullable().optional(),
 });
 
 export const favoriteResponseSchema = z.object({
@@ -273,21 +343,41 @@ export const albumItemSchema = z.object({
   mediaCount: z.number(),
   isShared: z.boolean(),
   shareToken: z.string().nullable(),
+  shareExpiresAt: z.number().nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
 
+export const albumListQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+export type AlbumListQueryInput = z.infer<typeof albumListQuerySchema>;
+
+export const albumDetailQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(200).default(60),
+});
+export type AlbumDetailQueryInput = z.infer<typeof albumDetailQuerySchema>;
+
 export const albumListResponseSchema = z.object({
   albums: z.array(albumItemSchema),
+  nextCursor: z.string().nullable().optional(),
 });
 
 export const albumDetailResponseSchema = albumItemSchema.extend({
   items: z.array(timelineItemSchema),
+  nextCursor: z.string().nullable().optional(),
+});
+
+export const shareAlbumRequestSchema = z.object({
+  expiresIn: z.enum(["24h", "7d", "30d", "never"]).optional(),
 });
 
 export const shareAlbumResponseSchema = z.object({
   shareToken: z.string(),
   shareUrl: z.string(),
+  expiresAt: z.number().nullable().optional(),
 });
 
 export const publicAlbumItemSchema = z.object({
@@ -307,6 +397,7 @@ export const publicAlbumResponseSchema = z.object({
   title: z.string(),
   mediaCount: z.number(),
   createdAt: z.number(),
+  expiresAt: z.number().nullable().optional(),
   items: z.array(publicAlbumItemSchema),
 });
 
@@ -371,7 +462,7 @@ export const searchQuerySchema = z.object({
 export const searchResponseSchema = z.object({
   items: z.array(timelineItemSchema),
   nextCursor: z.string().nullable(),
-  totalMatches: z.number(),
+  totalMatches: z.number().optional(),
 });
 
 export const tagCountSchema = z.object({
@@ -379,8 +470,15 @@ export const tagCountSchema = z.object({
   count: z.number(),
 });
 
+export const tagsQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+export type TagsQueryInput = z.infer<typeof tagsQuerySchema>;
+
 export const tagsResponseSchema = z.object({
   tags: z.array(tagCountSchema),
+  nextCursor: z.string().nullable().optional(),
 });
 
 // ---------- ubicaciones y mapa ----------
@@ -408,11 +506,14 @@ export const locationsQuerySchema = z.object({
   maxLng: z.coerce.number().optional(),
   city: z.string().trim().optional(),
   filter: searchFilterSchema.optional().default("all"),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(1000).default(200),
 });
 
 export const locationsResponseSchema = z.object({
   items: z.array(locationItemSchema),
-  totalWithGps: z.number(),
+  totalWithGps: z.number().optional(),
+  nextCursor: z.string().nullable().optional(),
 });
 
 export const placeItemSchema = z.object({
@@ -424,8 +525,15 @@ export const placeItemSchema = z.object({
   thumbhash: z.string().nullable(),
 });
 
+export const placesQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+export type PlacesQueryInput = z.infer<typeof placesQuerySchema>;
+
 export const placesResponseSchema = z.object({
   places: z.array(placeItemSchema),
+  nextCursor: z.string().nullable().optional(),
 });
 
 export type PlaceItem = z.infer<typeof placeItemSchema>;
@@ -474,3 +582,72 @@ export type LocationItem = z.infer<typeof locationItemSchema>;
 export type LocationsQuery = z.infer<typeof locationsQuerySchema>;
 export type LocationsResponse = z.infer<typeof locationsResponseSchema>;
 export type ApiError = z.infer<typeof errorSchema>;
+export type MultipartInitResponse = z.infer<typeof multipartInitResponseSchema>;
+export type MultipartPresignPartsInput = z.infer<typeof multipartPresignPartsSchema>;
+export type MultipartPresignPartsResponse = z.infer<typeof multipartPresignPartsResponseSchema>;
+export type MultipartPartInput = z.infer<typeof multipartPartInputSchema>;
+export type MultipartCompleteInput = z.infer<typeof multipartCompleteSchema>;
+export type MultipartAbortInput = z.infer<typeof multipartAbortSchema>;
+export type ShareAlbumRequest = z.infer<typeof shareAlbumRequestSchema>;
+
+// ---------- gestión de sesiones, exportación y borrado de cuenta ----------
+
+export const userSessionItemSchema = z.object({
+  id: z.string(),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  ipAddress: z.string().nullable().optional(),
+  userAgent: z.string().nullable().optional(),
+  isCurrent: z.boolean(),
+});
+
+export const userSessionsResponseSchema = z.object({
+  sessions: z.array(userSessionItemSchema),
+});
+
+export const userExportMediaItemSchema = z.object({
+  id: z.string(),
+  sha256: z.string(),
+  mediaType: mediaTypeSchema,
+  takenAt: z.number(),
+  width: z.number(),
+  height: z.number(),
+  fileSize: z.number(),
+  caption: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  downloadUrl: z.string(),
+});
+
+export const userExportAlbumItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.number(),
+  mediaIds: z.array(z.string()),
+});
+
+export const userExportResponseSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    email: z.string(),
+    name: z.string(),
+    createdAt: z.number(),
+  }),
+  exportedAt: z.string(),
+  mediaCount: z.number(),
+  media: z.array(userExportMediaItemSchema),
+  albums: z.array(userExportAlbumItemSchema),
+});
+
+export const userAccountDeleteResponseSchema = z.object({
+  ok: z.literal(true),
+  message: z.string(),
+});
+
+export type UserSessionItem = z.infer<typeof userSessionItemSchema>;
+export type UserSessionsResponse = z.infer<typeof userSessionsResponseSchema>;
+export type UserExportMediaItem = z.infer<typeof userExportMediaItemSchema>;
+export type UserExportAlbumItem = z.infer<typeof userExportAlbumItemSchema>;
+export type UserExportResponse = z.infer<typeof userExportResponseSchema>;
+export type UserAccountDeleteResponse = z.infer<typeof userAccountDeleteResponseSchema>;

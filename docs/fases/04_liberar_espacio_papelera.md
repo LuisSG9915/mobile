@@ -44,6 +44,12 @@ Permitir al usuario recuperar almacenamiento local de las fotos ya respaldadas e
   - Decrementa `userStorageStats` con `removeStorageUsage` **solo** para `status === 'ready'` (los `pending` nunca sumaron cuota).
   - El mismo cron purga registros `pending` con más de 24 h (subidas abandonadas).
 
+### 4. Unificación de invalidación de React Query (`lib/query-client.ts`)
+
+- Helper centralizado `invalidateMediaLifecycleQueries(queryClient)` que invalida simultáneamente las claves de consulta:
+  `["storage"]`, `["user-storage"]`, `["timeline"]`, `["timeline-months"]`, `["trash"]`, `["albums"]`, `["search"]`, `["locations"]` y `["memories"]`.
+- Invocado tras toda mutación del ciclo de vida de medios: al mover a la papelera (`media/[id].tsx`), restaurar o deshacer (`media/[id].tsx`, `trash.tsx`), vaciar la papelera (`trash.tsx`) y tras la limpieza de ráfagas (`cleaner.tsx`). Esto asegura consistencia total entre las vistas de Ajustes, timeline, álbumes y cuota de almacenamiento.
+
 ## 🧪 Verificación Local
 
 - `free-space.test.ts`: lista de 5 assets (3 sincronizados, 2 pendientes) → solo los 3 sincronizados se envían a eliminación.

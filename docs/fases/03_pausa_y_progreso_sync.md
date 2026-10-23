@@ -29,6 +29,9 @@ Dar al usuario control manual del respaldo con un botón de **pausa persistente*
   - Si está pausado: ejecutar `scanLibrary()` (la cola sigue reflejando lo pendiente) pero **no** procesar.
   - La pausa jamás se limpia sola: solo `setBackupPaused(false)` desde el botón "Reanudar" la quita.
 - El procesador chequea el flag **entre ítems**: el archivo en vuelo termina su PUT, el siguiente no arranca. No abortar requests a medias.
+- **Diferenciación de errores 413 y pausa global**:
+  - Ante error 413 con código `quota_exceeded` (superación de la cuota de 10 GB del usuario), el procesador activa la pausa global con `setBackupPaused(true)` para evitar quemar intentos en los demás archivos en cola. El usuario reanuda tras liberar espacio.
+  - Ante error 413 con código `file_too_large` (archivo que excede el límite unitario de 5 GB), **no se pausa el runner global**: se marca únicamente ese ítem como `failed` permanente con razón `file_too_large` y la cola continúa procesando el siguiente elemento.
 - Web: tras `setBackupPaused` emitir el evento de cola (`useQueueEvents.emit()`) para que la pestaña que tiene el Web Lock `photos.queue.process:<userId>` se entere vía BroadcastChannel `photos.queue` y detenga su bucle.
 
 ### 3. Estado y UI

@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS queue (
   bytes_sent INTEGER NOT NULL DEFAULT 0,
   next_retry_at INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL,
+  upload_id TEXT,
+  parts TEXT,
   PRIMARY KEY (user_id, asset_id)
 );
 CREATE INDEX IF NOT EXISTS queue_state ON queue(user_id, state, updated_at);
@@ -80,11 +82,22 @@ function migrateToUserScope(db: SQLite.SQLiteDatabase): void {
   `);
 }
 
+function migrateMultipartColumns(db: SQLite.SQLiteDatabase): void {
+  const cols = db.getAllSync<{ name: string }>("PRAGMA table_info(queue)");
+  if (!cols.some((c) => c.name === "upload_id")) {
+    db.execSync("ALTER TABLE queue ADD COLUMN upload_id TEXT;");
+  }
+  if (!cols.some((c) => c.name === "parts")) {
+    db.execSync("ALTER TABLE queue ADD COLUMN parts TEXT;");
+  }
+}
+
 export function getQueueDb(): SQLite.SQLiteDatabase {
   if (!dbInstance) {
     dbInstance = SQLite.openDatabaseSync("photos_queue.db");
     dbInstance.execSync(DDL);
     migrateToUserScope(dbInstance);
+    migrateMultipartColumns(dbInstance);
   }
   return dbInstance;
 }
@@ -219,13 +232,17 @@ export async function setState(
   assetId: string,
   state: QueueState,
   extra: Partial<
-    Pick<QueueItem, "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent">
+    Pick<
+      QueueItem,
+      "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent" | "upload_id" | "parts"
+    >
   > = {},
 ): Promise<void> {
   const db = getQueueDb();
   db.runSync(
     `UPDATE queue SET state = ?, sha256 = coalesce(?, sha256), remote_id = coalesce(?, remote_id),
-       last_error = ?, bytes_total = coalesce(?, bytes_total), bytes_sent = coalesce(?, bytes_sent), updated_at = ?
+       last_error = ?, bytes_total = coalesce(?, bytes_total), bytes_sent = coalesce(?, bytes_sent),
+       upload_id = coalesce(?, upload_id), parts = coalesce(?, parts), updated_at = ?
      WHERE asset_id = ? AND user_id IS ?`,
     [
       state,
@@ -234,6 +251,8 @@ export async function setState(
       extra.last_error ?? null,
       extra.bytes_total ?? null,
       extra.bytes_sent ?? null,
+      extra.upload_id ?? null,
+      extra.parts ?? null,
       Date.now(),
       assetId,
       activeUserId,
@@ -340,7 +359,13 @@ export function getPendingItems(limit = 100): QueueItem[] {
 }
 
 /** Todos los items de la cola (incluye done/duplicate) para la galería híbrida. */
-export function getQueueItems(limit = 2000): QueueItem[] {
+export function getQueueItems(limit = 2000, offset = 0): QueueItem[] {
+  if (offset > 0) {
+    return getQueueDb().getAllSync<QueueItem>(
+      "SELECT * FROM queue WHERE user_id IS ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      [activeUserId, limit, offset],
+    );
+  }
   return getQueueDb().getAllSync<QueueItem>(
     "SELECT * FROM queue WHERE user_id IS ? ORDER BY created_at DESC LIMIT ?",
     [activeUserId, limit],

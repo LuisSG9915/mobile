@@ -75,3 +75,32 @@ export function passwordResetEmail(url: string): Pick<EmailMessage, "subject" | 
 </html>`,
   };
 }
+
+/** Correo de verificación de cuenta (español, token válido). */
+export function verificationEmail(url: string): Pick<EmailMessage, "subject" | "html" | "text"> {
+  const safeUrl = url.replace(/"/g, "&quot;");
+  return {
+    subject: "Verifica tu correo en Photos",
+    text: `Bienvenido a Photos.\n\nPara verificar tu dirección de correo electrónico, abre el siguiente enlace:\n${url}\n\nSi no creaste esta cuenta, puedes ignorar este mensaje.`,
+    html: `<!doctype html>
+<html lang="es">
+  <body style="margin:0;padding:24px;background:#f5f5f4;font-family:system-ui,-apple-system,sans-serif;color:#171717;">
+    <div style="max-width:420px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px;">
+      <h1 style="margin:0 0 12px;font-size:22px;">Verifica tu correo</h1>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.5;color:#525252;">
+        Bienvenido a Photos. Confirma tu dirección de correo electrónico para asegurar tu cuenta y mantener activo el respaldo.
+      </p>
+      <a href="${safeUrl}" style="display:block;text-align:center;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 20px;border-radius:12px;">
+        Verificar mi correo
+      </a>
+      <p style="margin:24px 0 0;font-size:13px;line-height:1.5;color:#737373;">
+        Si no creaste una cuenta en Photos, ignora este correo.
+      </p>
+      <p style="margin:16px 0 0;font-size:12px;line-height:1.5;color:#a3a3a3;word-break:break-all;">
+        Si el botón no funciona, copia este enlace: ${safeUrl}
+      </p>
+    </div>
+  </body>
+</html>`,
+  };
+}

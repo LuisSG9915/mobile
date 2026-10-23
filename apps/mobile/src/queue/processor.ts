@@ -1,4 +1,4 @@
-import { MIME_BY_EXT } from "@photos/shared";
+import { MIME_BY_EXT, MULTIPART_THRESHOLD_BYTES } from "@photos/shared";
 import { File } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library/legacy";
@@ -26,7 +26,7 @@ import {
 import { sha256File } from "./hash";
 import { publishByteTick, publishSyncProgress } from "./progress";
 import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
-import { makeThumbAndHash, type ThumbResult } from "./thumb";
+import { makePreview, makeThumbAndHash, type ThumbResult } from "./thumb";
 
 let running = false;
 let cancelled = false;
@@ -223,8 +223,130 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
   const thumb = cachedThumb ?? (await makeThumbAndHash(mediaType, localUri));
   if (cachedThumb) thumbCache.delete(item.asset_id);
 
+  const preview = await makePreview(mediaType, localUri);
+
   await setState(item.asset_id, "init", { sha256 });
   emitStructure();
+
+  // Subida multipart reanudable para archivos > 20 MB
+  if (fileSize > MULTIPART_THRESHOLD_BYTES) {
+    const init = await api.multipartInit({
+      sha256,
+      mediaType,
+      mimeType,
+      ext,
+      fileSize,
+      thumbSize: thumb.bytes,
+      previewSize: preview?.bytes,
+      takenAt,
+      latitude: lat,
+      longitude: lon,
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+      durationMs,
+      thumbhash: thumb.thumbhash,
+    });
+
+    if (init.status === "duplicate") {
+      await setState(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: fileSize });
+      useItemProgress.getState().clearItemProgress(item.asset_id);
+      safeDelete(thumb.uri);
+      if (preview) safeDelete(preview.uri);
+      refreshRemoteData();
+      emitStructure();
+      return;
+    }
+
+    await setState(item.asset_id, "uploading_thumb", {
+      remote_id: init.id,
+      upload_id: init.uploadId,
+    });
+    emitStructure();
+    await uploadFile(init.thumb, thumb.uri);
+    safeDelete(thumb.uri);
+
+    if (init.preview && preview) {
+      await uploadFile(init.preview, preview.uri);
+      safeDelete(preview.uri);
+    }
+
+    await setState(item.asset_id, "uploading_original");
+    emitStructure();
+
+    let completedParts: { partNumber: number; etag: string }[] = [];
+    try {
+      if (item.parts) completedParts = JSON.parse(item.parts);
+    } catch {}
+
+    const completedMap = new Map(completedParts.map((p) => [p.partNumber, p.etag]));
+    const missingPartNumbers: number[] = [];
+    for (let p = 1; p <= init.totalParts; p++) {
+      if (!completedMap.has(p)) missingPartNumbers.push(p);
+    }
+
+    if (missingPartNumbers.length > 0) {
+      const { parts: presignedParts } = await api.multipartPresignParts({
+        id: init.id,
+        uploadId: init.uploadId,
+        partNumbers: missingPartNumbers,
+      });
+
+      const partSize = init.partSize;
+      let bytesSent = completedParts.length * partSize;
+
+      for (const part of presignedParts) {
+        if (cancelled) throw new Error("Subida cancelada.");
+        const start = (part.partNumber - 1) * partSize;
+        const end = Math.min(fileSize, start + partSize);
+        const partLength = end - start;
+
+        const tempPartUri = `${FileSystem.cacheDirectory}part-${item.asset_id}-${part.partNumber}.bin`;
+        const b64 = await FileSystem.readAsStringAsync(localUri, {
+          encoding: "base64",
+          position: start,
+          length: partLength,
+        });
+        await FileSystem.writeAsStringAsync(tempPartUri, b64, { encoding: "base64" });
+
+        const uploadRes = await FileSystem.uploadAsync(part.url, tempPartUri, {
+          httpMethod: "PUT",
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        });
+        safeDelete(tempPartUri);
+
+        if (!uploadRes || (uploadRes.status !== 200 && uploadRes.status !== 204)) {
+          throw new Error(
+            `La subida de la parte ${part.partNumber} falló (HTTP ${uploadRes?.status}).`,
+          );
+        }
+
+        const etag =
+          uploadRes.headers?.etag ||
+          uploadRes.headers?.ETag ||
+          uploadRes.headers?.Etag ||
+          `"${Date.now()}"`;
+
+        bytesSent += partLength;
+        completedParts.push({ partNumber: part.partNumber, etag });
+        await setState(item.asset_id, "uploading_original", {
+          parts: JSON.stringify(completedParts),
+          bytes_sent: bytesSent,
+        });
+        publishByteTick(item.asset_id, bytesSent, fileSize);
+      }
+    }
+
+    await setState(item.asset_id, "completing", { bytes_sent: fileSize });
+    emitStructure();
+    await api.completeUpload(init.id);
+    await setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
+    useItemProgress.getState().clearItemProgress(item.asset_id);
+    refreshRemoteData();
+    emitStructure();
+    return;
+  }
+
+  // Subida estándar para archivos ≤ 20 MB
   const init = await api.initUpload({
     sha256,
     mediaType,
@@ -232,6 +354,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
     ext,
     fileSize,
     thumbSize: thumb.bytes,
+    previewSize: preview?.bytes,
     takenAt,
     latitude: lat,
     longitude: lon,
@@ -245,6 +368,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
     await setState(item.asset_id, "duplicate", { remote_id: init.id, bytes_sent: fileSize });
     useItemProgress.getState().clearItemProgress(item.asset_id);
     safeDelete(thumb.uri);
+    if (preview) safeDelete(preview.uri);
     refreshRemoteData();
     emitStructure();
     return;
@@ -254,6 +378,11 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
   emitStructure();
   await uploadFile(init.thumb, thumb.uri);
   safeDelete(thumb.uri);
+
+  if (init.preview && preview) {
+    await uploadFile(init.preview, preview.uri);
+    safeDelete(preview.uri);
+  }
 
   await setState(item.asset_id, "uploading_original");
   emitStructure();
@@ -442,11 +571,15 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         return true;
       }
       // 4xx definitivos no arreglan solos reintentando: failed directo.
-      // 413 quota_exceeded además pausa el respaldo para no quemar intentos
-      // en el resto de la cola — el usuario libera espacio y reanuda.
+      // 413 file_too_large: falla únicamente ese ítem y la cola continúa.
+      // 413 quota_exceeded: además pausa el respaldo global para no quemar intentos.
       if (e instanceof ApiError && e.status === 413) {
-        await setState(item.asset_id, "failed", { last_error: message });
-        setBackupPaused(true);
+        if (e.code === "file_too_large") {
+          await setState(item.asset_id, "failed", { last_error: "file_too_large" });
+        } else {
+          await setState(item.asset_id, "failed", { last_error: message });
+          setBackupPaused(true);
+        }
       } else if (e instanceof ApiError && e.status === 400) {
         await setState(item.asset_id, "failed", { last_error: message });
       } else {

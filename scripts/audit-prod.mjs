@@ -73,7 +73,7 @@ const QUERIES = [
             u.used_bytes - coalesce(m.bytes,0) as drift_bytes
      from user_storage_stats u
      left join (
-       select user_id, sum(file_size+thumb_size) as bytes, count(*) as cnt
+       select user_id, sum(file_size+thumb_size+coalesce(preview_size,0)) as bytes, count(*) as cnt
        from media where status='ready' group by user_id
      ) m on m.user_id = u.user_id
      order by abs(u.used_bytes - coalesce(m.bytes,0)) desc`,
@@ -81,6 +81,10 @@ const QUERIES = [
   [
     "quota_over",
     `select user_id, used_bytes, max_bytes from user_storage_stats where used_bytes > max_bytes`,
+  ],
+  [
+    "oversized_files",
+    `select count(*) as c, coalesce(max(file_size),0) as max_bytes from media where file_size > 5368709120`,
   ],
   [
     "dup_sha_same_user",
@@ -116,7 +120,8 @@ const QUERIES = [
   [
     "r2_keys",
     `select r2_key_thumb as k, status from media
-     union all select r2_key_original as k, status from media`,
+     union all select r2_key_original as k, status from media
+     union all select r2_key_preview as k, status from media where r2_key_preview is not null`,
   ],
 ];
 
@@ -239,6 +244,10 @@ for (const r of report.stats_drift ?? []) {
 }
 console.log(`Usuarios sobre cuota: ${(report.quota_over ?? []).length}`);
 if (report.quota_over?.length) console.table(report.quota_over);
+const of = report.oversized_files?.[0] ?? {};
+if (of.c > 0) {
+  console.log(`Archivos >5GB anómalos: ${of.c} (máx: ${fmtBytes(of.max_bytes)})`);
+}
 
 console.log(`\nDuplicados sha256 mismo usuario: ${(report.dup_sha_same_user ?? []).length}`);
 console.log(`Sha256 compartidos entre usuarios: ${(report.dup_sha_cross_user ?? []).length}`);
