@@ -30,9 +30,9 @@ Las especificaciones detalladas viven en `docs/fases/`; el tablero maestro con e
 ## 🧪 Línea Base de Validación Local (Post-Etapa 5)
 
 Validación 100% offline ejecutada y verificada:
-- **API Tests (Miniflare D1 + R2 en memoria)**: 19 suites, 143 tests aprobados (0 fallos).
+- **API Tests (Miniflare D1 + R2 en memoria)**: 19 suites, 144 tests aprobados (0 fallos).
 - **Mobile Tests (Vitest + happy-dom)**: 22 suites, 232 tests aprobados (0 fallos).
-- **Total Tests Unitarios/Integración**: 375 tests aprobados.
+- **Total Tests Unitarios/Integración**: 376 tests aprobados.
 - **Pipeline Selftest (`scripts/test-pipeline.test.mjs`)**: 31 tests aprobados.
 - **Linter & Tipado**: `pnpm lint` y `pnpm typecheck` limpios en todos los paquetes (`@photos/api`, `@photos/mobile`, `@photos/shared`).
 - **Plan v2 (post-Fase 22)**: H1 “Verdad y confianza” en curso. Estado real, P0 abiertos y evidencia en [`docs/PLAN_MEJORAS.md`](../PLAN_MEJORAS.md).

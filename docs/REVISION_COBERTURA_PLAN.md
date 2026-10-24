@@ -93,7 +93,7 @@ Para no perder lo bueno:
 - **Integridad básica:** cuota atómica para altas nuevas, dedup SHA-256, sweep con cursor, reconciliación.
 - **Escala de lectura:** paginación, FTS5, previews, índices.
 - **Ciclo de cuenta:** sesiones, borrado, exportación de metadatos (aunque no sea ZIP).
-- **Calidad base:** 375 tests, lint, typecheck, E2E web, CI, backup D1 diario.
+- **Calidad base:** 376 tests, lint, typecheck, E2E web, CI, backup D1 diario.
 - **Decisiones explícitas:** sección 8 (“no se tocan”) y backlog P2 con razones.
 - **Secuenciación:** dependencias y estimaciones, aunque no se contrastaron con la realidad.
 
@@ -105,7 +105,7 @@ El plan es un buen **plan de construcción**. Lo que falta es el plan de **opera
 
 | Dimensión | Cobertura | Evidencia / ausencia |
 | :--- | :---: | :--- |
-| Construcción de features | **Alta** | Etapas 0–5, 375 tests, CI |
+| Construcción de features | **Alta** | Etapas 0–5, 376 tests, CI |
 | Verificación y evidencia | **Baja** | `[x]` sin artefacto; P0 abiertos; DoD marcado sin logs |
 | Producto y descubrimiento | **Nula** | No hay user journeys, métricas de uso, onboarding ni research |
 | UX/UI y accesibilidad | **Baja** | Sin auditoría a11y; celdas sin rol/fecha; scrubber solo-gesto |
@@ -223,7 +223,7 @@ DSAR beyond export JSON. El borrado de cuenta no pide re-autenticación.
 carga/estrés, inyección de fallos, regresión visual, accesibilidad ni umbral de cobertura. El E2E web
 solo corre Chromium y usa `expo start`, no el export de producción.
 
-**Evidencia.** `package.json` sin coverage; `playwright.config.ts` un solo project; 375 tests no
+**Evidencia.** `package.json` sin coverage; `playwright.config.ts` un solo project; 376 tests no
 cubren multipart >20 MB ni bypass de cuota.
 
 **Primeras acciones.**

@@ -5,15 +5,18 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
 
 ## [Unreleased]
 
-### Planeado — Plan v2 H1 “Verdad y confianza”
-- Cerrar P0 de multipart y cuota en dispositivo real (H1.1, H1.2).
-- Release `v1.1.0` con APK y `/version` (H1.4), tras ejecutar el E2E de resume con R2 dev.
-- Restore drill D1 + R2 con RTO/RPO (H1.5).
-- Seguridad mínima: headers en producción, credenciales del smoke por secretos y `callbackURL` de la
-  verificación hacia la app (H1.6).
-- Heartbeat del cron y alertas (H1.7).
+### Pendiente para cierre total de H1
+- Etiquetado de release `v1.1.0` en git y generación de APK EAS (`eas build --platform android --profile preview`).
+- Ejecución remota del Restore Drill (`docs/ops/RESTORE_DRILL.md`) con credenciales y firma de tiempos.
+- Verificación con dominio real en Resend (`RESEND_API_KEY`) y headers en producción.
+- E2E multipart-resume con R2 dev cuando se configure `apps/api/.dev.vars`.
+
+## [1.1.0] - 2026-10-24
 
 ### Añadido
+- Helper `apps/mobile/src/auth/verification.ts` y soporte para `callbackURL` dinámico web (`${origin}/welcome`) y deep link nativo (`photos:///welcome` con `expo-linking`), integrado en `register.tsx`, `backup.tsx` y cubierto en tests de API y Mobile.
+- Procedimiento formal de simulacro de recuperación en `docs/ops/RESTORE_DRILL.md` con RPO 24 h / RTO 4 h y consultas de validación en instancia aislada `photos-db-restore`.
+- Runner de validación `scripts/gemini-gate.mjs` con modalidades rápida (`--quick`), completa y E2E (`--e2e`).
 - Migraciones `0013_public_shriek.sql` (`media.upload_id`) y `0014_robust_patch.sql`
   (`album.share_allow_download`).
 - Heartbeat del cron en `system_state.cron_last_run` y workflow `cron-heartbeat.yml` (>26 h o
@@ -54,4 +57,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
 ### Corregido
 - Archivos > 20 MB ya no fallan en `object_missing` en web ni en nativo.
 - `check-hashes`, álbumes, exportación y reconciliación consultan en trozos (<100 parámetros de D1).
+- `trash/empty` incluye previews, descuenta `previewSize` una vez y solo resta cuota si el lote se borró
+  completo (evita doble descuento concurrente); las reservas `pending` se liberan.
+- El cron agrega las actualizaciones de cuota por usuario (una query por usuario, no por fila) y pagina
+  el aborto de MPUs huérfanas.
+- Regla de ciclo de vida R2 documentada (`docs/ops/R2_LIFECYCLE.md`) para abortar MPUs a los 7 días.
 - `/uploads/{id}/complete` rechaza filas multipart en vez de devolver 409 sin pista.

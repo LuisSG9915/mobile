@@ -8,6 +8,8 @@
   y experimentos reproducibles.
 - [`REVISION_COBERTURA_PLAN.md`](REVISION_COBERTURA_PLAN.md) — áreas que el plan inicial no cubría
   (SRE, seguridad, privacidad, calidad, UX, coste).
+- [`GEMINI_3_8_FLASH_PLAN.md`](GEMINI_3_8_FLASH_PLAN.md) — guion ejecutable para Gemini 3.8 Flash y
+  puerta local (`scripts/gemini-gate.mjs`).
 
 ## Histórico
 
@@ -22,6 +24,7 @@
 - [`ops/SLO.md`](ops/SLO.md) — SLOs y alertas (H2.1).
 - [`ops/INCIDENT_RESPONSE.md`](ops/INCIDENT_RESPONSE.md) — runbooks.
 - [`ops/D1_BACKUP.md`](ops/D1_BACKUP.md) y [`backup-321.md`](backup-321.md) — respaldos y restauración.
+- [`ops/R2_LIFECYCLE.md`](ops/R2_LIFECYCLE.md) — abortar MPUs huérfanas a 7 días.
 
 ## Calidad
 

@@ -64,7 +64,7 @@
 **Objetivo:** Monitoreo, robustez y preparación para producción.
 - [x] Endpoint de uso de almacenamiento por usuario: `GET /v1/stats` (count, totalBytes, lastUploadAt y `quotaBytes` desde `STORAGE_QUOTA_BYTES` compartido).
 - [x] Barra de almacenamiento en `apps/mobile/src/app/(tabs)/settings.tsx` alimentada por `stats.data.quotaBytes`.
-- [x] Suite completa de validación local (pipeline 31, API 143 tests en 19 suites, Mobile 232 tests en 22 suites = 375 tests verdes) + E2E Playwright 11/11 verdes (auth, persistencia de cola, Web Locks, subida/dedup/filtro). Nota: el primer intento falló por un `expo start` zombie ocupando :8081 con env de producción; con los puertos limpios la suite pasó entera.
+- [x] Suite completa de validación local (pipeline 31, API 144 tests en 19 suites, Mobile 232 tests en 22 suites = 376 tests verdes) + E2E Playwright 11/11 verdes (auth, persistencia de cola, Web Locks, subida/dedup/filtro). Nota: el primer intento falló por un `expo start` zombie ocupando :8081 con env de producción; con los puertos limpios la suite pasó entera.
 - [x] Auditoría de linting con Biome (`pnpm lint` limpio tras `lint:fix`) y typecheck global (`pnpm typecheck`).
 - [x] Base de hardening post-Fase 22 construida (cuota atómica, sweep persistente, previews, paginación, borrado de cuenta y CI/CD). **No toda está cerrada:** P0/P1 abiertos y evidencia real en [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md).
 - [ ] Plan v2 — H1 “Verdad y confianza”: cerrar P0 multipart/cuota, release `v1.1.0`, restore drill, seguridad mínima y heartbeat. Ver [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md).
