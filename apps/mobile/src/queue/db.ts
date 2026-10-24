@@ -164,6 +164,20 @@ export function setBackupPaused(paused: boolean): void {
   kvSet(PAUSE_KEY, paused ? "1" : "0");
 }
 
+const EMAIL_VERIFICATION_KEY = "backup.needs_email_verification";
+
+/**
+ * El servidor rechazó la subida con 403 `email_unverified`: la UI debe ofrecer
+ * reenviar la verificación. Se limpia al reanudar el respaldo con éxito.
+ */
+export function setNeedsEmailVerification(needed: boolean): void {
+  kvSet(EMAIL_VERIFICATION_KEY, needed ? "1" : "0");
+}
+
+export function needsEmailVerification(): boolean {
+  return kvGet(EMAIL_VERIFICATION_KEY) === "1";
+}
+
 /**
  * Marca de tiempo del último escaneo completo, POR USUARIO: si A escaneó hace
  * un minuto y entra B, su primer escaneo no debe quedar suprimido por el

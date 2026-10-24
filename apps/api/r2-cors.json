@@ -8,9 +8,9 @@
           "https://photos-web.luis-sg9915.workers.dev"
         ],
         "methods": ["PUT", "GET", "HEAD"],
-        "headers": ["*"]
+        "headers": ["Range", "Content-Type", "*"]
       },
-      "exposeHeaders": ["ETag"],
+      "exposeHeaders": ["Accept-Ranges", "Content-Range", "Content-Length", "ETag"],
       "maxAgeSeconds": 3600
     }
   ]

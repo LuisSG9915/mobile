@@ -123,6 +123,10 @@ export default function SharedAlbumScreen() {
 
   const handleDownloadAll = async () => {
     if (!album || !items.length || isDownloadingAll) return;
+    if (!album.allowDownload) {
+      toast.info("El dueño del álbum ha desactivado la descarga de originales.");
+      return;
+    }
     setIsDownloadingAll(true);
     toast(t.albums.downloadingZip);
     try {
@@ -138,11 +142,20 @@ export default function SharedAlbumScreen() {
 
   const handleDownloadSingle = async (item: PublicAlbumItem) => {
     if (isDownloadingSingle) return;
+    if (!item.downloadUrl) {
+      toast.info("El dueño del álbum ha desactivado la descarga de originales.");
+      return;
+    }
     setIsDownloadingSingle(true);
     try {
       const ext = item.mediaType === "video" ? "mp4" : "jpg";
       const filename = `${item.id}.${ext}`;
-      await saveDownload(item.downloadUrl || item.originalUrl, filename);
+      const url = item.downloadUrl;
+      if (!url) {
+        toast.info("El dueño del álbum ha desactivado la descarga de originales.");
+        return;
+      }
+      await saveDownload(url, filename);
       toast.success(t.viewer.downloadDone);
     } catch {
       toast.error(t.viewer.downloadFailed);
@@ -369,10 +382,20 @@ export default function SharedAlbumScreen() {
             {/* Renderizado de video o imagen */}
             {selectedPhoto ? (
               selectedPhoto.mediaType === "video" ? (
-                <PublicVideoPlayer uri={selectedPhoto.originalUrl} />
+                selectedPhoto.originalUrl ? (
+                  <PublicVideoPlayer uri={selectedPhoto.originalUrl} />
+                ) : (
+                  <Image
+                    source={{ uri: selectedPhoto.thumbUrl }}
+                    placeholder={{ thumbhash: selectedPhoto.thumbhash }}
+                    style={{ width: "100%", height: "100%" }}
+                    contentFit="contain"
+                  />
+                )
               ) : (
                 <Image
-                  source={{ uri: selectedPhoto.originalUrl }}
+                  // Sin allowDownload solo llega miniatura: el enlace no expone originales.
+                  source={{ uri: selectedPhoto.originalUrl ?? selectedPhoto.thumbUrl }}
                   placeholder={{ thumbhash: selectedPhoto.thumbhash }}
                   style={{ width: "100%", height: "100%" }}
                   contentFit="contain"

@@ -1,5 +1,8 @@
 # 📋 Tablero de Control Maestro - Implementación SWE-2
 
+> **Histórico (fases 1–22).** El plan vigente es [`PLAN_MEJORAS.md`](PLAN_MEJORAS.md) (Plan v2, H1
+> en curso). Este tablero se conserva para trazabilidad de los commits originales.
+
 ## Directivas para SWE-2
 1. Ejecutar de forma estrictamente secuencial: **Fase 1 ➔ Fase 7**.
 2. No usar recursos remotos de Cloudflare (`--remote` está prohibido). Todos los tests corren localmente.

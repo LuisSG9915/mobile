@@ -123,15 +123,22 @@ describe("albums y compartido", () => {
     expect(shareJson.shareToken).toBeDefined();
     expect(shareJson.shareUrl).toContain(shareJson.shareToken);
 
-    // 8. Consulta pública sin sesión (GET /v1/shared/album/:token)
-    const publicRes = await SELF.fetch(`http://localhost/v1/shared/album/${shareJson.shareToken}`);
+    // 8. Consulta pública sin sesión (GET /v1/albums/public/:token)
+    const publicRes = await SELF.fetch(`http://localhost/v1/albums/public/${shareJson.shareToken}`);
     expect(publicRes.status).toBe(200);
     const publicJson = await j(publicRes);
     expect(publicJson.title).toBe("Vacaciones en Japón");
     expect(publicJson.mediaCount).toBe(2);
+    expect(publicJson.allowDownload).toBe(false);
     expect(publicJson.items[0].thumbUrl).toContain("X-Amz-Signature");
-    expect(publicJson.items[0].originalUrl).toContain("X-Amz-Signature");
-    expect(publicJson.items[0].downloadUrl).toContain("X-Amz-Signature");
+    // Por defecto el enlace NO expone originales ni descarga.
+    expect(publicJson.items[0].originalUrl).toBeUndefined();
+    expect(publicJson.items[0].downloadUrl).toBeUndefined();
+
+    // 8b. La ruta heredada /v1/shared/album/:token responde 410 (deprecada).
+    const legacyRes = await SELF.fetch(`http://localhost/v1/shared/album/${shareJson.shareToken}`);
+    expect(legacyRes.status).toBe(410);
+    expect((await j(legacyRes)).code).toBe("legacy_share_url");
 
     // 9. Revocar enlace de compartir
     const unshareRes = await SELF.fetch(`http://localhost/v1/albums/${albumId}/share`, {
@@ -142,7 +149,7 @@ describe("albums y compartido", () => {
 
     // Consulta pública tras revocar da 404
     const publicRevokedRes = await SELF.fetch(
-      `http://localhost/v1/shared/album/${shareJson.shareToken}`,
+      `http://localhost/v1/albums/public/${shareJson.shareToken}`,
     );
     expect(publicRevokedRes.status).toBe(404);
 
@@ -303,7 +310,7 @@ describe("albums y compartido", () => {
     expect(shareJson.expiresAt).toBeDefined();
 
     // Acceso antes de expirar -> 200
-    const accessOk = await SELF.fetch(`http://localhost/v1/shared/album/${shareJson.shareToken}`);
+    const accessOk = await SELF.fetch(`http://localhost/v1/albums/public/${shareJson.shareToken}`);
     expect(accessOk.status).toBe(200);
 
     // Simular que el enlace expiró en D1
@@ -312,10 +319,113 @@ describe("albums y compartido", () => {
 
     // Acceso tras expirar -> 410 Gone
     const accessExpired = await SELF.fetch(
-      `http://localhost/v1/shared/album/${shareJson.shareToken}`,
+      `http://localhost/v1/albums/public/${shareJson.shareToken}`,
     );
     expect(accessExpired.status).toBe(410);
     const expiredJson = await j(accessExpired);
     expect(expiredJson.error).toBe("expired");
+  });
+
+  it("con allowDownload=true el enlace público sí incluye original y descarga", async () => {
+    const { cookie, userId } = await createUser();
+    const mediaIds = await seedTestMedia(userId, 1);
+    const createRes = await SELF.fetch("http://localhost/v1/albums", {
+      ...authed(cookie),
+      method: "POST",
+      headers: { ...authed(cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Origen", mediaIds }),
+    });
+    const albumId = (await j(createRes)).id;
+
+    const shareRes = await SELF.fetch(`http://localhost/v1/albums/${albumId}/share`, {
+      ...authed(cookie),
+      method: "POST",
+      headers: { ...authed(cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ allowDownload: true }),
+    });
+    const shareJson = await j(shareRes);
+    expect(shareJson.allowDownload).toBe(true);
+
+    const publicJson = await j(
+      await SELF.fetch(`http://localhost/v1/albums/public/${shareJson.shareToken}`),
+    );
+    expect(publicJson.allowDownload).toBe(true);
+    expect(publicJson.items[0].originalUrl).toContain("X-Amz-Signature");
+    expect(publicJson.items[0].downloadUrl).toContain("attachment");
+  });
+
+  it("un enlace caducado no se reutiliza al volver a compartir sin body", async () => {
+    const { cookie, userId } = await createUser();
+    const mediaIds = await seedTestMedia(userId, 1);
+    const db = getDb(env.DB);
+    const createRes = await SELF.fetch("http://localhost/v1/albums", {
+      ...authed(cookie),
+      method: "POST",
+      headers: { ...authed(cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Caducado", mediaIds }),
+    });
+    const albumId = (await j(createRes)).id;
+
+    const shareRes = await SELF.fetch(`http://localhost/v1/albums/${albumId}/share`, {
+      ...authed(cookie),
+      method: "POST",
+      headers: { ...authed(cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn: "24h" }),
+    });
+    const first = await j(shareRes);
+    await db
+      .update(album)
+      .set({ shareExpiresAt: Date.now() - 1000 })
+      .where(eq(album.id, albumId));
+
+    const reshare = await SELF.fetch(`http://localhost/v1/albums/${albumId}/share`, {
+      ...authed(cookie),
+      method: "POST",
+    });
+    const second = await j(reshare);
+    expect(second.shareToken).not.toBe(first.shareToken);
+    expect(second.expiresAt).toBeGreaterThan(Date.now());
+    const access = await SELF.fetch(`http://localhost/v1/albums/public/${second.shareToken}`);
+    expect(access.status).toBe(200);
+  });
+
+  it("no permite usar como portada una foto de otro usuario (IDOR)", async () => {
+    const owner = await createUser();
+    const attacker = await createUser();
+    const ownerMedia = await seedTestMedia(owner.userId, 1);
+    const ownMedia = await seedTestMedia(attacker.userId, 1);
+    const createRes = await SELF.fetch("http://localhost/v1/albums", {
+      ...authed(attacker.cookie),
+      method: "POST",
+      headers: { ...authed(attacker.cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Mío", mediaIds: ownMedia }),
+    });
+    const albumId = (await j(createRes)).id;
+
+    const patchRes = await SELF.fetch(`http://localhost/v1/albums/${albumId}`, {
+      ...authed(attacker.cookie),
+      method: "PATCH",
+      headers: { ...authed(attacker.cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ coverMediaId: ownerMedia[0] }),
+    });
+    expect(patchRes.status).toBe(400);
+
+    const detail = await j(
+      await SELF.fetch(`http://localhost/v1/albums/${albumId}`, authed(attacker.cookie)),
+    );
+    expect(detail.coverMediaId).not.toBe(ownerMedia[0]);
+  });
+
+  it("check-hashes acepta lotes de 300 hashes (límite de 100 parámetros de D1)", async () => {
+    const { cookie } = await createUser();
+    const hashes = Array.from({ length: 300 }, (_, i) => i.toString(16).padStart(64, "a"));
+    const res = await SELF.fetch("http://localhost/v1/uploads/check-hashes", {
+      ...authed(cookie),
+      method: "POST",
+      headers: { ...authed(cookie).headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ sha256: hashes }),
+    });
+    expect(res.status).toBe(200);
+    expect((await j(res)).existing).toEqual([]);
   });
 });

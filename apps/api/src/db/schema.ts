@@ -89,6 +89,9 @@ export const media = sqliteTable(
     fileSize: integer("file_size").notNull(),
     thumbSize: integer("thumb_size").notNull(),
     previewSize: integer("preview_size"),
+    // ID de la subida multipart en curso (solo status='pending'). Permite
+    // reanudar contra la misma MPU en vez de crear una nueva con etags viejos.
+    uploadId: text("upload_id"),
     status: text("status", { enum: ["pending", "ready"] })
       .notNull()
       .default("pending"),
@@ -172,6 +175,10 @@ export const album = sqliteTable(
     shareToken: text("share_token"),
     shareExpiresAt: integer("share_expires_at"),
     shareRevokedAt: integer("share_revoked_at"),
+    /** Los enlaces públicos solo exponen miniaturas y previews (no originales). */
+    shareAllowDownload: integer("share_allow_download", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

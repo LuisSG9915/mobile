@@ -38,6 +38,7 @@ describe("buildGridGeometry", () => {
     const g = buildGridGeometry(ROWS, COLS, CELL);
     // header(40) + 1 línea + header(40) + 2 líneas = 380
     expect(g.height).toBe(HEADER_HEIGHT + CELL + HEADER_HEIGHT + 2 * CELL);
+    expect(g.totalHeight).toBe(g.height);
     expect(g.lines).toHaveLength(5);
     expect(g.lines[0]).toMatchObject({ kind: "header", top: 0, rowIndex: 0 });
     expect(g.lines[1]).toMatchObject({ kind: "photos", top: HEADER_HEIGHT, firstRow: 1 });
@@ -52,6 +53,24 @@ describe("buildGridGeometry", () => {
       firstRow: 5,
     });
     expect(g.lines[4]).toMatchObject({ kind: "photos", firstRow: 8 });
+  });
+
+  it("mantiene estabilidad referencial (memoización) si solo cambian atributos de las fotos sin alterar estructura", () => {
+    const g1 = buildGridGeometry(ROWS, COLS, CELL);
+
+    // Nuevas instancias de fila con fotos actualizadas (por ej. progreso o syncStatus)
+    const updatedRows: GalleryRow[] = ROWS.map((r) =>
+      r.type === "photo"
+        ? { ...r, photo: { ...r.photo, progress: 0.85, syncStatus: "SYNCING" } }
+        : { ...r },
+    );
+
+    const g2 = buildGridGeometry(updatedRows, COLS, CELL);
+    expect(g2).toBe(g1); // Misma referencia en memoria
+
+    // Si cambian las columnas, sí debe recalcular
+    const g3 = buildGridGeometry(ROWS, COLS + 1, CELL);
+    expect(g3).not.toBe(g1);
   });
 });
 

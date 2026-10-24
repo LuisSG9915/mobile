@@ -47,6 +47,18 @@ export const authClient = createAuthClient({
 
 export const { useSession, signIn, signUp, requestPasswordReset, resetPassword } = authClient;
 
+/** Reenvía el correo de verificación (paridad con client.ts). */
+export async function resendVerificationEmail(
+  email: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { error } = await authClient.sendVerificationEmail({ email, callbackURL: "/welcome" });
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export const signOut: typeof authClient.signOut = async (options) => {
   try {
     return await authClient.signOut(options);

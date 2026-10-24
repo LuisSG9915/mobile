@@ -23,6 +23,7 @@ import {
 } from "../db/schema";
 import type { AppEnv } from "../env";
 import { presignGetDownload } from "../lib/s3";
+import { mapInChunks } from "../lib/slices";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -208,10 +209,10 @@ export const userApp = new OpenAPIHono<AppEnv>()
 
     const albumsRows = await db.select().from(album).where(eq(album.userId, user.id)).all();
     const albumIds = albumsRows.map((a) => a.id);
-    const albumMediaRows =
-      albumIds.length > 0
-        ? await db.select().from(albumMedia).where(inArray(albumMedia.albumId, albumIds)).all()
-        : [];
+    // >100 álbumes superan el tope de parámetros de D1: consultar en trozos.
+    const albumMediaRows = await mapInChunks(albumIds, (slice) =>
+      db.select().from(albumMedia).where(inArray(albumMedia.albumId, slice)).all(),
+    );
 
     const albums = albumsRows.map((a) => ({
       id: a.id,

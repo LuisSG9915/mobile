@@ -17,7 +17,23 @@ export type GridLine =
   | { kind: "header"; top: number; height: number; rowIndex: number }
   | { kind: "photos"; top: number; height: number; firstRow: number };
 
-export type GridGeometry = { lines: GridLine[]; height: number };
+export type GridGeometry = {
+  lines: GridLine[];
+  height: number;
+  totalHeight: number;
+};
+
+let cachedGeometry: {
+  fingerprint: string;
+  columns: number;
+  cellSize: number;
+  headerHeight: number;
+  geometry: GridGeometry;
+} | null = null;
+
+export function clearGridGeometryCacheForTests(): void {
+  cachedGeometry = null;
+}
 
 export function buildGridGeometry(
   rows: GalleryRow[],
@@ -25,6 +41,24 @@ export function buildGridGeometry(
   cellSize: number,
   headerHeight: number = HEADER_HEIGHT,
 ): GridGeometry {
+  let headerIndicesStr = "";
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].type === "header") {
+      headerIndicesStr += `${i},`;
+    }
+  }
+  const fingerprint = `${rows.length}:${headerIndicesStr}`;
+
+  if (
+    cachedGeometry &&
+    cachedGeometry.columns === columns &&
+    cachedGeometry.cellSize === cellSize &&
+    cachedGeometry.headerHeight === headerHeight &&
+    cachedGeometry.fingerprint === fingerprint
+  ) {
+    return cachedGeometry.geometry;
+  }
+
   const lines: GridLine[] = [];
   let y = 0;
   let inLine = 0; // fotos colocadas en la línea actual
@@ -41,7 +75,15 @@ export function buildGridGeometry(
     }
     inLine = (inLine + 1) % columns;
   }
-  return { lines, height: y };
+  const geometry: GridGeometry = { lines, height: y, totalHeight: y };
+  cachedGeometry = {
+    fingerprint,
+    columns,
+    cellSize,
+    headerHeight,
+    geometry,
+  };
+  return geometry;
 }
 
 /** Línea que contiene la coordenada y (búsqueda binaria). */

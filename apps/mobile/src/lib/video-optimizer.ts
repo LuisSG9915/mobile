@@ -123,3 +123,30 @@ export async function saveOptimizedVideoToGallery(uri: string, filename: string)
     }
   }
 }
+
+/**
+ * Genera una versión comprimida MP4 H.264 ligera (~720p / 2 Mbps) para streaming rápido
+ * y compatibilidad cruzada en navegadores web sin códec HEVC.
+ */
+export async function createVideoPreview(
+  localUri: string,
+): Promise<{ uri: string; bytes: number } | null> {
+  if (Platform.OS === "web") {
+    return null;
+  }
+  try {
+    const res = await optimizeVideoForShare({
+      uri: localUri,
+      preset: "whatsapp_hd",
+    });
+    if (res.uri && res.uri !== localUri) {
+      const info = await FileSystem.getInfoAsync(res.uri);
+      if (info.exists && typeof info.size === "number" && info.size > 0) {
+        return { uri: res.uri, bytes: info.size };
+      }
+    }
+  } catch (e) {
+    console.warn("createVideoPreview falló, usando original:", e);
+  }
+  return null;
+}

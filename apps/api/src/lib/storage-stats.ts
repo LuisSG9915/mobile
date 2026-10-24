@@ -1,5 +1,5 @@
 import { STORAGE_QUOTA_BYTES } from "@photos/shared";
-import { and, eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { media, userStorageStats } from "../db/schema";
 
@@ -162,6 +162,115 @@ export async function setStorageUsage(
 }
 
 /**
+ * Reconciliación rápida de reservas de cuota por usuario individual.
+ * 1. Poda subidas 'pending' obsoletas que hayan superado el TTL.
+ * 2. Recalcula reserved_bytes sumando únicamente los 'pending' vigentes del usuario.
+ * 3. Actualiza reserved_bytes en user_storage_stats sin modificar used_bytes.
+ */
+export async function reconcileUserReservations(
+  db: Db,
+  userId: string,
+  stalePendingTtlMs = 2 * 3600 * 1000,
+): Promise<number> {
+  const now = Date.now();
+  if (stalePendingTtlMs > 0) {
+    const staleThreshold = now - stalePendingTtlMs;
+    await db
+      .delete(media)
+      .where(
+        and(
+          eq(media.userId, userId),
+          eq(media.status, "pending"),
+          lt(media.updatedAt, staleThreshold),
+        ),
+      );
+  }
+
+  const aggPending = await db
+    .select({
+      bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+    })
+    .from(media)
+    .where(and(eq(media.userId, userId), eq(media.status, "pending")))
+    .get();
+
+  const realReservedBytes = aggPending?.bytes ?? 0;
+
+  await db
+    .update(userStorageStats)
+    .set({ reservedBytes: realReservedBytes, updatedAt: now })
+    .where(eq(userStorageStats.userId, userId));
+
+  return realReservedBytes;
+}
+
+/**
+ * Reconciliación por usuario individual (usada reactivamente ante cuota excedida
+ * y por herramientas administrativas de reconciliación).
+ * 1. Poda subidas 'pending' obsoletas que hayan superado el TTL.
+ * 2. Recalcula used_bytes (media 'ready') y reserved_bytes (media 'pending' vigentes).
+ * 3. Actualiza user_storage_stats atómicamente.
+ */
+export async function reconcileUserStorage(
+  db: Db,
+  userId: string,
+  stalePendingTtlMs = 2 * 3600 * 1000,
+): Promise<{ usedBytes: number; reservedBytes: number; maxBytes: number; mediaCount: number }> {
+  const now = Date.now();
+  if (stalePendingTtlMs > 0) {
+    const staleThreshold = now - stalePendingTtlMs;
+    await db
+      .delete(media)
+      .where(
+        and(
+          eq(media.userId, userId),
+          eq(media.status, "pending"),
+          lt(media.updatedAt, staleThreshold),
+        ),
+      );
+  }
+
+  const [aggReady, aggPending] = await Promise.all([
+    db
+      .select({
+        bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+        cnt: sql<number>`count(*)`,
+      })
+      .from(media)
+      .where(and(eq(media.userId, userId), eq(media.status, "ready")))
+      .get(),
+    db
+      .select({
+        bytes: sql<number>`coalesce(sum(${media.fileSize} + ${media.thumbSize} + coalesce(${media.previewSize}, 0)), 0)`,
+      })
+      .from(media)
+      .where(and(eq(media.userId, userId), eq(media.status, "pending")))
+      .get(),
+  ]);
+
+  const usedBytes = aggReady?.bytes ?? 0;
+  const reservedBytes = aggPending?.bytes ?? 0;
+  const count = aggReady?.cnt ?? 0;
+
+  await db
+    .insert(userStorageStats)
+    .values({
+      userId,
+      usedBytes,
+      reservedBytes,
+      maxBytes: STORAGE_QUOTA_BYTES,
+      mediaCount: count,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: userStorageStats.userId,
+      set: { usedBytes, reservedBytes, mediaCount: count, updatedAt: now },
+    });
+
+  return { usedBytes, reservedBytes, maxBytes: STORAGE_QUOTA_BYTES, mediaCount: count };
+}
+
+/**
  * Reconciliación completa: recalcula user_storage_stats desde media
  * (status='ready', incluye papelera — sigue ocupando R2 hasta la purga) y
  * pone a 0 las filas de usuarios sin media ready. media es la fuente de
@@ -204,11 +313,18 @@ export async function reconcileStorageStats(db: Db): Promise<number> {
     }
   }
 
-  const userIds = Array.from(allUserIds);
-  await db
-    .update(userStorageStats)
-    .set({ usedBytes: 0, reservedBytes: 0, mediaCount: 0, updatedAt: Date.now() })
-    .where(userIds.length ? notInArray(userStorageStats.userId, userIds) : undefined);
+  // Poner a 0 las filas de usuarios sin media. `notInArray` con todos los
+  // usuarios superaría los 100 parámetros de D1: se leen las filas y se
+  // actualizan solo las que sobran (en lotes de 90 ids).
+  const statRows = await db.select({ userId: userStorageStats.userId }).from(userStorageStats);
+  const staleIds = statRows.map((r) => r.userId).filter((id) => !allUserIds.has(id));
+  for (let i = 0; i < staleIds.length; i += 90) {
+    const slice = staleIds.slice(i, i + 90);
+    await db
+      .update(userStorageStats)
+      .set({ usedBytes: 0, reservedBytes: 0, mediaCount: 0, updatedAt: Date.now() })
+      .where(inArray(userStorageStats.userId, slice));
+  }
 
   return allUserIds.size;
 }

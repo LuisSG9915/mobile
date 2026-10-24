@@ -92,6 +92,20 @@
       "when": 1792690000000,
       "tag": "0012_share_expiration_and_revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792818881362,
+      "tag": "0013_public_shriek",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792822913920,
+      "tag": "0014_robust_patch",
+      "breakpoints": true
     }
   ]
 }

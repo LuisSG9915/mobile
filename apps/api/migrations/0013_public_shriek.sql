@@ -1,0 +1,1 @@
+ALTER TABLE `media` ADD `upload_id` text;

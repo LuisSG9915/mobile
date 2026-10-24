@@ -20,6 +20,7 @@ import {
   refreshProjection,
   setBackupPaused,
   setItemHash,
+  setNeedsEmailVerification,
   setNextRetryAt,
   setState,
 } from "./db";
@@ -152,6 +153,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
         height: thumb.height,
         durationMs: null,
         thumbhash: thumb.thumbhash,
+        uploadId: item.upload_id ?? undefined,
       },
       { signal },
     );
@@ -165,9 +167,11 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
       return;
     }
 
+    const canResume = init.resumed === true;
     await setState(item.asset_id, "uploading_thumb", {
       remote_id: init.id,
       upload_id: init.uploadId,
+      ...(canResume ? {} : { parts: "[]" }),
     });
     emitStructure();
     await uploadBlob(init.thumb, thumb.blob, undefined, signal);
@@ -183,9 +187,11 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
 
     // Partes ya subidas en intentos previos (reanudación)
     let completedParts: { partNumber: number; etag: string }[] = [];
-    try {
-      if (item.parts) completedParts = JSON.parse(item.parts);
-    } catch {}
+    if (canResume) {
+      try {
+        if (item.parts) completedParts = JSON.parse(item.parts);
+      } catch {}
+    }
 
     const completedMap = new Map(completedParts.map((p) => [p.partNumber, p.etag]));
     const missingPartNumbers: number[] = [];
@@ -466,6 +472,17 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
             }
             const message =
               e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
+            // Correo sin verificar: no es una sesión caída (ver processor.ts).
+            if (e instanceof ApiError && e.status === 403 && e.code === "email_unverified") {
+              try {
+                await setState(item.asset_id, "queued", { last_error: message });
+              } catch {}
+              useItemProgress.getState().clearItemProgress(item.asset_id);
+              setBackupPaused(true);
+              setNeedsEmailVerification(true);
+              emitStructure();
+              break;
+            }
             // Sesión caída a mitad de pasada: reintentar quemaría intentos
             // hasta 'failed' contra un 401 que no se arregla solo. Cortar.
             if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -488,6 +505,11 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
                   setBackupPaused(true);
                 }
               } else if (e instanceof ApiError && e.status === 400) {
+                if (item.remote_id) {
+                  try {
+                    await api.cancelUpload(item.remote_id, { uploadId: item.upload_id });
+                  } catch {}
+                }
                 await setState(item.asset_id, "failed", { last_error: message });
               } else {
                 // Leer attempts ANTES de bumpAttempt: la fila proyectada es la
@@ -495,6 +517,11 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
                 const attempts = item.attempts + 1;
                 await bumpAttempt(item.asset_id);
                 if (attempts >= MAX_ATTEMPTS) {
+                  if (item.remote_id) {
+                    try {
+                      await api.cancelUpload(item.remote_id, { uploadId: item.upload_id });
+                    } catch {}
+                  }
                   await setState(item.asset_id, "failed", { last_error: message });
                 } else {
                   const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];

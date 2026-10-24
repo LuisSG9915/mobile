@@ -8,6 +8,7 @@ import { ApiError, api } from "../api/client";
 import { useQueueEvents } from "../lib/events";
 import { queryClient } from "../lib/query-client";
 import { useItemProgress, useSettings } from "../lib/store";
+import { createVideoPreview } from "../lib/video-optimizer";
 import {
   bumpAttempt,
   finishItem,
@@ -20,6 +21,7 @@ import {
   recoverInterrupted,
   setBackupPaused,
   setItemHash,
+  setNeedsEmailVerification,
   setNextRetryAt,
   setState,
 } from "./db";
@@ -223,7 +225,10 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
   const thumb = cachedThumb ?? (await makeThumbAndHash(mediaType, localUri));
   if (cachedThumb) thumbCache.delete(item.asset_id);
 
-  const preview = await makePreview(mediaType, localUri);
+  let preview = mediaType === "video" ? await createVideoPreview(localUri).catch(() => null) : null;
+  if (!preview) {
+    preview = await makePreview(mediaType, localUri);
+  }
 
   await setState(item.asset_id, "init", { sha256 });
   emitStructure();
@@ -245,6 +250,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
       height: Math.max(1, Math.round(height)),
       durationMs,
       thumbhash: thumb.thumbhash,
+      uploadId: item.upload_id ?? undefined,
     });
 
     if (init.status === "duplicate") {
@@ -257,9 +263,11 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
       return;
     }
 
+    const canResume = init.resumed === true;
     await setState(item.asset_id, "uploading_thumb", {
       remote_id: init.id,
       upload_id: init.uploadId,
+      ...(canResume ? {} : { parts: "[]" }),
     });
     emitStructure();
     await uploadFile(init.thumb, thumb.uri);
@@ -274,9 +282,11 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
     emitStructure();
 
     let completedParts: { partNumber: number; etag: string }[] = [];
-    try {
-      if (item.parts) completedParts = JSON.parse(item.parts);
-    } catch {}
+    if (canResume) {
+      try {
+        if (item.parts) completedParts = JSON.parse(item.parts);
+      } catch {}
+    }
 
     const completedMap = new Map(completedParts.map((p) => [p.partNumber, p.etag]));
     const missingPartNumbers: number[] = [];
@@ -320,11 +330,10 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
           );
         }
 
-        const etag =
-          uploadRes.headers?.etag ||
-          uploadRes.headers?.ETag ||
-          uploadRes.headers?.Etag ||
-          `"${Date.now()}"`;
+        const etag = uploadRes.headers?.etag || uploadRes.headers?.ETag || uploadRes.headers?.Etag;
+        if (!etag) {
+          throw new Error(`R2 no devolvió ETag para la parte ${part.partNumber}.`);
+        }
 
         bytesSent += partLength;
         completedParts.push({ partNumber: part.partNumber, etag });
@@ -338,7 +347,11 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
 
     await setState(item.asset_id, "completing", { bytes_sent: fileSize });
     emitStructure();
-    await api.completeUpload(init.id);
+    await api.multipartComplete({
+      id: init.id,
+      uploadId: init.uploadId,
+      parts: completedParts,
+    });
     await setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
     useItemProgress.getState().clearItemProgress(item.asset_id);
     refreshRemoteData();
@@ -562,6 +575,17 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
       }
       const message =
         e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
+      // Correo sin verificar: no es una sesión caída. Pausar con el motivo
+      // visible para que el usuario pueda reenviar la verificación en vez de
+      // ver la cola detenida sin explicación.
+      if (e instanceof ApiError && e.status === 403 && e.code === "email_unverified") {
+        await setState(item.asset_id, "queued", { last_error: message }).catch(() => {});
+        useItemProgress.getState().clearItemProgress(item.asset_id);
+        setBackupPaused(true);
+        setNeedsEmailVerification(true);
+        emitStructure();
+        return true;
+      }
       // Sesión caída a mitad de pasada: reintentar quemaría intentos hasta
       // 'failed' contra un 401 que no se arregla solo. Reencolar y cortar.
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -581,16 +605,27 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
           setBackupPaused(true);
         }
       } else if (e instanceof ApiError && e.status === 400) {
+        if (item.remote_id) {
+          try {
+            await api.cancelUpload(item.remote_id, { uploadId: item.upload_id });
+          } catch {}
+        }
         await setState(item.asset_id, "failed", { last_error: message });
       } else {
         const db = getQueueDb();
-        const row = db.getFirstSync<{ attempts: number }>(
-          "SELECT attempts FROM queue WHERE asset_id = ? AND user_id IS ?",
+        const row = db.getFirstSync<{ attempts: number; remote_id?: string; upload_id?: string }>(
+          "SELECT attempts, remote_id, upload_id FROM queue WHERE asset_id = ? AND user_id IS ?",
           [item.asset_id, item.user_id ?? null],
         );
         const attempts = (row?.attempts ?? item.attempts) + 1;
         await bumpAttempt(item.asset_id);
         if (attempts >= MAX_ATTEMPTS) {
+          const remoteId = row?.remote_id ?? item.remote_id;
+          if (remoteId) {
+            try {
+              await api.cancelUpload(remoteId, { uploadId: row?.upload_id ?? item.upload_id });
+            } catch {}
+          }
           await setState(item.asset_id, "failed", { last_error: message });
         } else {
           const wait = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];

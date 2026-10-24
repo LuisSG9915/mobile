@@ -46,7 +46,7 @@ pnpm typecheck    # tsc --noEmit en todos los paquetes
 pnpm test         # API (Miniflare) + mobile (happy-dom) vía turbo
 ```
 
-Estado actual: 118 tests API + 223 tests mobile, todos verdes sin llamadas externas a Cloudflare. El plan de fases y sus commits viven en `docs/PLAN_GENERAL.md`.
+Estado actual: 143 tests API (19 suites) + 232 tests mobile (22 suites) = 375 tests unitarios/integración + 30 tests de pipeline (`pnpm test:pipeline`), todos verdes sin llamadas externas a Cloudflare. El plan vigente (v2, H1 en curso) y su evidencia viven en [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md); [`docs/PLAN_GENERAL.md`](docs/PLAN_GENERAL.md) es histórico.
 
 ## Distribución
 

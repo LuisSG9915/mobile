@@ -253,6 +253,20 @@ export function setBackupPaused(paused: boolean): void {
   kvSet(PAUSE_KEY, paused ? "1" : "0");
 }
 
+const EMAIL_VERIFICATION_KEY = "backup.needs_email_verification";
+
+/**
+ * El servidor rechazó la subida con 403 `email_unverified`: la UI debe ofrecer
+ * reenviar la verificación. Se limpia al reanudar el respaldo con éxito.
+ */
+export function setNeedsEmailVerification(needed: boolean): void {
+  kvSet(EMAIL_VERIFICATION_KEY, needed ? "1" : "0");
+}
+
+export function needsEmailVerification(): boolean {
+  return kvGet(EMAIL_VERIFICATION_KEY) === "1";
+}
+
 /** Último escaneo por usuario, como en db.ts (en web el scanner es no-op). */
 export function getLastScanTs(): number {
   const uid = store.getActiveContext()?.userId ?? "anon";

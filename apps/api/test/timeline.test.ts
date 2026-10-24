@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
+import { clearPresignCacheForTests, presignGet } from "../src/lib/s3";
 import { authed, createUser, j, sha } from "./helpers";
 
 async function seedMedia(
@@ -337,5 +338,15 @@ describe("timeline", () => {
     expect(usesMemoriesIndex).toBe(true);
     const hasMemoriesScan = memoriesPlan.some((p) => p.detail.includes("SCAN TABLE media"));
     expect(hasMemoriesScan).toBe(false);
+  });
+
+  it("presignGet devuelve la misma URL cacheada en llamadas repetidas dentro de la misma ventana", async () => {
+    clearPresignCacheForTests();
+    const testKey = "users/test-user/thumbs/abc123def456.webp";
+    const url1 = await presignGet(env, testKey);
+    const url2 = await presignGet(env, testKey);
+
+    expect(url1).toBe(url2);
+    expect(url1).toContain("users/test-user/thumbs/abc123def456.webp");
   });
 });

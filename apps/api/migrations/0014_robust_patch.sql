@@ -1,0 +1,1 @@
+ALTER TABLE `album` ADD `share_allow_download` integer DEFAULT false NOT NULL;

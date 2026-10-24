@@ -81,9 +81,27 @@ export const uploadCompleteResponseSchema = z.object({
   status: z.literal("ready"),
 });
 
+export const uploadCancelBodySchema = z
+  .object({
+    uploadId: z.string().optional(),
+  })
+  .optional();
+
+export type UploadCancelInput = z.infer<typeof uploadCancelBodySchema>;
+
+export const uploadCancelResponseSchema = z.object({
+  ok: z.literal(true),
+  releasedBytes: z.number().int().nonnegative(),
+});
+
+export type UploadCancelResponse = z.infer<typeof uploadCancelResponseSchema>;
+
 // ---------- uploads multipart ----------
 
-export const multipartInitSchema = uploadInitSchema;
+export const multipartInitSchema = uploadInitSchema.extend({
+  /** Si se envía y coincide con la MPU guardada, se reanuda en vez de crear otra. */
+  uploadId: z.string().optional(),
+});
 
 export const multipartInitResponseSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("duplicate"), id: z.string() }),
@@ -91,6 +109,8 @@ export const multipartInitResponseSchema = z.discriminatedUnion("status", [
     status: z.literal("upload"),
     id: z.string(),
     uploadId: z.string(),
+    /** true si se reutiliza la MPU y los etags previos del cliente. */
+    resumed: z.boolean().optional(),
     key: z.string(),
     partSize: z.number().int().positive(),
     totalParts: z.number().int().positive(),
@@ -300,6 +320,7 @@ export const okSchema = z.object({ ok: z.literal(true) });
 // ---------- admin ----------
 
 export const adminStorageRowSchema = z.object({
+  userId: z.string().optional(),
   email: z.string(),
   usedBytes: z.number(),
   maxBytes: z.number(),
@@ -312,6 +333,20 @@ export const adminStorageResponseSchema = z.object({
   rows: z.array(adminStorageRowSchema),
   totalUsedBytes: z.number(),
   userCount: z.number(),
+});
+
+export const adminReconcileResponseSchema = z.object({
+  ok: z.boolean(),
+  userId: z.string(),
+  previous: z.object({
+    usedBytes: z.number(),
+    reservedBytes: z.number(),
+  }),
+  current: z.object({
+    usedBytes: z.number(),
+    reservedBytes: z.number(),
+  }),
+  reconciledAt: z.string(),
 });
 
 // ---------- álbumes ----------
@@ -372,12 +407,17 @@ export const albumDetailResponseSchema = albumItemSchema.extend({
 
 export const shareAlbumRequestSchema = z.object({
   expiresIn: z.enum(["24h", "7d", "30d", "never"]).optional(),
+  /** Si coincide con el enlace vigente, no se rota el token. */
+  token: z.string().optional(),
+  /** Permite descargar originales desde el enlace público (por defecto false). */
+  allowDownload: z.boolean().optional(),
 });
 
 export const shareAlbumResponseSchema = z.object({
   shareToken: z.string(),
   shareUrl: z.string(),
   expiresAt: z.number().nullable().optional(),
+  allowDownload: z.boolean(),
 });
 
 export const publicAlbumItemSchema = z.object({
@@ -389,7 +429,11 @@ export const publicAlbumItemSchema = z.object({
   durationMs: z.number().nullable(),
   thumbhash: z.string(),
   thumbUrl: z.string(),
-  originalUrl: z.string(),
+  /**
+   * Solo si el dueño activó `allowDownload`: URL prefirmada del "original".
+   * Sin ella, el visor público usa preview/original y muestra solo miniaturas.
+   */
+  originalUrl: z.string().optional(),
   downloadUrl: z.string().optional(),
 });
 
@@ -398,6 +442,7 @@ export const publicAlbumResponseSchema = z.object({
   mediaCount: z.number(),
   createdAt: z.number(),
   expiresAt: z.number().nullable().optional(),
+  allowDownload: z.boolean(),
   items: z.array(publicAlbumItemSchema),
 });
 
@@ -564,6 +609,7 @@ export type StorageResponse = z.infer<typeof storageResponseSchema>;
 export type DownloadResponse = z.infer<typeof downloadResponseSchema>;
 export type AdminStorageRow = z.infer<typeof adminStorageRowSchema>;
 export type AdminStorageResponse = z.infer<typeof adminStorageResponseSchema>;
+export type AdminReconcileResponse = z.infer<typeof adminReconcileResponseSchema>;
 export type CreateAlbumInput = z.infer<typeof createAlbumSchema>;
 export type UpdateAlbumInput = z.infer<typeof updateAlbumSchema>;
 export type AddAlbumMediaInput = z.infer<typeof addAlbumMediaSchema>;
@@ -582,6 +628,7 @@ export type LocationItem = z.infer<typeof locationItemSchema>;
 export type LocationsQuery = z.infer<typeof locationsQuerySchema>;
 export type LocationsResponse = z.infer<typeof locationsResponseSchema>;
 export type ApiError = z.infer<typeof errorSchema>;
+export type MultipartInitInput = z.infer<typeof multipartInitSchema>;
 export type MultipartInitResponse = z.infer<typeof multipartInitResponseSchema>;
 export type MultipartPresignPartsInput = z.infer<typeof multipartPresignPartsSchema>;
 export type MultipartPresignPartsResponse = z.infer<typeof multipartPresignPartsResponseSchema>;

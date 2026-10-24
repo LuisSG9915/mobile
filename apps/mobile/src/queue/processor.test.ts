@@ -19,12 +19,18 @@ const h = vi.hoisted(() => ({
   queuedWithoutHashCalls: 0,
   backupPaused: false,
   initUploadFailures: new Map<string, { status: number; code: string; message: string }>(),
+  multipartInitFailures: new Map<string, { status: number; code: string; message: string }>(),
+  needsVerification: false,
+  fileSize: 1000,
+  multipartInitCalls: 0,
+  multipartCompleteCalls: 0,
+  completeUploadCalls: 0,
 }));
 
 vi.mock("expo-file-system", () => ({
   File: class {
     uri: string;
-    size = 1000;
+    size = h.fileSize;
     constructor(uri: string) {
       this.uri = uri;
     }
@@ -55,6 +61,13 @@ vi.mock("expo-file-system/legacy", () => ({
   },
   FileSystemUploadType: { BINARY_CONTENT: 0 },
   FileSystemSessionType: { BACKGROUND: 0 },
+  cacheDirectory: "file:///cache/",
+  readAsStringAsync: async () => "AAAA",
+  writeAsStringAsync: async () => {},
+  uploadAsync: async (_url: string) => ({
+    status: 200,
+    headers: { etag: '"etag-part"' },
+  }),
 }));
 
 vi.mock("expo-media-library/legacy", () => ({
@@ -101,7 +114,40 @@ vi.mock("../api/client", () => {
           original: { url: "https://r2/original", headers: {} },
         };
       },
-      completeUpload: async () => ({}),
+      completeUpload: async () => {
+        h.completeUploadCalls++;
+        return {};
+      },
+      multipartInit: async (input: { sha256: string; fileSize: number; previewSize?: number }) => {
+        h.multipartInitCalls++;
+        const failure = h.multipartInitFailures.get(input.sha256);
+        if (failure) {
+          throw new ApiError(failure.status, failure.code, failure.message);
+        }
+        const partSize = 5 * 1024 * 1024;
+        return {
+          status: "upload",
+          id: `remote-${input.sha256}`,
+          uploadId: `up-${input.sha256}`,
+          resumed: false,
+          key: `users/u/originals/${input.sha256}.jpg`,
+          partSize,
+          totalParts: Math.max(1, Math.ceil(input.fileSize / partSize)),
+          expiresAt: new Date().toISOString(),
+          thumb: { url: "https://r2/thumb", headers: {} },
+          ...(input.previewSize ? { preview: { url: "https://r2/preview", headers: {} } } : {}),
+        };
+      },
+      multipartPresignParts: async ({ partNumbers }: { partNumbers: number[] }) => ({
+        parts: partNumbers.map((partNumber) => ({
+          partNumber,
+          url: `https://r2/part/${partNumber}`,
+        })),
+      }),
+      multipartComplete: async () => {
+        h.multipartCompleteCalls++;
+        return { id: "remote", status: "ready" };
+      },
     },
   };
 });
@@ -170,6 +216,9 @@ vi.mock("./db", () => ({
   setBackupPaused: (paused: boolean) => {
     h.backupPaused = paused;
   },
+  setNeedsEmailVerification: (needed: boolean) => {
+    h.needsVerification = needed;
+  },
 }));
 
 function makeItem(id: string): MockItem {
@@ -206,6 +255,12 @@ beforeEach(() => {
   h.queuedWithoutHashCalls = 0;
   h.backupPaused = false;
   h.initUploadFailures.clear();
+  h.multipartInitFailures.clear();
+  h.needsVerification = false;
+  h.fileSize = 1000;
+  h.multipartInitCalls = 0;
+  h.multipartCompleteCalls = 0;
+  h.completeUploadCalls = 0;
 });
 
 describe("processQueue nativo: concurrencia", () => {
@@ -281,5 +336,37 @@ describe("processQueue nativo: concurrencia", () => {
     expect(h.backupPaused).toBe(false);
     expect(normalPhoto.state).toBe("done");
     expect(h.finished).toContain("photo-normal");
+  });
+
+  it("403 email_unverified no se trata como sesión: reencola con motivo y pausa el respaldo", async () => {
+    h.fileSize = 21 * 1024 * 1024;
+    h.pending = [makeItem("video-unverified")];
+    h.multipartInitFailures.set("sha-file:///video-unverified.jpg", {
+      status: 403,
+      code: "email_unverified",
+      message: "Debes verificar tu correo electrónico.",
+    });
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(h.pending[0].state).toBe("queued");
+    expect(h.pending[0].last_error).toContain("verificar");
+    expect(h.backupPaused).toBe(true);
+    expect(h.needsVerification).toBe(true);
+    expect(h.finished).toEqual([]);
+  });
+
+  it("un archivo > 20 MB completa con multipartComplete, no con completeUpload", async () => {
+    h.fileSize = 21 * 1024 * 1024;
+    h.pending = [makeItem("video-big")];
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(h.multipartInitCalls).toBe(1);
+    expect(h.multipartCompleteCalls).toBe(1);
+    expect(h.completeUploadCalls).toBe(0);
+    expect(h.pending[0].state).toBe("done");
   });
 });

@@ -40,11 +40,12 @@ export type PresignedTarget = { url: string; headers: Record<string, string> };
 // tratar la respuesta como inmutable.
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
-// Ventana de firma reutilizada por todas las lecturas GET (ver presignGet).
-const getSigningDate = () => {
-  const windowMs = PRESIGN_GET_WINDOW_SECONDS * 1000;
-  return new Date(Math.floor(Date.now() / windowMs) * windowMs);
-};
+const presignGetCache = new Map<string, string>();
+const MAX_PRESIGN_CACHE_SIZE = 2000;
+
+export function clearPresignCacheForTests(): void {
+  presignGetCache.clear();
+}
 
 export async function presignPut(
   env: Bindings,
@@ -76,6 +77,17 @@ export async function presignPut(
 }
 
 export async function presignGet(env: Bindings, key: string): Promise<string> {
+  const windowMs = PRESIGN_GET_WINDOW_SECONDS * 1000;
+  const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+  const cacheKey = `${env.R2_BUCKET_NAME}:${windowStart}:${key}`;
+
+  const cachedUrl = presignGetCache.get(cacheKey);
+  if (cachedUrl) {
+    presignGetCache.delete(cacheKey);
+    presignGetCache.set(cacheKey, cachedUrl);
+    return cachedUrl;
+  }
+
   const command = new GetObjectCommand({
     Bucket: env.R2_BUCKET_NAME,
     Key: key,
@@ -83,10 +95,38 @@ export async function presignGet(env: Bindings, key: string): Promise<string> {
   });
   // Fecha de firma redondeada a bloques de 6 h: la URL no cambia dentro de la
   // ventana, así que las caches (expo-image, CDN) pueden reutilizarla.
-  return getSignedUrl(getClient(env), command, {
+  const url = await getSignedUrl(getClient(env), command, {
     expiresIn: PRESIGN_GET_TTL_SECONDS,
-    signingDate: getSigningDate(),
+    signingDate: new Date(windowStart),
   });
+
+  if (presignGetCache.size >= MAX_PRESIGN_CACHE_SIZE) {
+    const oldestKey = presignGetCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      presignGetCache.delete(oldestKey);
+    }
+  }
+  presignGetCache.set(cacheKey, url);
+
+  return url;
+}
+
+/**
+ * GET prefirmado con TTL ajustado. Lo usan los enlaces públicos para que sus
+ * URLs no sobrevivan a la caducidad del enlace. Sin caché: el TTL es variable.
+ */
+export async function presignGetWithTtl(
+  env: Bindings,
+  key: string,
+  ttlSeconds?: number,
+): Promise<string> {
+  if (ttlSeconds == null) return presignGet(env, key);
+  const command = new GetObjectCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: key,
+    ResponseCacheControl: IMMUTABLE_CACHE_CONTROL,
+  });
+  return getSignedUrl(getClient(env), command, { expiresIn: Math.max(1, ttlSeconds) });
 }
 
 /**
@@ -97,17 +137,48 @@ export async function presignGetDownload(
   env: Bindings,
   key: string,
   filename: string,
+  ttlSeconds?: number,
 ): Promise<string> {
+  if (ttlSeconds != null) {
+    const command = new GetObjectCommand({
+      Bucket: env.R2_BUCKET_NAME,
+      Key: key,
+      ResponseCacheControl: IMMUTABLE_CACHE_CONTROL,
+      ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`,
+    });
+    return getSignedUrl(getClient(env), command, { expiresIn: Math.max(1, ttlSeconds) });
+  }
+  const windowMs = PRESIGN_GET_WINDOW_SECONDS * 1000;
+  const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+  const cacheKey = `${env.R2_BUCKET_NAME}:${windowStart}:${key}:dl:${filename}`;
+
+  const cachedUrl = presignGetCache.get(cacheKey);
+  if (cachedUrl) {
+    presignGetCache.delete(cacheKey);
+    presignGetCache.set(cacheKey, cachedUrl);
+    return cachedUrl;
+  }
+
   const command = new GetObjectCommand({
     Bucket: env.R2_BUCKET_NAME,
     Key: key,
     ResponseCacheControl: IMMUTABLE_CACHE_CONTROL,
     ResponseContentDisposition: `attachment; filename="${encodeURIComponent(filename)}"`,
   });
-  return getSignedUrl(getClient(env), command, {
+  const url = await getSignedUrl(getClient(env), command, {
     expiresIn: PRESIGN_GET_TTL_SECONDS,
-    signingDate: getSigningDate(),
+    signingDate: new Date(windowStart),
   });
+
+  if (presignGetCache.size >= MAX_PRESIGN_CACHE_SIZE) {
+    const oldestKey = presignGetCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      presignGetCache.delete(oldestKey);
+    }
+  }
+  presignGetCache.set(cacheKey, url);
+
+  return url;
 }
 
 export type MultipartPartInfo = {

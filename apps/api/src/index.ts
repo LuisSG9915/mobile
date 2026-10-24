@@ -92,12 +92,43 @@ app.use("/api/auth/*", async (c, next) => {
   return next();
 });
 app.use("/v1/*", async (c, next) => webCors(c.env)(c, next));
+// Enlaces públicos: sin sesión, pero con rate limit por IP (SHARE_LIMITER).
+app.use("/v1/albums/public/*", async (c, next) => {
+  const limiter = c.env.SHARE_LIMITER;
+  if (limiter) {
+    const key = c.req.header("cf-connecting-ip") ?? "anon";
+    const { success } = await limiter.limit({ key });
+    if (!success) {
+      return c.json(
+        { error: "rate_limited", message: "Demasiadas solicitudes. Espera un minuto." },
+        429,
+      );
+    }
+  }
+  c.header("Cache-Control", "private, max-age=60");
+  return next();
+});
 app.use("/v1/*", async (c, next) => {
-  if (c.req.path.startsWith("/v1/shared/")) {
+  // Las rutas públicas no requieren sesión; el resto de /v1 sí.
+  if (c.req.path.startsWith("/v1/albums/public/") || c.req.path.startsWith("/v1/shared/")) {
     return next();
   }
   return requireUser(c, next);
 });
+
+/**
+ * Versión viva del API. `APP_VERSION`/`GIT_SHA` los inyecta el deploy
+ * (wrangler `--var`); sin ellos no se puede saber qué commit está en producción.
+ */
+app.get("/version", (c) =>
+  c.json({
+    ok: true,
+    service: "photos-api",
+    version: c.env.APP_VERSION ?? "dev",
+    commit: c.env.GIT_SHA ?? "unknown",
+    time: new Date().toISOString(),
+  }),
+);
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));

@@ -91,6 +91,12 @@ export const t = {
     freed: (n: number, size: string) => `${n} elementos liberados (${size})`,
     pause: "Pausar respaldo",
     resume: "Reanudar respaldo",
+    verifyNeededTitle: "Verifica tu correo para seguir respaldando",
+    verifyNeededBody:
+      "Han pasado los días de gracia y tu correo aún no está verificado. Reenvía el enlace y ábrelo para que el respaldo continúe.",
+    verifyResend: "Reenviar verificación",
+    verifyResent: (email: string) => `Enlace enviado a ${email}. Revisa tu bandeja de entrada.`,
+    verifyResendFailed: "No se pudo reenviar. Inténtalo de nuevo en unos minutos.",
     paused: "Respaldo en pausa",
     queued: (n: number) => `En cola (${n} pendientes)`,
   },
@@ -423,6 +429,10 @@ export const t = {
     total: (n: number) => `Total · ${n} usuarios`,
     empty: "Sin usuarios",
     restricted: "Acceso restringido al administrador",
+    reconcile: "Reconciliar almacenamiento",
+    reconcileConfirm: (email: string) => `¿Deseas recalcular el almacenamiento de ${email}?`,
+    reconcileSuccess: "Almacenamiento reconciliado correctamente",
+    reconcileError: "Error al reconciliar almacenamiento",
   },
   errors: {
     network: "Sin conexión. Revisa tu red.",

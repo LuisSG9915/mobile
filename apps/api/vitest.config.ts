@@ -42,6 +42,8 @@ export default defineConfig({
           R2_ACCESS_KEY_ID: "test-key",
           R2_SECRET_ACCESS_KEY: "test-secret",
           BETTER_AUTH_SECRET: "test-secret-key-for-tests-only-32chars",
+          // Entorno "test": la telemetría no debe escribir logs JSON por cada request.
+          ENVIRONMENT: "test",
           BETTER_AUTH_URL: "http://localhost:8787",
           WEB_ORIGINS: "http://localhost:8081,https://web.test.dev",
           ...devVars,

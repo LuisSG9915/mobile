@@ -1,9 +1,19 @@
 import { ADMIN_EMAIL } from "@photos/shared";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { ChevronLeft } from "lucide-react-native";
-import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
+import { ChevronLeft, RefreshCw } from "lucide-react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  RefreshControl,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { useSession } from "../auth/client";
 import { t } from "../i18n/es";
@@ -23,6 +33,34 @@ export default function AdminScreen() {
     enabled: isAdmin,
   });
   const data = query.data;
+
+  const reconcileMutation = useMutation({
+    mutationFn: (userId: string) => api.adminReconcile(userId),
+    onSuccess: () => {
+      toast.success(t.admin.reconcileSuccess);
+      void query.refetch();
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || t.admin.reconcileError);
+    },
+  });
+
+  const handleReconcile = (userId: string, email: string) => {
+    const msg = t.admin.reconcileConfirm(email);
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(msg)) {
+        reconcileMutation.mutate(userId);
+      }
+    } else {
+      Alert.alert(t.admin.reconcile, msg, [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Reconciliar",
+          onPress: () => reconcileMutation.mutate(userId),
+        },
+      ]);
+    }
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top", "bottom"]}>
@@ -48,7 +86,7 @@ export default function AdminScreen() {
             />
           }
           ListHeaderComponent={
-            <View className="flex-row px-5 py-2 border-b border-neutral-200 dark:border-neutral-800">
+            <View className="flex-row items-center px-5 py-2 border-b border-neutral-200 dark:border-neutral-800">
               <Text className="flex-1 text-xs font-semibold text-neutral-400 uppercase">
                 {t.admin.email}
               </Text>
@@ -58,9 +96,10 @@ export default function AdminScreen() {
               <Text className="w-14 text-right text-xs font-semibold text-neutral-400 uppercase">
                 {t.admin.count}
               </Text>
-              <Text className="w-16 text-right text-xs font-semibold text-neutral-400 uppercase">
+              <Text className="w-14 text-right text-xs font-semibold text-neutral-400 uppercase">
                 {t.admin.quota}
               </Text>
+              <View className="w-8" />
             </View>
           }
           renderItem={({ item }) => (
@@ -74,9 +113,28 @@ export default function AdminScreen() {
               <Text className="w-14 text-right text-sm text-neutral-600 dark:text-neutral-300">
                 {item.mediaCount}
               </Text>
-              <Text className="w-16 text-right text-sm text-neutral-600 dark:text-neutral-300">
+              <Text className="w-14 text-right text-sm text-neutral-600 dark:text-neutral-300">
                 {item.usedPercent}%
               </Text>
+              <View className="w-8 items-end justify-center">
+                {item.userId ? (
+                  <Pressable
+                    onPress={() => item.userId && handleReconcile(item.userId, item.email)}
+                    disabled={
+                      reconcileMutation.isPending && reconcileMutation.variables === item.userId
+                    }
+                    accessibilityLabel={t.admin.reconcile}
+                    hitSlop={8}
+                    className="p-1"
+                  >
+                    {reconcileMutation.isPending && reconcileMutation.variables === item.userId ? (
+                      <ActivityIndicator size="small" color="#737373" />
+                    ) : (
+                      <RefreshCw size={16} color="#737373" />
+                    )}
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           )}
           ListEmptyComponent={

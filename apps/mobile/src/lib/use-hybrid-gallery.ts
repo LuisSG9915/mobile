@@ -65,25 +65,35 @@ export function useHybridGallery(
     if (localAssetsCache?.key === scopeKey) setLocalAssets(localAssetsCache.assets);
   }, [scopeKey]);
 
-  const refreshLocal = useCallback(async () => {
-    const key = scopeKey;
-    const commit = (assets: LocalAsset[]) => {
-      if (scopeRef.current !== key) return;
-      localAssetsCache = { key, assets };
-      setLocalAssets(assets);
-    };
-    try {
-      // Primera página (60) en cuanto MediaLibrary la entrega; el resto sigue
-      // paginando en segundo plano sin bloquear el primer render (sin tope fijo de 2.000).
-      const assets = await listLocalAssets(20_000, localAlbumId, syncedAlbumIds, commit);
-      commit(assets);
-    } catch {
-      // Sin permisos o error de MediaLibrary: galería solo remota/cola.
-    }
-  }, [localAlbumId, syncedAlbumIds, scopeKey]);
+  const refreshLocal = useCallback(
+    async (signal?: AbortSignal) => {
+      const key = scopeKey;
+      const commit = (assets: LocalAsset[]) => {
+        if (scopeRef.current !== key || signal?.aborted) return;
+        localAssetsCache = { key, assets };
+        setLocalAssets(assets);
+      };
+      try {
+        // Primer lote rápido (300) y páginas de 1000 en segundo plano con cesión de hilo (16 ms)
+        const assets = await listLocalAssets(20_000, localAlbumId, syncedAlbumIds, commit, {
+          signal,
+          initialBatchSize: 300,
+          pageSize: 1000,
+        });
+        commit(assets);
+      } catch {
+        // Sin permisos o error de MediaLibrary: galería solo remota/cola.
+      }
+    },
+    [localAlbumId, syncedAlbumIds, scopeKey],
+  );
 
   useEffect(() => {
-    void refreshLocal();
+    const controller = new AbortController();
+    void refreshLocal(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [refreshLocal, libTick]);
 
   const query = useTimeline(filter, before);

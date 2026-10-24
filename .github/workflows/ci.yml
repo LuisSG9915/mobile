@@ -127,9 +127,16 @@ jobs:
         run: pnpm --filter @photos/api db:migrate:remote
 
       - name: Deploy API Worker
-        run: pnpm --filter @photos/api deploy
+        run: |
+          # /version expone la versión y el commit desplegados (H1.4).
+          node node_modules/wrangler/bin/wrangler.js deploy \
+            --var APP_VERSION="${GITHUB_REF_NAME}" \
+            --var GIT_SHA="${GITHUB_SHA}"
 
       - name: Deploy Web Worker
+        env:
+          EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
+          EXPO_PUBLIC_DEPLOY_VERSION: ${{ github.ref_name }}
         run: pnpm --filter @photos/mobile deploy:web
 
       - name: Observability Healthcheck (Sentry)
@@ -141,8 +148,21 @@ jobs:
       - name: Production Smoke Tests (Upload & Presigned R2)
         env:
           PROD_WEB_URL: https://photos-web.luis-sg9915.workers.dev
-          SMOKE_OPTIONAL: "1"
-        run: node apps/mobile/e2e/prod-smoke.mjs --optional
+          PROD_API_URL: https://photos-api.luis-sg9915.workers.dev
+          SMOKE_USER_EMAIL: ${{ secrets.SMOKE_USER_EMAIL }}
+          SMOKE_USER_PASSWORD: ${{ secrets.SMOKE_USER_PASSWORD }}
+        run: |
+          set +e
+          node apps/mobile/e2e/prod-smoke.mjs --optional
+          code=$?
+          # 2 = credenciales no configuradas (skip explícito); 0 = OK; otro = fallo real.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then
+            echo "::error::El smoke de producción falló (exit $code)."
+            exit "$code"
+          fi
+          if [ "$code" -eq 2 ]; then
+            echo "::warning::Sin SMOKE_USER_EMAIL/SMOKE_USER_PASSWORD: smoke omitido."
+          fi
 
       - name: Production Integrity Audit (D1 / R2)
         run: node scripts/audit-prod.mjs

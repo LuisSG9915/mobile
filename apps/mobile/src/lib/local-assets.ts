@@ -66,13 +66,20 @@ export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
 
 /**
  * Lista los assets locales del dispositivo para la galería híbrida. Paginación
- * incremental sin tope artificial de 2.000 fotos (soporta bibliotecas completas).
+ * incremental progresiva: primer lote rápido de 300 para TTI instantáneo, seguido
+ * de páginas de 1.000 activos en segundo plano cediendo el hilo principal (16 ms)
+ * con soporte para cancelación vía AbortSignal.
  */
 export async function listLocalAssets(
   limit = 20_000,
   albumId?: string | null,
   syncedAlbumIds?: string[] | null,
   onFirstPage?: (assets: LocalAsset[]) => void,
+  options?: {
+    signal?: AbortSignal;
+    pageSize?: number;
+    initialBatchSize?: number;
+  },
 ): Promise<LocalAsset[]> {
   // Sin granularPermissions, Android chequea TODAS las declaradas (ver scanner).
   const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
@@ -80,7 +87,10 @@ export async function listLocalAssets(
 
   const out: LocalAsset[] = [];
   let firstPageReported = false;
-  // Primera página en cuanto está: la galería pinta sin esperar las 10 páginas.
+  const initialBatch = options?.initialBatchSize ?? 300;
+  const pageSize = options?.pageSize ?? 1000;
+
+  // Primera página en cuanto está (300 items): la galería pinta sin esperar la biblioteca entera.
   const reportFirstPage = () => {
     if (firstPageReported || out.length === 0) return;
     firstPageReported = true;
@@ -94,13 +104,23 @@ export async function listLocalAssets(
   async function scanSource(sourceAlbumId?: string) {
     let after: string | undefined;
     do {
+      if (options?.signal?.aborted) return;
+
+      const isFirst = out.length === 0;
+      const batchToFetch = isFirst
+        ? Math.min(initialBatch, limit)
+        : Math.min(pageSize, limit - out.length);
+
       const page = await MediaLibrary.getAssetsAsync({
-        first: out.length === 0 ? Math.min(60, limit) : Math.min(200, limit - out.length),
+        first: batchToFetch,
         after,
         mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
         sortBy: [[MediaLibrary.SortBy.creationTime, false]],
         ...(sourceAlbumId ? { album: sourceAlbumId } : {}),
       });
+
+      if (options?.signal?.aborted) return;
+
       for (const a of page.assets) {
         // creationTime llega en unidad variable (s o ms) y 0 sin EXIF.
         // Usar modificationTime si creationTime falta; de lo contrario fallback estable (nunca Date.now()).
@@ -128,6 +148,12 @@ export async function listLocalAssets(
       }
       after = page.hasNextPage && out.length < limit ? page.endCursor : undefined;
       reportFirstPage();
+
+      if (after && out.length < limit) {
+        // Ceder el hilo principal (16 ms) entre páginas para no congelar la UI a 60 fps
+        await new Promise((resolve) => setTimeout(resolve, 16));
+        if (options?.signal?.aborted) return;
+      }
     } while (after && out.length < limit);
   }
 
@@ -140,7 +166,7 @@ export async function listLocalAssets(
       return [];
     }
     for (const alb of syncedAlbumIds) {
-      if (out.length >= limit) break;
+      if (out.length >= limit || options?.signal?.aborted) break;
       await scanSource(alb);
     }
     out.sort((a, b) => b.creationTime - a.creationTime);

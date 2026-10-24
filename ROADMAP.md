@@ -1,5 +1,8 @@
 # 📸 Plan de Trabajo y Estado de Fases — Photo Cloud Sync
 
+> **Histórico (fases 1–5).** El plan vigente es [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md)
+> (Plan v2, H1 en curso). Este documento se conserva para trazabilidad.
+
 > **Motor de Ejecución:** Devin AI (Modelo SWE-2 Max)  
 > **Arquitectura:** Turborepo | Expo React Native | Hono en Cloudflare Workers | Cloudflare R2 | SQLite Queue
 
@@ -7,7 +10,7 @@
 
 ## 📊 Progreso General
 
-**Total:** `[██████████] 100%`
+**Total fases 1–5 (histórico):** `[██████████] 100%` · **Plan v2 H1:** en curso (ver `docs/PLAN_MEJORAS.md`)
 
 | Fase | Título | Estado | Progreso |
 | :--- | :--- | :---: | :--- |
@@ -61,5 +64,7 @@
 **Objetivo:** Monitoreo, robustez y preparación para producción.
 - [x] Endpoint de uso de almacenamiento por usuario: `GET /v1/stats` (count, totalBytes, lastUploadAt y `quotaBytes` desde `STORAGE_QUOTA_BYTES` compartido).
 - [x] Barra de almacenamiento en `apps/mobile/src/app/(tabs)/settings.tsx` alimentada por `stats.data.quotaBytes`.
-- [x] Suite completa `pnpm test:all` (pipeline 24, api 39, mobile 97) + E2E Playwright 11/11 verdes (auth, persistencia de cola, Web Locks, subida/dedup/filtro). Nota: el primer intento falló por un `expo start` zombie ocupando :8081 con env de producción; con los puertos limpios la suite pasó entera.
-- [x] Auditoría de linting con Biome (`pnpm lint` limpio tras `lint:fix`).
+- [x] Suite completa de validación local (pipeline 31, API 143 tests en 19 suites, Mobile 232 tests en 22 suites = 375 tests verdes) + E2E Playwright 11/11 verdes (auth, persistencia de cola, Web Locks, subida/dedup/filtro). Nota: el primer intento falló por un `expo start` zombie ocupando :8081 con env de producción; con los puertos limpios la suite pasó entera.
+- [x] Auditoría de linting con Biome (`pnpm lint` limpio tras `lint:fix`) y typecheck global (`pnpm typecheck`).
+- [x] Base de hardening post-Fase 22 construida (cuota atómica, sweep persistente, previews, paginación, borrado de cuenta y CI/CD). **No toda está cerrada:** P0/P1 abiertos y evidencia real en [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md).
+- [ ] Plan v2 — H1 “Verdad y confianza”: cerrar P0 multipart/cuota, release `v1.1.0`, restore drill, seguridad mínima y heartbeat. Ver [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md).

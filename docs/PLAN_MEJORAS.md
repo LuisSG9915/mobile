@@ -1,342 +1,231 @@
-# Plan de trabajo — mejoras posteriores a la Fase 22
+# Plan de trabajo v2 — Confianza, operación y producto
 
-> Documento de planificación. No implementa cambios.
-> Referencias: `docs/PLAN_GENERAL.md`, `ROADMAP.md`, `docs/decisions.md`, `docs/testing/PLAN_PRUEBAS.md`.
-
-## 0. Resumen ejecutivo
-
-El plan inicial está cerrado: las 5 fases del `ROADMAP.md` y las 22 fases de
-`docs/PLAN_GENERAL.md` figuran completadas, y la arquitectura base (Worker sin
-binarios, R2 prefirmado, D1, cola híbrida, papelera, cuota y tests) está
-implementada.
-
-Lo que falta no son fases del plan viejo, sino **deuda de producto y operación**
-que el plan no cubría:
-
-1. **Integridad**: la cuota tiene una carrera conocida, el barrido de huérfanos
-   de R2 no avanza más allá de las primeras 5.000 claves y el vaciado de
-   papelera no está acotado.
-2. **Escala**: el visor descarga el original completo, la galería local se corta
-   en 2.000 assets, el salto temporal carga páginas de una en una y varias
-   consultas no tienen paginación.
-3. **Operación**: quedan pendientes el rate limit de auth en producción, Resend,
-   el token de Sentry en EAS, la verificación de backups y el despliegue
-   continuo. La documentación además está desincronizada.
-
-La propuesta es **6 etapas cortas**, priorizando quick wins y luego integridad
-antes que funcionalidades nuevas.
-
-## 1. Estado de partida
-
-### Lo que ya está bien
-
-- **Arquitectura**: el Worker nunca recibe binarios; el cliente sube directo a
-  R2 con URLs prefirmadas (`apps/api/src/lib/s3.ts`, `uploads.ts`).
-- **Deduplicación**: SHA-256 por usuario + `check-hashes` + índice único.
-- **Respaldo**: cola persistente nativa (SQLite) y web (IndexedDB), pausa
-  persistente, reintentos con backoff, watchdog de subidas y exclusión por
-  Web Locks.
-- **Higiene**: papelera de 30 días, cron de purga, reconciliación de cuota,
-  rate limit de subidas, Sentry opcional y backups D1 diarios.
-- **Calidad**: ~95 casos de test en API y ~195 en mobile, además de E2E web,
-  Miniflare local y checklist nativo.
-
-### Señales de que “100%” no significa “terminado”
-
-- `docs/testing/PLAN_IMPLEMENTACION_DEVIN.md` sigue con las 7 fases en `[ ]`,
-  aunque `docs/PLAN_GENERAL.md` las marca `[x]`.
-- `README.md` dice “46 tests API + 116 mobile”; los archivos actuales declaran
-  ~95 y ~195. `ROADMAP.md` también cita 39/97.
-- `docs/decisions.md` tiene un apartado **Pendiente operativo** con el
-  `AUTH_LIMITER` y Resend.
-- No hay un backlog posterior a la Fase 22: el roadmap dice 100%, pero no dice
-  qué sigue.
-
-> Nota de verificación: en esta sesión no se pudieron ejecutar `pnpm lint`,
-> `pnpm typecheck` ni los tests porque `node_modules` no está instalado. El
-> diagnóstico es estático (código, migraciones, workflows y documentación).
-
-## 2. Hallazgos priorizados
-
-| ID | Hallazgo | Evidencia | Impacto | Prioridad |
-| :-- | :--- | :--- | :--- | :---: |
-| **M-01** | Documentación y tablero desincronizados | `PLAN_IMPLEMENTACION_DEVIN.md` con `[ ]`; README con 46/116 tests; ROADMAP sin siguiente etapa | Una sesión futura no sabe qué está hecho ni qué sigue | P0 |
-| **M-02** | Operación incompleta | `AUTH_LIMITER` pendiente de deploy; `RESEND_API_KEY`/`EMAIL_FROM`; `SENTRY_AUTH_TOKEN` en EAS; `EXPO_PUBLIC_ADMIN_EMAIL` no está en `eas.json` | Sin freno de fuerza bruta en prod, sin recuperación real de contraseña ni source maps; el panel admin puede quedar oculto en el APK | P0 |
-| **M-03** | Carrera de cuota | `docs/decisions.md` la documenta: dos `/uploads/init` concurrentes pueden superar los 10 GB | Se puede exceder la cuota y generar coste | P0 |
-| **M-04** | El barrido de huérfanos R2 no progresa | `cron/cleanup.ts` empieza siempre en `cursor = undefined` y corta a 5.000 claves; con más objetos vuelve a escanear el mismo prefijo | Objetos huérfanos fuera del primer bloque nunca se borran; coste silencioso | P0 |
-| **M-05** | Vaciar papelera y cron no están acotados | `media.ts` selecciona toda la papelera y hace un `removeStorageUsage` por item; `trash` devuelve 500 con `nextCursor: null` | Con miles de elementos se pueden agotar subrequests/tiempo y quedar cuota desincronizada; elementos >500 invisibles | P0 |
-| **M-06** | El visor descarga el original completo | `app/media/[id].tsx` usa `detail.data.originalUrl` para mostrar la foto remota | Fotos de 20 MP y vídeos 4K gastan datos, memoria y tiempo de apertura | P1 |
-| **M-07** | Subidas grandes no reanudables | Nativo: un único PUT; web: el archivo entero va como `ArrayBuffer` a IndexedDB | Un fallo al 99% reinicia todo; un vídeo grande puede no caber en el navegador | P1 |
-| **M-08** | Galería local limitada a 2.000 assets | `listLocalAssets(2000)` y `getQueueItems(2000)` | Bibliotecas grandes no muestran fotos locales antiguas (ni pendientes) | P1 |
-| **M-09** | Salto temporal costoso | `app/(tabs)/index.tsx` busca el mes con `fetchNextPage()` repetido; la Fase 5 pedía `?before=` | Saltar a un año antiguo puede encadenar decenas de peticiones | P1 |
-| **M-10** | Invalidación de queries incompleta | `trash.tsx` invalida `["user-storage"]`, pero Ajustes usa `["storage"]`; borrar/restaurar no invalida `timeline-months`, álbumes, búsqueda, mapa ni recuerdos | La barra de cuota, el scrubber y los contadores quedan obsoletos | P1 |
-| **M-11** | Un archivo demasiado grande pausa todo el respaldo | `uploads/init` devuelve 413 `file_too_large`; ambos procesadores tratan cualquier 413 como cuota y pausan la cola | Un vídeo de >5 GB bloquea el respaldo hasta que el usuario lo note | P1 |
-| **M-12** | Consultas sin techo ni índice | `memories` y `places` cargan todo; `tags` parsea todas las filas; `search` hace `%LIKE%` + `count(*)` por página; álbum y papelera no paginan | Memoria/CPU del Worker y latencia crecientes con la biblioteca | P1 |
-| **M-13** | Backups sin verificación real | `scripts/backup-r2.mjs` solo compara tamaño; la restauración D1 es manual | Una copia corrupta puede pasar meses sin detectarse | P1 |
-| **M-14** | Ciclo de cuenta y privacidad incompletos | Sin borrado de cuenta, exportación completa, sesiones revocables, verificación de email ni caducidad de enlaces públicos; el manifiesto Android pide `READ_MEDIA_AUDIO` y `WRITE_EXTERNAL_STORAGE` | Difícil cumplir expectativas de privacidad; fricción en Play Store; enlaces públicos eternos | P2 |
-| **M-15** | Entrega y QA manuales | CI no ejecuta E2E; no hay deploy continuo de API/web; la matriz nativa es manual | Regresiones de auth/cola/subida se descubren tarde | P2 |
-
-## 3. Plan por etapas
-
-### Etapa 0 — Quick wins y orden (2–3 días) [x] Completado
-
-**Objetivo:** dejar el tablero fiable y corregir los errores pequeños de mayor
-retorno.
-
-Tareas:
-
-1. Actualizar `PLAN_IMPLEMENTACION_DEVIN.md` (marcar fases), README (números
-   reales de tests) y ROADMAP (enlace a este plan).
-2. Verificar y completar el checklist operativo de `docs/decisions.md`:
-   `wrangler deploy` con `AUTH_LIMITER`, `RESEND_API_KEY`, `EMAIL_FROM`,
-   `SENTRY_AUTH_TOKEN` y `EXPO_PUBLIC_ADMIN_EMAIL` en EAS.
-3. Corregir `trash.tsx`: `["user-storage"]` → `["storage"]`.
-4. Crear un helper único de invalidación (`invalidateMediaLifecycleQueries`) y usarlo en
-   borrar/restaurar/vaciar/editar; incluir `timeline-months`, `album`,
-   `albums`, `search`, `locations`, `memories` y `storage`.
-5. Distinguir `file_too_large` de `quota_exceeded` en los dos procesadores:
-   - `file_too_large`: item `failed`, sin pausar la cola.
-   - `quota_exceeded`: item `failed`/`queued`, pausar y ofrecer reintento al
-     reanudar.
-6. Añadir un test de regresión para cada corrección (`processor.test.ts` y `processor.web.test.ts`).
-
-**Criterio de aceptación:** documentación coherente, checklist operativo
-cerrado, y tests que fallen si vuelve la invalidación incorrecta o si un 413 de
-tamaño pausa la cola.
-
-**Esfuerzo:** S.
+> **Estado:** H1 en curso (2026-10-23). Este documento sustituye la lista lineal de etapas 0–5.
+> **Regla de oro:** ningún `[x]` sin evidencia enlazada; ningún feature nuevo hasta cerrar H1.
+> **Referencias:** [Investigación de huecos](INVESTIGACION_HUECOS_PLAN.md) ·
+> [Revisión de cobertura](REVISION_COBERTURA_PLAN.md) · [Decisiones](decisions.md).
 
 ---
 
-### Etapa 1 — Integridad de datos y cuota (1 semana) [x] Completado
+## 0. Qué cambia
 
-**Objetivo:** que D1, R2 y la cuota cuenten la misma historia.
+El plan anterior era una lista de **construcción** en 6 etapas. Funcionó para implementar la base,
+pero mezclaba construir, entregar y operar, y terminó marcando `[x]` sin que el sistema lo demostrara.
 
-Tareas:
+Este plan separa tres preguntas:
 
-1. **Cuota atómica**:
-   - Columna `reserved_bytes` en `user_storage_stats` con migración DDL (`0009_stale_grandmaster.sql`).
-   - `reserveStorageQuota` atómica en `POST /uploads/init` con `WHERE (used_bytes + reserved_bytes + bytes) <= max_bytes`.
-   - `confirmStorageUsage` en `POST /uploads/{id}/complete` que transiciona bytes reservados a usados.
-   - Liberación de reserva en `POST /uploads/init` (bloque `catch`) y en el cron diario para uploads `pending` expirados.
-   - Test concurrente con `Promise.all` verificando que de dos subidas concurrentes que exceden la cuota, exactamente una recibe 201 y la otra 413 `quota_exceeded`.
-2. **Barrido de huérfanos con cursor persistente**:
-   - Tabla `system_state` (`r2_orphan_sweep_cursor`).
-   - Límite de 5 páginas (5.000 objetos) por ejecución del cron diario, guardando el cursor o reseteando a `null` al llegar al fin.
-   - Test con simulación de >5.000 claves en R2 verificando avance de cursor y eliminación de huérfanos del final en dos corridas consecutivas.
-3. **Papelera acotada**:
-   - `GET /trash` con paginación real por cursor opaco `(deletedAt, id)` y `nextCursor`.
-   - `POST /trash/empty` acotado a 250 elementos por llamada, con eliminación en batch de R2 y D1, devolviendo `{ ok, deletedCount, remainingCount, hasMore }`.
-   - Bucle automático en cliente móvil (`trash.tsx`).
-   - Test de paginación en `GET /trash` y vaciado de >1.000 items en `POST /trash/empty`.
-4. **Backups verificables**:
-   - Comparación incremental por ETag y hash MD5 en `scripts/backup-r2.mjs`.
-   - Flag `--verify-sample [N]` para verificación criptográfica de SHA-256 en muestra aleatoria de objetos.
-   - Paso post-dump en `.github/workflows/backup-d1.yml` con simulación de restauración en SQLite efímero (`sqlite3 :memory: < backup.sql`) ejecutando `PRAGMA integrity_check;` y validación de tablas.
-   - Documentación actualizada en `docs/ops/D1_BACKUP.md`, `docs/backup-321.md` y `docs/decisions.md`.
+1. **H1 — ¿Es verdad y es seguro?** Cerrar P0, tener evidencia, publicar y poder restaurar.
+2. **H2 — ¿Se puede operar?** SLOs, alertas, staging, calidad nativa, coste y capacidad.
+3. **H3 — ¿Se puede usar y sostener?** Onboarding, accesibilidad, shares, plataforma y documentación.
 
-**Criterio de aceptación:** test de concurrencia de cuota; auditoría con 0
-diferencias inexplicables; vaciar 5.000 elementos no agota límites; restore
-probado al menos una vez.
-
-**Esfuerzo:** M.
+Las etapas 0–5 pasan a **histórico** (sección 1.3). No se borran: se corrigen sus estados y se
+enlazan a evidencia.
 
 ---
 
-### Etapa 2 — Escala de consultas y navegación (1–2 semanas) [x] Completado
+## 1. Estado real (2026-10-23)
 
-**Objetivo:** que la app siga siendo rápida con decenas de miles de elementos.
+### 1.1 Lo construido y validado
 
-Tareas:
+- Worker sin binarios, R2 prefirmado, D1, cola nativa SQLite y web IndexedDB.
+- Dedup SHA-256 por usuario, cuota atómica para altas nuevas, papelera 30 días, reconciliación.
+- Timeline paginado, FTS5, previews WebP, álbumes, shares, mapa, recuerdos.
+- Sesiones revocables, borrado de cuenta, export de metadatos, recuperación de contraseña.
+- 375 tests unitarios/integración (143 API + 232 mobile) + 31 de pipeline; lint y typecheck verdes.
+- Migraciones sincronizadas: `_journal` 13/13 con snapshots `0011`/`0012`; `db:generate` responde
+  “No schema changes”.
 
-1. **Paginación real**:
-   - Álbum (`albumDetail`), papelera, lugares y recuerdos.
-   - `memories`: límite por año y total; no devolver todos los items.
-   - `places`: agregación en SQL (`GROUP BY city, country`) en vez de cargar
-     todas las filas en memoria.
-2. **Salto temporal directo**:
-   - Añadir `before`/`date` al timeline (la Fase 5 ya lo pedía).
-   - Usarlo desde el modal de mes y el scrubber; evitar `fetchNextPage` en
-     cadena.
-3. **Búsqueda**:
-   - Evaluar FTS5 en D1 para `caption`, `tags`, ciudad/país y extensión.
-   - Si FTS5 no encaja, crear tabla `media_tag` normalizada e indexada.
-   - `tags`: dejar de cargar todas las filas y contar en SQL.
-   - Limitar `count(*)` a la primera página o a un máximo conocido.
-4. **Índices y presupuesto de consultas**:
-   - Medir con un dataset sintético de ~100k filas.
-   - Objetivo: timeline < 150 ms, búsqueda < 300 ms, meses < 150 ms en local.
+### 1.2 Estado de los hallazgos (P0/P1)
 
-**Criterio de aceptación:** ninguna ruta devuelve listas ilimitadas; salto a
-2016 hace una sola petición; presupuesto de latencia medido y documentado.
+| ID | Hallazgo | Estado | Evidencia actual |
+| :--- | :--- | :---: | :--- |
+| I-01 | Multipart nativo no completa archivos > 20 MB | **Resuelto (unit)** | `processor.ts` llama `multipartComplete`; test nativo >20 MB |
+| I-02 | `multipart/finalize` no valida tamaño/MIME | **Resuelto (unit)** | validación de size/MIME + tests de ensamblado |
+| I-03 | “Reanudación” crea MPU nueva y reusa etags viejos | **En progreso** | `upload_id` persistido y `uploadId` reutilizado; falta prueba E2E kill/resume |
+| I-04 | Cadena de migraciones | **Resuelto** | snapshots 13/13; `db:generate` sin cambios |
+| I-05 | Re-init `pending` no re-reserva cuota | **Resuelto (unit)** | cambio de tamaño → 409; test de re-init |
+| I-06 | Límite D1 de 100 parámetros | **Resuelto (unit)** | trozos de 50 en check-hashes/álbumes/export y reconcile; test de 300 hashes |
+| I-07 | Cron supera 1.000 queries | **Abierto P1** | una query por fila en `cleanup.ts:42-88` |
+| I-08 | `trash/empty` omite previews y puede descontar dos veces | **Abierto P1** | `media.ts:545-564` |
+| I-09 | Shares públicos sin paginación/rate limit/originales | **Resuelto (unit)** | tope 500, `SHARE_LIMITER`, `allowDownload=false` por defecto y TTL acotado |
+| I-10 | IDOR `coverMediaId` | **Resuelto (unit)** | validación de propiedad en `PATCH /albums/{id}` + test A/B |
+| I-11 | Verificación de email sin salida | **En progreso** | 403 reencola con motivo, pausa y banner con reenvío; faltan `callbackURL` a la app y prueba con Resend |
+| I-12 | Cola nativa topada en 2.000 | **Abierto P1** | `db.ts:362` |
+| I-13 | Web: archivo entero en IndexedDB; visor descarga original | **Abierto P1** | `db.web.ts:298`; `media/[id].tsx:1321-1325` |
+| I-14 | Álbum/papelera/salto sin paginar en UI | **Abierto P1** | `use-hybrid-gallery.ts:102-106`; `trash.tsx:15` |
+| I-15 | Release/CD sin tag, staging ni rollback | **Abierto P1** | último tag `v1.0.9`; deploy en push |
+| I-16 | Backups manuales, mismo bucket, sin restore drill | **Abierto P1** | `backup-r2.mjs`; `backup-d1.yml` |
+| I-17 | Sin heartbeat ni alertas | **En progreso** | `cron_last_run` + `cron-heartbeat.yml`; faltan alertas 5xx/drift y prueba en prod |
+| I-18 | Plan sobredeclara estado | **En progreso** | tablero v2 con evidencia; falta cerrar filas con artefactos |
 
-**Esfuerzo:** M/L.
+Los IDs remiten a [INVESTIGACION_HUECOS_PLAN.md](INVESTIGACION_HUECOS_PLAN.md). H1 ataca
+I-01…I-05, I-10, I-11, I-15, I-16 e I-17; H2 cierra I-06…I-09, I-12…I-14 e I-18.
 
----
+### 1.3 Histórico de las etapas 0–5
 
-### Etapa 3 — Subidas grandes y visor (2 semanas) [x] Completado
-
-**Objetivo:** que respaldar un vídeo de varios GB sea interrumpible y que ver
-una foto remota no descargue 20 MB.
-
-Tareas:
-
-1. **Subida reanudable**:
-   - Multipart upload de R2 con partes de 8–16 MB (o TUS si se prefiere).
-   - Persistir `uploadId`, `partNumber`, `etag` y bytes confirmados.
-   - Reanudar tras matar la app, perder red o recargar la pestaña.
-   - Web: chunks en IndexedDB, no un único `ArrayBuffer`.
-   - UI: progreso por item, cancelar, reintentar y “subir ahora” por item.
-2. **Preview de visualización**:
-   - Generar al subir una derivada de ~1.600 px WebP (y póster para vídeo).
-   - Guardar `r2KeyPreview`/`previewSize`; servirla en el visor y el carrusel.
-   - El original queda para descarga, edición y zoom de alta calidad.
-3. **Galería paginada**:
-   - `listLocalAssets` y la cola con cursor, no tope fijo de 2.000.
-   - `FlashList` con `onEndReached` y ventana de precarga.
-4. **Cuota y limpieza**:
-   - Mostrar desglose (originales, miniaturas, papelera) en Ajustes.
-   - Opción “liberar espacio automáticamente tras N días” (opt-in).
-
-**Criterio de aceptación:** matar la red al 80% y reanudar sin re-subir todo;
-un vídeo de 1 GB completa; una foto remota de 20 MP abre con <500 KB de
-descarga; galería de 20.000 assets navega sin cortes.
-
-**Esfuerzo:** L.
+| Etapa | Qué se construyó | Qué falta / veredicto |
+| :--- | :--- | :--- |
+| 0 | Invalidación única, distinción 413, docs y cifras | `decisions.md` sigue con pendientes; checklist operativo no cerrado → **parcial** |
+| 1 | Cuota atómica, sweep con cursor, papelera paginada, backups D1 | Bypass por multipart/re-init; previews en `trash/empty`; restore no probado → **parcial** |
+| 2 | Paginación, FTS5, `before`, previews | Sin benchmarks; UI de álbum/papelera/salto; límites D1 → **parcial** |
+| 3 | Multipart, preview, cola, galería | Nativo y `finalize` corregidos; falta E2E kill/resume; web `ArrayBuffer`; cola 2.000; sin desglose de cuota → **parcial** |
+| 4 | Sesiones, borrado, export, shares, email, admin | Export JSON, no ZIP; shares sin flag/rate; email sin reenvío; IDOR portada → **parcial** |
+| 5 | E2E, CI/CD, backup D1, checklist nativo | Sin tag/staging/rollback; smoke opcional; sin cobertura; heartbeat añadido en H1.7 → **no cumple** |
 
 ---
 
-### Etapa 4 — Seguridad, privacidad y ciclo de cuenta (1–2 semanas) [x] Completado
+## 2. Reglas del plan
 
-**Objetivo:** cerrar el ciclo de vida de una cuenta y reducir superficie.
+1. **Fuente única.** Este documento es el tablero vigente. `ROADMAP.md` y `PLAN_GENERAL.md` quedan
+   como histórico y llevan un banner que apunta aquí.
+2. **Evidencia primero.** Un `[x]` debe enlazar commit, test, workflow, captura o informe. Sin enlace,
+   el estado es `todo` o `in_progress`, nunca `done`.
+3. **Estados claros.** `todo` / `in_progress` / `blocked` / `done`; `blocked` exige motivo y dueño.
+4. **P0 primero.** Un P0 abierto bloquea cualquier feature nueva. No se abre H3 con H1 abierto.
+5. **Resultado, no tarea.** Cada fila dice qué cambia para el usuario o el sistema, no solo qué archivo
+   se toca.
+6. **Dueño y fecha.** Cada trabajo tiene un responsable y una semana objetivo; si no, no entra.
+7. **Riesgo y rollback.** Migraciones/cron/deploy llevan plan de reversa y backup previo.
+8. **DoD por horizonte.** H1 no cierra sin sus pruebas, release y restore; H2 sin SLO/alertas/staging;
+   H3 sin UX/a11y/documentación.
+9. **Revisión semanal.** Viernes: actualizar estados, evidencias, riesgos y siguiente foco.
+10. **No “100%”.** Solo se declara al cerrar un horizonte con evidencia reproducible.
 
-Tareas:
-
-1. **Verificación de email con periodo de gracia**:
-   - No bloquear a usuarios existentes; marcar verificados o dar 30 días.
-   - Reutilizar `email.ts` y la infraestructura de Resend.
-2. **Sesiones**:
-   - Listar dispositivos, cerrar sesión remota y revocar todas.
-3. **Borrado y exportación de cuenta**:
-   - `DELETE /v1/account` con confirmación y cascada D1 + borrado de
-     `users/{userId}/` en R2 por lotes.
-   - Exportación ZIP con originales + metadatos (reutilizar batch download).
-4. **Enlaces públicos**:
-   - Caducidad configurable, rotación y opción de desactivar descarga de
-     originales.
-   - Rate limit/caché en `/v1/shared/*`.
-5. **Android**:
-   - Quitar permisos no usados (`READ_MEDIA_AUDIO`, `WRITE_EXTERNAL_STORAGE`,
-     duplicados) y revisar `ACCESS_MEDIA_LOCATION`.
-6. **Admin**:
-   - Confirmar `EXPO_PUBLIC_ADMIN_EMAIL` en el entorno de EAS.
-
-**Criterio de aceptación:** una cuenta se puede borrar por completo y dejar 0
-objetos; exportación restaurable; enlace compartido caduca; manifiesto Android
-mínimo.
-
-**Esfuerzo:** M.
+**Owner y fechas:** en este plan el owner es Luis; las semanas son relativas al inicio de H1 y se
+revisan cada viernes. H2/H3 permanecen en `todo` hasta cerrar H1.
 
 ---
 
-### Etapa 5 — Calidad, entrega y observabilidad (1 semana + continuo) [x] Completado
+## 3. H1 — Verdad y confianza (semanas 1–3)
 
-**Objetivo:** que los errores se detecten antes de publicar, no en el móvil.
+**Objetivo:** que el plan no mienta y que el respaldo no pierda datos.
+**Salida:** P0 cerrados, release `v1.1.0`, restore drill, seguridad mínima y heartbeat.
 
-Tareas:
+| ID | Resultado | Trabajo | Evidencia de cierre | Estado |
+| :--- | :--- | :--- | :--- | :---: |
+| **H1.1** | Vídeos > 20 MB se respaldan y se reanudan | Llamar `multipartComplete` en nativo; persistir `uploadId` en D1; no reusar etags de otra MPU; resolver la colisión de ruta con `/uploads/{id}/complete`; spec E2E `multipart-resume` (21 MB, corte en presign-parts, recarga, `resumed: true`) | Test nativo >20 MB; test API de reanudación; spec E2E listo pero **pendiente de ejecución con R2 dev** | `in_progress` |
+| **H1.2** | La cuota no se puede saltar | Validar `head().size`/MIME/partes en `multipart/finalize`; re-init con tamaño distinto → 409; test de bypass con `fileSize=6` y parte de 6 MiB | `used_bytes` no cambia si el tamaño no coincide; re-init mayor → 409; MIME incorrecto → 409 | `done` |
+| **H1.3** | El plan es verificable | Tablero con evidencia; estados reales; banners en ROADMAP/PLAN_GENERAL; `decisions.md` al día | Ningún `[x]` sin enlace; `decisions.md` sin pendientes operativos | `in_progress` |
+| **H1.4** | Hay una release real | `/version` con `APP_VERSION`/`GIT_SHA`; deploy inyecta los vars; `CHANGELOG.md`; `pnpm release:check` (tag SemVer, árbol limpio, migraciones, changelog); workflow **Rollback** + `docs/ops/ROLLBACK.md` | `/version` implementado y testeado en pipeline; **falta commit, tag `v1.1.0` y APK** | `in_progress` |
+| **H1.5** | Se puede restaurar | Restore D1 + R2 a entorno nuevo, RPO/RTO documentados; backup D1 fuera del bucket de producción; `backup-r2` falla con errores; runbook en `docs/ops/INCIDENT_RESPONSE.md` | Informe de restore con tiempos; `exit 1` con error inyectado | `in_progress` |
+| **H1.6** | Seguridad mínima | IDOR cerrado; álbum público limitado (500), `SHARE_LIMITER`, `allowDownload=false` por defecto, URLs acotadas; CSP/HSTS web; reenvío de verificación; smoke **sin credenciales en repo** (secretos `SMOKE_USER_*`, exit 2 = no configurado) | 3 tests de shares/IDOR, 1 de processor, 2 de estado, 1 de pipeline; **falta**: configurar los secretos y verificar headers en prod | `in_progress` |
+| **H1.7** | Un fallo avisa | `cron_last_run` en `system_state` + workflow `cron-heartbeat.yml` (>26 h o `ok=false` → falla el job y GitHub avisa); SLO en `docs/ops/SLO.md` | Heartbeat implementado y testeado; falta la prueba de alerta en producción (requiere secrets) | `in_progress` |
 
-1. **CI**:
-   - Nightly de E2E web (o en cada PR si el coste es aceptable).
-   - `expo-doctor` y build web en PR.
-   - Cobertura mínima en módulos críticos (cola, processor, storage, auth).
-2. **CD**:
-   - Workflow de deploy de API + web en tag, con migraciones, smoke test y
-     rollback documentado.
-   - Staging con bucket `photos-media-dev` y datos de prueba.
-3. **Observabilidad**:
-   - Heartbeat del cron y alerta si no corre.
-   - Alertas de drift de cuota, huérfanos, 5xx y fallos de backup.
-   - Sentry separado cliente/servidor (opcional).
-4. **Nativo**:
-   - Checklist por release en Android (API 34/35/36) e iOS si se publica.
-   - Al menos un dispositivo físico por release; recoger logs de cola.
+**DoD de H1:** `pnpm lint`, `pnpm typecheck`, `pnpm test` y `pnpm test:pipeline` verdes; los tests
+nuevos fallan en el código viejo y pasan en el nuevo; `v1.1.0` publicado; restore drill firmado; 0 P0
+y 0 hallazgos altos de seguridad abiertos.
 
-**Criterio de aceptación:** deploy de una tag sin pasos manuales; alerta si el
-cron o el backup fallan; checklist nativo firmado por release.
+---
 
-**Esfuerzo:** M + continuo.
+## 4. H2 — Operar y medir (semanas 4–8)
 
-## 4. Backlog P2 (no ahora)
+**Objetivo:** que un fallo se detecte, se entienda y se recupere sin madrugar.
 
-| Idea | Por qué posponerla |
-| :--- | :--- |
-| App iOS publicada | Requiere cuenta Apple, perfiles y QA; el foco actual es Android/web |
-| Álbumes colaborativos | Cambia el modelo de permisos y shares; no es necesario para uso personal |
-| PWA/offline completo | El offline ya está cubierto por la cola; el visor offline requiere caché de originales |
-| Live Photos (HEIC+MOV) | Cambia el modelo de media y la deduplicación |
-| Reconocimiento de personas | Coste/privacidad; AI tags ya cubre parte |
-| Preview de vídeo transcodificado | Coste de CPU; primero medir el preview de imagen |
-| Dedup global entre usuarios | Descartado en `decisions.md`: ahorro pequeño, rediseño grande |
-| Limpieza automática de espacio | Útil, pero después de previews y cuota |
+| ID | Resultado | Trabajo | Evidencia |
+| :--- | :--- | :--- | :--- |
+| **H2.1** | SLOs y alertas | 4 SLOs (respaldo, 5xx, cron, restore), dashboards, alertas y on-call de una persona | Simulación de fallo y alerta recibida |
+| **H2.2** | Entrega reversible | Staging real, deploy por tag, canary, rollback probado, `/version` | Deploy y reversa en staging |
+| **H2.3** | Calidad nativa | E2E Android (Maestro/Detox): onboarding, permiso limitado, 30 MB, kill/resume, restore; matriz API 34/35/36 + un físico | Run por release con artefactos |
+| **H2.4** | Calidad de datos | Contract tests, migraciones desde cero, carga 100k, inyección de fallos, cobertura crítica ≥80 % | CI con presupuesto p95 y cobertura |
+| **H2.5** | Límites D1 | Chunking de `check-hashes`/álbumes/export/reconcile; cron por lotes; tests de 1.200 filas | <1.000 queries; 500 hashes OK; export 101 álbumes OK |
+| **H2.6** | Coste y capacidad | Modelo R2/D1/Workers/IA/Sentry, presupuesto mensual, alertas, rate limits de abuso | Informe mensual y alerta de gasto |
 
-## 5. Orden, dependencias y estimación
+**DoD de H2:** SLO con alerta probada; staging + rollback; E2E nativo en 2 dispositivos; cobertura y
+carga en CI; informe de coste con umbral.
 
-```text
-Etapa 0 (2-3 d)
-   ↓
-Etapa 1 (5-7 d)  ← cuota y R2 primero: sin esto, escalar multiplica el riesgo
-   ↓
-Etapa 2 (7-10 d) ← consultas y paginación
-   ↓
-Etapa 3 (10-15 d) ← uploads y visor; depende de cuota/preview
-   ↓
-Etapa 4 (7-10 d) ← seguridad y cuenta
-   ↓
-Etapa 5 (5-8 d + continuo)
-```
+---
 
-Total orientativo: **6–8 semanas a tiempo completo** o **3 meses a tiempo
-parcial**. No incluye el backlog P2.
+## 5. H3 — Producto y sostenibilidad (semanas 9–16)
 
-Dependencias clave:
+**Objetivo:** que el respaldo se entienda, se use y se mantenga.
 
-- La cuota atómica debe ir antes de permitir más concurrencia o subidas
-  reanudables.
-- El preview del visor depende de una nueva clave en R2 y de la migración de
-  `media`.
-- La paginación de álbumes/papelera conviene antes de tocar la UI de selección.
-- La verificación de email no debe activarse sin migrar a los usuarios
-  existentes.
+| ID | Resultado | Trabajo | Evidencia |
+| :--- | :--- | :--- | :--- |
+| **H3.1** | Onboarding y restore comprensibles | Journeys: primer arranque → permisos → primer backup → verificación → liberar espacio → restore; estados vacío/error/offline; notificaciones | Test con 5 usuarios; tiempo al primer backup <5 min |
+| **H3.2** | Accesibilidad e i18n | TalkBack/VoiceOver, roles/labels/acciones, reduce motion, contraste, catálogo de textos | Auditoría y fixes en las 5 pantallas |
+| **H3.3** | Shares y cuenta completos | Paginación, descarga configurable, revocación, re-autenticación para borrar, export ZIP o decisión documentada | Tests de abuso y restore de export |
+| **H3.4** | Plataforma decidida | ADR iOS/Play/PWA; si no, fuera del checklist y del plan | ADR firmado |
+| **H3.5** | Documentación sostenible | ADRs, runbooks, arquitectura, changelog, onboarding técnico | Docs enlazados y revisados |
 
-## 6. Definition of Done
+**DoD de H3:** usuario nuevo completa el primer backup sin ayuda; a11y auditada; shares/export
+probados; decisión de plataforma; documentación operativa completa.
 
-Una etapa se considera cerrada cuando:
+---
 
-- [ ] Tiene tests unitarios y, si toca API, test Miniflare sin red externa.
-- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test` y `pnpm test:pipeline` pasan.
-- [ ] Si toca UI, se probó en web y en un dispositivo Android real.
-- [ ] Si toca API, se probó el flujo completo con `wrangler dev` y R2 dev.
-- [ ] Se actualizaron `PLAN_GENERAL.md`, README y este documento.
-- [ ] No añade coste externo obligatorio ni requiere `--remote` en tests.
-- [ ] Tiene plan de rollback si toca migraciones o cron.
+## 6. Métricas y SLOs
 
-## 7. Primera semana (checklist concreta)
+| Área | Métrica | Objetivo |
+| :--- | :--- | :--- |
+| Confianza | % de biblioteca seleccionada respaldada | ≥99 % |
+| Confianza | Restore exitoso en drill | 100 % |
+| Integridad | Checksum mismatch / drift de cuota | 0 |
+| Disponibilidad | Upload success / API 5xx | ≥99 % / <0.5 % |
+| Operación | Cron diario / alerta <5 min | 100 % / sí |
+| Recuperación | RTO / RPO | <4 h / <24 h |
+| Seguridad | Hallazgos altos abiertos >30 días | 0 |
+| Autorización | Rutas con test A/B de ownership | 100 % |
+| Calidad | Cobertura módulos críticos | ≥80 % |
+| Calidad | Flake rate / E2E pass | <2 % / ≥99 % |
+| Producto | Primer backup completado | ≥80 % de altas |
+| Producto | Tiempo al primer backup | <5 min |
+| Coste | Coste mensual por usuario | Presupuesto definido |
+| Plan | Etapas con evidencia enlazada | 100 % |
 
-1. Instalar dependencias y ejecutar la suite completa para fijar la línea base
-   real (`pnpm install && pnpm test:all --skip native`).
-2. Corregir la invalidación `["user-storage"]` y añadir su test.
-3. Distinguir `file_too_large` de `quota_exceeded` en nativo y web.
-4. Actualizar tablero, README y ROADMAP.
-5. Verificar el checklist operativo (limiter, Resend, Sentry, admin email).
-6. Abrir un issue/ADR por cada hallazgo M-03…M-13 y decidir cuáles entran en la
-   Etapa 1.
-7. Medir el estado actual con `node scripts/audit-prod.mjs` (solo lectura) y
-   guardar el resultado como línea base.
+---
 
-## 8. Decisiones que no se tocan
+## 7. Riesgos
 
-- El Worker no recibe binarios; se mantiene el flujo prefirmado.
-- Los tests siguen siendo 100% locales y sin `--remote`.
-- La deduplicación global entre usuarios no entra en el alcance.
-- La UI y los mensajes visibles siguen en español.
-- No se compilan builds nativos salvo que el cambio lo exija.
+| Riesgo | Prob. | Impacto | Mitigación H1/H2 |
+| :--- | :---: | :---: | :--- |
+| Pérdida de fotos por restore no probado | Media | **Existencial** | H1.5 restore drill + offsite |
+| Exposición por IDOR/share | Media | Alto | H1.6 tests A/B + límites |
+| Coste por cuota/IA | Media | Alto | H1.2 + H2.6 presupuesto |
+| APK obsoleto | Alta | Alto | H1.4 tag + APK + `/version` |
+| Incidente sin runbook | Media | Alto | H2.1 alertas + runbooks |
+| Burnout / deuda | Media | Alto | H2.6 + H3.5 + presupuesto de mantenimiento |
+| Plan teatro | Alta | Medio | Regla de evidencia + revisión semanal |
+
+---
+
+## 8. Decisiones pendientes
+
+1. ¿Producto personal o multiusuario? Define seguridad, privacidad, coste y soporte.
+2. ¿iOS y Play Store entran en 2026? Si no, se sacan del plan y del checklist.
+3. ¿RPO/RTO aceptables? Sin esto no se diseña el backup.
+4. ¿Presupuesto mensual de R2/D1/Workers/IA/Sentry?
+5. ¿Quién atiende un incidente y en qué horario?
+6. ¿La cuota de 10 GB es dura o blanda?
+7. ¿Se adopta este Plan v2 como único tablero? (recomendado: sí)
+
+---
+
+## 9. Backlog no ahora (P2)
+
+Se revisa al cerrar H2; no antes.
+
+| Idea | Por qué esperar | Criterio para promover |
+| :--- | :--- | :--- |
+| App iOS publicada | Cuenta/perfiles/QA; foco Android/web | H3.4 + presupuesto |
+| Álbumes colaborativos | Cambia permisos y shares | H3.3 + threat model |
+| PWA/offline completo | Requiere caché de originales | H2.3 + coste |
+| Live Photos (HEIC+MOV) | Cambia modelo de media/dedup | H2.4 + datos |
+| Reconocimiento de personas | Coste/privacidad | H3.2 + consentimiento |
+| Preview de vídeo transcodificado | CPU/coste | H2.6 + demanda |
+| Dedup global entre usuarios | Rediseño de claves | H2.6 + ahorro medido |
+| Limpieza automática de espacio | Después de cuota/UX | H3.1 + opt-in |
+
+---
+
+## 10. Anexo: evidencia y enlaces
+
+- Investigación técnica completa: [INVESTIGACION_HUECOS_PLAN.md](INVESTIGACION_HUECOS_PLAN.md).
+- Revisión de cobertura (insumo del Plan v2): [REVISION_COBERTURA_PLAN.md](REVISION_COBERTURA_PLAN.md).
+- Decisiones de diseño: [decisions.md](decisions.md).
+- Pruebas: [docs/testing/PLAN_PRUEBAS.md](testing/PLAN_PRUEBAS.md).
+- Baseline actual: 143 API + 232 mobile + 31 pipeline; `pnpm lint` 231 archivos; `db:generate` sin
+  cambios.
+- Etapas 0–5: histórico en la sección 1.3; los detalles de implementación quedan en el historial de
+  git y en `docs/fases/`.
+
+**Regla final:** si una tarea no tiene evidencia, no está hecha. Si un horizonte no tiene su DoD, no
+se abre el siguiente.

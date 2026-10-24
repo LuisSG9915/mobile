@@ -15,6 +15,8 @@ export async function downloadPublicAlbum(
     const item = items[index];
     const ext = item.mediaType === "video" ? "mp4" : "jpg";
     const filename = `${baseName}_${String(index + 1).padStart(3, "0")}_${item.id.slice(0, 8)}.${ext}`;
-    await saveDownload(item.downloadUrl || item.originalUrl, filename);
+    const url = item.downloadUrl ?? item.originalUrl;
+    if (!url) throw new Error("La descarga de originales está desactivada en este álbum.");
+    await saveDownload(url, filename);
   }
 }

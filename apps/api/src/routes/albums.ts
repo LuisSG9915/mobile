@@ -8,6 +8,8 @@ import {
   createAlbumSchema,
   errorSchema,
   okSchema,
+  PRESIGN_GET_TTL_SECONDS,
+  publicAlbumResponseSchema,
   shareAlbumRequestSchema,
   shareAlbumResponseSchema,
   updateAlbumSchema,
@@ -17,11 +19,39 @@ import { getDb } from "../db/client";
 import { album, albumMedia, media } from "../db/schema";
 import { type AppEnv, webOrigins } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
-import { presignGet } from "../lib/s3";
+import { presignGet, presignGetDownload, presignGetWithTtl } from "../lib/s3";
+import { mapInChunks } from "../lib/slices";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
   description,
+});
+
+/** Tope de elementos en un enlace público: evita amplificar N×3 prefirmas por request. */
+const PUBLIC_ALBUM_MAX_ITEMS = 500;
+
+/**
+ * Enlace público de un álbum. Vive en /albums/public/{token} (no en /shared/)
+ * para poder aplicar el rate limit por IP de `SHARE_LIMITER`.
+ */
+const getPublicAlbumRoute = createRoute({
+  method: "get",
+  path: "/albums/public/{token}",
+  tags: ["albums"],
+  summary: "Ver álbum compartido públicamente",
+  description:
+    "Devuelve el contenido del álbum con URLs prefirmadas, sin autenticación. Solo incluye originales si el dueño activó allowDownload.",
+  request: { params: z.object({ token: z.string().min(1) }) },
+  responses: {
+    200: {
+      content: { "application/json": { schema: publicAlbumResponseSchema } },
+      description: "Contenido del álbum compartido",
+    },
+    404: err("Álbum compartido no encontrado"),
+    410: err("Enlace caducado o revocado"),
+    413: err("Álbum demasiado grande para un enlace público"),
+    429: err("Demasiadas solicitudes"),
+  },
 });
 
 const idParam = z.object({ id: z.string() });
@@ -94,6 +124,7 @@ const updateAlbumRoute = createRoute({
       content: { "application/json": { schema: albumDetailResponseSchema } },
       description: "Álbum actualizado",
     },
+    400: err("La portada debe ser una foto del usuario"),
     401: err("Sin sesión"),
     404: err("Álbum no encontrado"),
   },
@@ -165,6 +196,7 @@ const shareAlbumRoute = createRoute({
       content: { "application/json": { schema: shareAlbumResponseSchema } },
       description: "Enlace generado",
     },
+    400: err("Parámetros de enlace inválidos"),
     401: err("Sin sesión"),
     404: err("Álbum no encontrado"),
   },
@@ -292,12 +324,12 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
     const validMediaIds: string[] = [];
 
     if (mediaIds && mediaIds.length > 0) {
-      const userMedia = await db
-        .select({ id: media.id })
-        .from(media)
-        .where(
-          and(eq(media.userId, user.id), inArray(media.id, mediaIds), isNull(media.deletedAt)),
-        );
+      const userMedia = await mapInChunks(mediaIds, (slice) =>
+        db
+          .select({ id: media.id })
+          .from(media)
+          .where(and(eq(media.userId, user.id), inArray(media.id, slice), isNull(media.deletedAt))),
+      );
       const allowedSet = new Set(userMedia.map((m) => m.id));
       for (const mId of mediaIds) {
         if (allowedSet.has(mId)) validMediaIds.push(mId);
@@ -508,7 +540,26 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
 
     const updates: Partial<typeof album.$inferInsert> = { updatedAt: Date.now() };
     if (title !== undefined) updates.title = title;
-    if (coverMediaId !== undefined) updates.coverMediaId = coverMediaId;
+    if (coverMediaId !== undefined) {
+      if (coverMediaId !== null) {
+        // IDOR: sin esta comprobación se podía usar como portada una foto ajena
+        // (y recibir su URL prefirmada) si se conocía el id.
+        const owned = await db
+          .select({ id: media.id })
+          .from(media)
+          .where(
+            and(eq(media.id, coverMediaId), eq(media.userId, user.id), isNull(media.deletedAt)),
+          )
+          .get();
+        if (!owned) {
+          return c.json(
+            { error: "bad_request", message: "La portada debe ser una foto tuya." },
+            400,
+          );
+        }
+      }
+      updates.coverMediaId = coverMediaId;
+    }
 
     await db.update(album).set(updates).where(eq(album.id, id));
 
@@ -604,10 +655,12 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
     }
 
     // Filtrar que sean medios legítimos del usuario
-    const userMedia = await db
-      .select({ id: media.id })
-      .from(media)
-      .where(and(eq(media.userId, user.id), inArray(media.id, mediaIds), isNull(media.deletedAt)));
+    const userMedia = await mapInChunks(mediaIds, (slice) =>
+      db
+        .select({ id: media.id })
+        .from(media)
+        .where(and(eq(media.userId, user.id), inArray(media.id, slice), isNull(media.deletedAt))),
+    );
 
     const now = Date.now();
     for (const m of userMedia) {
@@ -663,21 +716,35 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       return c.json({ error: "not_found", message: "Álbum no encontrado." }, 404);
     }
 
-    const body = c.req.header("content-type")?.includes("application/json")
-      ? await c.req.json().catch(() => ({}))
-      : {};
+    const parsed = shareAlbumRequestSchema.safeParse(c.req.valid("json") ?? {});
+    if (!parsed.success) {
+      return c.json({ error: "bad_request", message: "Parámetros de enlace inválidos." }, 400);
+    }
+    const body = parsed.data;
 
     const now = Date.now();
     let shareExpiresAt: number | null = a.shareExpiresAt ?? null;
-    if (body?.expiresIn) {
+    // Un enlace caducado nunca debe reutilizarse aunque el cliente no mande body.
+    if (a.shareRevokedAt != null || (a.shareExpiresAt != null && a.shareExpiresAt <= now)) {
+      shareExpiresAt = now + 7 * 24 * 3600 * 1000;
+    }
+    if (body.expiresIn) {
       if (body.expiresIn === "24h") shareExpiresAt = now + 24 * 3600 * 1000;
       else if (body.expiresIn === "7d") shareExpiresAt = now + 7 * 24 * 3600 * 1000;
       else if (body.expiresIn === "30d") shareExpiresAt = now + 30 * 24 * 3600 * 1000;
       else if (body.expiresIn === "never") shareExpiresAt = null;
     }
 
+    const allowDownload = body.allowDownload ?? a.shareAllowDownload;
+
     let shareToken = a.shareToken;
-    if (!shareToken || a.shareRevokedAt != null) {
+    if (
+      !shareToken ||
+      a.shareRevokedAt != null ||
+      (a.shareExpiresAt != null && a.shareExpiresAt <= now) ||
+      // Pedir la rotación explícitamente con otro token devuelve uno nuevo.
+      (body.token != null && body.token !== a.shareToken)
+    ) {
       shareToken = crypto.randomUUID().replace(/-/g, "");
     }
 
@@ -686,6 +753,7 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       .set({
         shareToken,
         shareExpiresAt,
+        shareAllowDownload: allowDownload,
         shareRevokedAt: null,
         updatedAt: now,
       })
@@ -702,7 +770,7 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
     }
     const shareUrl = `${origin}/shared/album/${shareToken}`;
 
-    return c.json({ shareToken, shareUrl, expiresAt: shareExpiresAt }, 200);
+    return c.json({ shareToken, shareUrl, expiresAt: shareExpiresAt, allowDownload }, 200);
   })
   .openapi(unshareAlbumRoute, async (c) => {
     const user = c.get("user");
@@ -724,4 +792,102 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       .set({ shareToken: null, shareRevokedAt: Date.now(), updatedAt: Date.now() })
       .where(eq(album.id, id));
     return c.json({ ok: true as const }, 200);
+  })
+  .openapi(getPublicAlbumRoute, async (c) => {
+    const { token } = c.req.valid("param");
+    const db = getDb(c.env.DB);
+
+    const a = await db.select().from(album).where(eq(album.shareToken, token)).get();
+    const now = Date.now();
+
+    if (!a?.shareToken) {
+      return c.json(
+        {
+          error: "not_found",
+          message: "El álbum compartido no existe o la dirección no es válida.",
+        },
+        404,
+      );
+    }
+    if (a.shareRevokedAt != null || (a.shareExpiresAt != null && a.shareExpiresAt <= now)) {
+      return c.json(
+        { error: "expired", message: "Este enlace compartido ha caducado o ha sido revocado." },
+        410,
+      );
+    }
+
+    const rows = await db
+      .select({ media })
+      .from(albumMedia)
+      .innerJoin(media, eq(albumMedia.mediaId, media.id))
+      .where(and(eq(albumMedia.albumId, a.id), isNull(media.deletedAt)))
+      .orderBy(desc(albumMedia.addedAt));
+
+    if (rows.length > PUBLIC_ALBUM_MAX_ITEMS) {
+      return c.json(
+        {
+          error: "album_too_large",
+          message: "Este álbum tiene demasiados elementos para un enlace público.",
+        },
+        413,
+      );
+    }
+
+    // Las URLs de un enlace no deben sobrevivir a su caducidad.
+    const maxTtl = a.shareExpiresAt
+      ? Math.min(PRESIGN_GET_TTL_SECONDS, Math.max(60, Math.floor((a.shareExpiresAt - now) / 1000)))
+      : undefined;
+
+    const items = await Promise.all(
+      rows.map(async ({ media: m }) => {
+        const thumbUrl = await presignGetWithTtl(c.env, m.r2KeyThumb, maxTtl);
+        const preview = m.r2KeyPreview
+          ? await presignGetWithTtl(c.env, m.r2KeyPreview, maxTtl)
+          : null;
+        if (!a.shareAllowDownload) {
+          // Solo miniaturas y previews: el enlace no expone el original.
+          return {
+            id: m.id,
+            mediaType: m.mediaType,
+            width: m.width,
+            height: m.height,
+            takenAt: m.takenAt,
+            durationMs: m.durationMs,
+            thumbhash: m.thumbhash,
+            thumbUrl,
+          };
+        }
+        const originalUrl = await presignGetWithTtl(c.env, m.r2KeyOriginal, maxTtl);
+        const downloadUrl = await presignGetDownload(
+          c.env,
+          m.r2KeyOriginal,
+          `${m.id}.${m.ext}`,
+          maxTtl,
+        );
+        return {
+          id: m.id,
+          mediaType: m.mediaType,
+          width: m.width,
+          height: m.height,
+          takenAt: m.takenAt,
+          durationMs: m.durationMs,
+          thumbhash: m.thumbhash,
+          thumbUrl,
+          ...(preview ? { originalUrl: preview } : { originalUrl }),
+          downloadUrl,
+        };
+      }),
+    );
+
+    return c.json(
+      {
+        title: a.title,
+        mediaCount: items.length,
+        createdAt: a.createdAt,
+        expiresAt: a.shareExpiresAt ?? null,
+        allowDownload: a.shareAllowDownload,
+        items,
+      },
+      200,
+    );
   });

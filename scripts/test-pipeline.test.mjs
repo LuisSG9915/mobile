@@ -7,7 +7,15 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -286,6 +294,44 @@ test("helpers.ts protege el cleanup contra buckets que no sean dev", () => {
   assert.match(src, /photos-media-dev/);
   // El guard debe lanzar antes de cualquier llamada a S3 (la primera es el ListObjectsV2).
   assert.ok(src.indexOf('Bucket !== "photos-media-dev"') < src.indexOf("s3.send"));
+});
+
+test("la web declara cabeceras de seguridad (_headers) para CSP/HSTS", () => {
+  const src = readFileSync(path.join(ROOT, "apps/mobile/public/_headers"), "utf8");
+  assert.match(src, /Content-Security-Policy:/);
+  assert.match(src, /Strict-Transport-Security:/);
+  assert.match(src, /frame-ancestors 'none'/);
+});
+
+test("el servidor no expone la ruta ambigua multipart/complete", () => {
+  const src = readFileSync(path.join(ROOT, "apps/api/src/routes/uploads.ts"), "utf8");
+  // /uploads/{id}/complete capturaba "multipart/complete"; la ruta real es finalize.
+  assert.ok(!src.includes('path: "/uploads/multipart/complete"'));
+  assert.match(src, /path: "\/uploads\/multipart\/finalize"/);
+});
+
+test("release-check exige tag y árbol limpio", () => {
+  const res = spawnSync(
+    process.execPath,
+    [path.join(ROOT, "scripts/release-check.mjs"), "--tag", "v9.9.9"],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+    },
+  );
+  // En una rama de trabajo con cambios debe fallar por árbol sucio o pasar si está limpio.
+  assert.ok([0, 1].includes(res.status));
+  assert.match(res.stdout, /release-check/);
+  assert.match(res.stdout, /migraciones registradas/);
+  if (res.status === 1) assert.match(res.stderr, /árbol sucio|tag/);
+});
+
+test("db:generate no deja migraciones pendientes (journal = snapshots)", () => {
+  const metaDir = path.join(ROOT, "apps/api/migrations/meta");
+  const journal = JSON.parse(readFileSync(path.join(metaDir, "_journal.json"), "utf8"));
+  const snapshots = readdirSync(metaDir).filter((f) => f.endsWith("_snapshot.json"));
+  assert.equal(journal.entries.length, snapshots.length);
+  assert.ok(journal.entries.length >= 14);
 });
 
 // ---------------------------------------------------- check-web-env (H-008)

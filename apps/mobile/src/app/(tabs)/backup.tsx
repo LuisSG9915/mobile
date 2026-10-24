@@ -1,9 +1,10 @@
 import { router } from "expo-router";
-import { CloudOff, Folder, HardDrive, RotateCcw } from "lucide-react-native";
+import { AlertCircle, CloudOff, Folder, HardDrive, RotateCcw } from "lucide-react-native";
 import { useState } from "react";
 import { Alert, Platform, ScrollView, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { resendVerificationEmail, useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
 import { useQueueEvents } from "../../lib/events";
 import { formatBytes, formatRelative } from "../../lib/format";
@@ -14,6 +15,7 @@ import {
   getLastScanTs,
   getQueueStats,
   isBackupPaused,
+  needsEmailVerification,
   retryFailed,
   setBackupPaused,
 } from "../../queue/db";
@@ -27,6 +29,7 @@ const isWeb = Platform.OS === "web";
 
 export default function BackupScreen() {
   useQueueEvents((s) => s.tick); // re-render ante cambios de la cola
+  const { data: session } = useSession();
   const { wifiOnly, includeVideos, setWifiOnly, setIncludeVideos, syncedAlbumIds } = useSettings();
   const [scanning, setScanning] = useState(false);
   const [pickWarning, setPickWarning] = useState<string | null>(null);
@@ -40,7 +43,22 @@ export default function BackupScreen() {
   const progress = stats.total ? stats.done / stats.total : 0;
   const running = isRunning();
   const paused = isBackupPaused();
+  const needsVerification = needsEmailVerification();
   const noAlbumsSelected = !isWeb && Array.isArray(syncedAlbumIds) && syncedAlbumIds.length === 0;
+
+  const resendVerification = async () => {
+    const email = session?.user?.email;
+    if (!email) {
+      toast.error("Vuelve a iniciar sesión para reenviar la verificación.");
+      return;
+    }
+    const res = await resendVerificationEmail(email);
+    if (res.ok) {
+      toast.success(t.backup.verifyResent(email));
+    } else {
+      toast.error(res.error ?? t.backup.verifyResendFailed);
+    }
+  };
 
   const togglePause = () => {
     if (paused) {
@@ -134,6 +152,19 @@ export default function BackupScreen() {
             </View>
           ) : null}
         </Card>
+
+        {needsVerification ? (
+          <Card className="gap-3 border border-amber-300/60 dark:border-amber-700/60">
+            <View className="flex-row items-center gap-2">
+              <AlertCircle size={16} color="#d97706" />
+              <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                {t.backup.verifyNeededTitle}
+              </Text>
+            </View>
+            <Text className="text-sm text-neutral-500">{t.backup.verifyNeededBody}</Text>
+            <Button label={t.backup.verifyResend} variant="ghost" onPress={resendVerification} />
+          </Card>
+        ) : null}
 
         {!isWeb ? (
           <Card className="flex-row items-center justify-between py-3.5">

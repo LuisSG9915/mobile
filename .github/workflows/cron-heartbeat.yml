@@ -1,0 +1,77 @@
+# H1.7: alerta si el cron de limpieza deja de correr.
+# Lee `system_state.cron_last_run` (escrito por runCleanup) y falla el job si el
+# latido tiene más de 26 h o si la última corrida terminó con ok=false, de modo
+# que GitHub envía un correo de fallo al dueño del repo.
+name: Cron heartbeat
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # tras el backup D1 (03:30 UTC) y el cron (03:00 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Latido de runCleanup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read cron_last_run
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          RAW=$(node node_modules/wrangler/bin/wrangler.js d1 execute photos-db --remote --json \
+            --command "SELECT value FROM system_state WHERE key = 'cron_last_run'" 2>/dev/null)
+          VALUE=$(printf '%s' "$RAW" | node -e '
+            let raw = "";
+            process.stdin.on("data", (d) => (raw += d));
+            process.stdin.on("end", () => {
+              const rows = JSON.parse(raw);
+              const row = Array.isArray(rows) ? rows[0]?.results?.[0] : undefined;
+              process.stdout.write(row?.value ?? "");
+            });
+          ')
+          if [ -z "$VALUE" ]; then
+            echo "::error::No existe cron_last_run: el cron nunca se ha ejecutado en este entorno."
+            exit 1
+          fi
+          echo "cron_last_run: $VALUE"
+          printf '%s' "$VALUE" | node -e '
+            let raw = "";
+            process.stdin.on("data", (d) => (raw += d));
+            process.stdin.on("end", () => {
+              const hb = JSON.parse(raw);
+              const now = Date.now();
+              const reference = hb.finishedAt ?? hb.startedAt;
+              const ageHours = (now - reference) / 3_600_000;
+              console.log(`edad del latido: ${ageHours.toFixed(1)} h (ok=${hb.ok})`);
+              if (hb.ok !== true) {
+                console.log("::error::La última corrida del cron terminó con error o no terminó.");
+                process.exit(1);
+              }
+              if (ageHours > 26) {
+                console.log("::error::El cron no se ejecuta desde hace más de 26 h.");
+                process.exit(1);
+              }
+            });
+          '

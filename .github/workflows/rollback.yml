@@ -1,0 +1,94 @@
+# Reversa de despliegue (H1.4): vuelve a una versión anterior del Worker o
+# restaura el catálogo D1 desde un respaldo. Manual, con confirmación explícita.
+#
+#   - Worker:  wrangler rollback <version-id> (API o web)
+#   - D1:      importa el respaldo a una base NUEVA (nunca sobre la de producción)
+#
+# Runbook completo: docs/ops/INCIDENT_RESPONSE.md (R4 · Deploy malo).
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Qué revertir"
+        type: choice
+        required: true
+        options:
+          - api-worker
+          - web-worker
+          - d1-restore-to-new-db
+      version_id:
+        description: "ID de versión para wrangler rollback (solo *-worker)"
+        type: string
+        required: false
+      backup_key:
+        description: "Clave R2 del respaldo D1, ej. backups/d1/d1-2026-10-20T03-30-00Z.sql"
+        type: string
+        required: false
+      confirm:
+        description: "Escribe ROLLBACK para confirmar"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: Rollback (${{ inputs.target }})
+    if: inputs.confirm == 'ROLLBACK'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rollback API worker
+        if: inputs.target == 'api-worker'
+        run: |
+          test -n "${{ inputs.version_id }}" || { echo "::error::version_id requerido"; exit 1; }
+          node node_modules/wrangler/bin/wrangler.js rollback "${{ inputs.version_id }}" --name photos-api
+
+      - name: Rollback web worker
+        if: inputs.target == 'web-worker'
+        run: |
+          test -n "${{ inputs.version_id }}" || { echo "::error::version_id requerido"; exit 1; }
+          node node_modules/wrangler/bin/wrangler.js rollback "${{ inputs.version_id }}" --name photos-web
+
+      - name: Restore D1 backup into a NEW database
+        if: inputs.target == 'd1-restore-to-new-db'
+        run: |
+          set -euo pipefail
+          test -n "${{ inputs.backup_key }}" || { echo "::error::backup_key requerido"; exit 1; }
+          node node_modules/wrangler/bin/wrangler.js r2 object get \
+            "photos-media/${{ inputs.backup_key }}" --file backups/restore.sql --remote
+          node node_modules/wrangler/bin/wrangler.js d1 create photos-db-restore --yes || true
+          node node_modules/wrangler/bin/wrangler.js d1 execute photos-db-restore \
+            --file backups/restore.sql --remote --yes
+          node node_modules/wrangler/bin/wrangler.js d1 execute photos-db-restore --remote \
+            --command "PRAGMA integrity_check; SELECT count(*) AS users FROM user; SELECT count(*) AS media FROM media;"
+          echo "::notice::Base photos-db-restore creada. Cambia database_id en apps/api/wrangler.jsonc y despliega."
+
+      - name: Smoke after rollback
+        if: inputs.target != 'd1-restore-to-new-db'
+        run: |
+          curl -fsS https://photos-api.luis-sg9915.workers.dev/version
+          curl -fsS -o /dev/null -w "%{http_code}\n" https://photos-web.luis-sg9915.workers.dev/

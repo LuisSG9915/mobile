@@ -65,6 +65,16 @@
         "limit": 30,
         "period": 60
       }
+    },
+    {
+      // Enlaces públicos de álbum, por IP: cada request prefirma hasta 500
+      // elementos, así que sin freno es un amplificador de CPU/coste.
+      "name": "SHARE_LIMITER",
+      "namespace_id": "1003",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
     }
   ]
 }

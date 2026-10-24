@@ -24,3 +24,15 @@ Las especificaciones detalladas viven en `docs/fases/`; el tablero maestro con e
 - [x] **Fase 5: Favoritos, Chips de Filtro y Salto Temporal** — `docs/fases/05_filtros_favoritos_busqueda.md` (Commit: 6ed25ed)
 - [x] **Fase 6: Panel Admin de Almacenamiento R2 (luis.sg9915@gmail.com)** — `docs/fases/06_admin_r2_storage.md` (Commit: 423f7fe)
 - [x] **Fase 7: Gestos (Zoom, Scrubber, Swipe) y Tests Finales** — `docs/fases/07_ux_gestos_pipeline.md` (Commit: c171624)
+
+---
+
+## 🧪 Línea Base de Validación Local (Post-Etapa 5)
+
+Validación 100% offline ejecutada y verificada:
+- **API Tests (Miniflare D1 + R2 en memoria)**: 19 suites, 143 tests aprobados (0 fallos).
+- **Mobile Tests (Vitest + happy-dom)**: 22 suites, 232 tests aprobados (0 fallos).
+- **Total Tests Unitarios/Integración**: 375 tests aprobados.
+- **Pipeline Selftest (`scripts/test-pipeline.test.mjs`)**: 31 tests aprobados.
+- **Linter & Tipado**: `pnpm lint` y `pnpm typecheck` limpios en todos los paquetes (`@photos/api`, `@photos/mobile`, `@photos/shared`).
+- **Plan v2 (post-Fase 22)**: H1 “Verdad y confianza” en curso. Estado real, P0 abiertos y evidencia en [`docs/PLAN_MEJORAS.md`](../PLAN_MEJORAS.md).

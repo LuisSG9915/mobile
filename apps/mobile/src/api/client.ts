@@ -1,4 +1,5 @@
 import type {
+  AdminReconcileResponse,
   AdminStorageResponse,
   AlbumDetailResponse,
   AlbumListResponse,
@@ -18,6 +19,7 @@ import type {
   MemoriesResponse,
   MultipartAbortInput,
   MultipartCompleteInput,
+  MultipartInitInput,
   MultipartInitResponse,
   MultipartPresignPartsInput,
   MultipartPresignPartsResponse,
@@ -35,6 +37,7 @@ import type {
   TrashResponse,
   UpdateAlbumInput,
   UpdateMediaInput,
+  UploadCancelResponse,
   UploadInitInput,
   UploadInitResponse,
   UserAccountDeleteResponse,
@@ -104,7 +107,7 @@ export const api = {
     }).then((r) => r.json()),
 
   multipartInit: (
-    body: UploadInitInput,
+    body: MultipartInitInput,
     opts?: { signal?: AbortSignal },
   ): Promise<MultipartInitResponse> =>
     apiFetch("/v1/uploads/multipart/init", {
@@ -127,7 +130,7 @@ export const api = {
     body: MultipartCompleteInput,
     opts?: { signal?: AbortSignal },
   ): Promise<{ id: string; status: "ready" }> =>
-    apiFetch("/v1/uploads/multipart/complete", {
+    apiFetch("/v1/uploads/multipart/finalize", {
       method: "POST",
       body: JSON.stringify(body),
       signal: opts?.signal,
@@ -157,6 +160,17 @@ export const api = {
     apiFetch(`/v1/uploads/${id}/complete`, { method: "POST", signal: opts?.signal }).then((r) =>
       r.json(),
     ),
+
+  cancelUpload: (
+    id: string,
+    opts?: { uploadId?: string | null; signal?: AbortSignal },
+  ): Promise<UploadCancelResponse> =>
+    apiFetch(`/v1/uploads/${id}/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: opts?.uploadId ? JSON.stringify({ uploadId: opts.uploadId }) : undefined,
+      signal: opts?.signal,
+    }).then((r) => r.json()),
 
   timeline: (
     cursor?: string,
@@ -221,6 +235,9 @@ export const api = {
   adminStorage: (): Promise<AdminStorageResponse> =>
     apiFetch("/v1/admin/storage").then((r) => r.json()),
 
+  adminReconcile: (userId: string): Promise<AdminReconcileResponse> =>
+    apiFetch(`/v1/admin/users/${userId}/reconcile`, { method: "POST" }).then((r) => r.json()),
+
   // Álbumes y Compartir
   albums: (params?: { cursor?: string; limit?: number }): Promise<AlbumListResponse> => {
     const q = new URLSearchParams();
@@ -273,7 +290,7 @@ export const api = {
     apiFetch(`/v1/albums/${id}/share`, { method: "DELETE" }).then((r) => r.json()),
 
   publicSharedAlbum: (token: string): Promise<PublicAlbumResponse> =>
-    apiFetch(`/v1/shared/album/${token}`).then((r) => r.json()),
+    apiFetch(`/v1/albums/public/${token}`).then((r) => r.json()),
 
   // Búsqueda, etiquetas y metadatos
   updateMedia: (id: string, body: UpdateMediaInput): Promise<MediaDetail> =>

@@ -16,6 +16,17 @@ async function init(cookie: string, body: Record<string, unknown>) {
   );
 }
 
+async function multipartInit(cookie: string, body: Record<string, unknown>) {
+  return SELF.fetch(
+    "http://localhost/v1/uploads/multipart/init",
+    authed(cookie, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 describe("uploads/init", () => {
   it("crea subida nueva → 201 con dos URLs prefirmadas", async () => {
     const { cookie, userId } = await createUser();
@@ -414,6 +425,189 @@ describe("uploads/multipart", () => {
     expect(abortRes.status).toBe(200);
     const abortJson = await j(abortRes);
     expect(abortJson.ok).toBe(true);
+  });
+
+  it("reanuda la misma MPU cuando el cliente manda el uploadId", async () => {
+    const { cookie } = await createUser();
+    const body = initBody({
+      sha256: sha("b1"),
+      fileSize: 25 * 1024 * 1024,
+      previewSize: 150_000,
+    });
+    const r1 = await multipartInit(cookie, body);
+    expect(r1.status).toBe(201);
+    const j1 = await j(r1);
+
+    const r2 = await multipartInit(cookie, { ...body, uploadId: j1.uploadId });
+    expect(r2.status).toBe(200);
+    const j2 = await j(r2);
+    expect(j2.uploadId).toBe(j1.uploadId);
+    expect(j2.resumed).toBe(true);
+  });
+
+  it("rechaza un re-init que cambia el tamaño de una subida pending", async () => {
+    const { cookie } = await createUser();
+    const body = initBody({
+      sha256: sha("b2"),
+      fileSize: 25 * 1024 * 1024,
+    });
+    const r1 = await multipartInit(cookie, body);
+    expect(r1.status).toBe(201);
+
+    const r2 = await multipartInit(cookie, { ...body, fileSize: 30 * 1024 * 1024 });
+    expect(r2.status).toBe(409);
+    const json = await j(r2);
+    expect(json.code).toBe("upload_size_changed");
+  });
+
+  it("rechaza un ensamblado cuyo tamaño real no coincide con el declarado y limpia la fila", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({
+      sha256: sha("b3"),
+      fileSize: 6,
+      thumbSize: 1,
+    });
+    const r1 = await multipartInit(cookie, body);
+    expect(r1.status).toBe(201);
+    const initJson = await j(r1);
+
+    // Miniatura correcta, pero la parte real pesa 6 MiB.
+    await env.BUCKET.put(`users/${userId}/thumbs/${body.sha256}.webp`, new Uint8Array(1));
+    const mpu = env.BUCKET.resumeMultipartUpload(initJson.key, initJson.uploadId);
+    const part = await mpu.uploadPart(1, new Uint8Array(6 * 1024 * 1024));
+
+    const completeRes = await SELF.fetch(
+      "http://localhost/v1/uploads/multipart/finalize",
+      authed(cookie, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: initJson.id,
+          uploadId: initJson.uploadId,
+          parts: [{ partNumber: 1, etag: part.etag }],
+        }),
+      }),
+    );
+    expect(completeRes.status).toBe(409);
+    const completeJson = await j(completeRes);
+    expect(completeJson.error).toBe("size_mismatch");
+
+    const db = getDb(env.DB);
+    const row = await db.select().from(media).where(eq(media.id, initJson.id)).get();
+    expect(row).toBeUndefined();
+    const stats = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(stats?.reservedBytes).toBe(0);
+  });
+
+  it("rechaza un ensamblado con MIME de miniatura incorrecto", async () => {
+    const { cookie, userId } = await createUser();
+    const body = initBody({
+      sha256: sha("b4"),
+      fileSize: 6,
+      thumbSize: 1,
+    });
+    const r1 = await multipartInit(cookie, body);
+    expect(r1.status).toBe(201);
+    const initJson = await j(r1);
+
+    await env.BUCKET.put(`users/${userId}/thumbs/${body.sha256}.webp`, new Uint8Array(1), {
+      httpMetadata: { contentType: "image/png" },
+    });
+    const mpu = env.BUCKET.resumeMultipartUpload(initJson.key, initJson.uploadId);
+    const part = await mpu.uploadPart(1, new Uint8Array(6));
+
+    const completeRes = await SELF.fetch(
+      "http://localhost/v1/uploads/multipart/finalize",
+      authed(cookie, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: initJson.id,
+          uploadId: initJson.uploadId,
+          parts: [{ partNumber: 1, etag: part.etag }],
+        }),
+      }),
+    );
+    expect(completeRes.status).toBe(409);
+    const completeJson = await j(completeRes);
+    expect(completeJson.error).toBe("mime_mismatch");
+  });
+});
+
+describe("uploads/:id/cancel", () => {
+  it("iniciar subida incrementa reserved_bytes, cancelar libera reserved_bytes a 0, y segunda llamada es idempotente", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+
+    const body = initBody({ sha256: sha("ca01"), fileSize: 200_000, thumbSize: 5_000 });
+    const initRes = await init(cookie, body);
+    expect(initRes.status).toBe(201);
+    const { id } = await j(initRes);
+
+    const statsAfterInit = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(statsAfterInit?.reservedBytes).toBe(205_000);
+
+    // Cancelar subida
+    const cancelRes = await SELF.fetch(
+      `http://localhost/v1/uploads/${id}/cancel`,
+      authed(cookie, { method: "POST" }),
+    );
+    expect(cancelRes.status).toBe(200);
+    const cancelJson = await j(cancelRes);
+    expect(cancelJson.ok).toBe(true);
+    expect(cancelJson.releasedBytes).toBe(205_000);
+
+    const statsAfterCancel = await db
+      .select()
+      .from(userStorageStats)
+      .where(eq(userStorageStats.userId, userId))
+      .get();
+    expect(statsAfterCancel?.reservedBytes).toBe(0);
+
+    // Segunda llamada debe ser idempotente
+    const cancel2Res = await SELF.fetch(
+      `http://localhost/v1/uploads/${id}/cancel`,
+      authed(cookie, { method: "POST" }),
+    );
+    expect(cancel2Res.status).toBe(200);
+    const cancel2Json = await j(cancel2Res);
+    expect(cancel2Json.ok).toBe(true);
+    expect(cancel2Json.releasedBytes).toBe(0);
+  });
+
+  it("reconciliación reactiva limpia reservas huérfanas al superar la cuota y permite la subida", async () => {
+    const { cookie, userId } = await createUser();
+    const db = getDb(env.DB);
+
+    // Establecer cuota de 500 KB y simular reservas huérfanas desfasadas que llenan la cuota
+    await db
+      .insert(userStorageStats)
+      .values({
+        userId,
+        usedBytes: 0,
+        reservedBytes: 450_000,
+        maxBytes: 500_000,
+        mediaCount: 0,
+        updatedAt: Date.now() - 3600_000,
+      })
+      .onConflictDoUpdate({
+        target: userStorageStats.userId,
+        set: { reservedBytes: 450_000, maxBytes: 500_000 },
+      });
+
+    // Sin archivos reales pendientes, intentar subir 100 KB (450 KB + 100 KB > 500 KB)
+    // Gracias a la reconciliación reactiva, se recalcula reserved_bytes real (0) y la subida se acepta
+    const body = initBody({ sha256: sha("ca02"), fileSize: 90_000, thumbSize: 5_000 });
+    const res = await init(cookie, body);
+    expect(res.status).toBe(201);
   });
 });
 

@@ -14,6 +14,13 @@ export type Bindings = {
   UPLOAD_LIMITER?: RateLimit;
   /** Rate limit de Cloudflare para /api/auth/* (login/registro); ausente en dev/tests. */
   AUTH_LIMITER?: RateLimit;
+  /** Rate limit por IP para los enlaces públicos (/albums/public/*); ausente en dev/tests. */
+  SHARE_LIMITER?: RateLimit;
+  /** Cloudflare Analytics Engine para telemetría operativa de subidas y rendimiento. */
+  ANALYTICS?: AnalyticsEngineDataset;
+
+  /** Entorno de ejecución (ej. "production", "development", "test"). */
+  ENVIRONMENT?: string;
 
   R2_ACCOUNT_ID: string;
   R2_ACCESS_KEY_ID: string;
@@ -39,6 +46,11 @@ export type Bindings = {
 
   /** Días de gracia para verificar el email antes de bloquear subidas (por defecto "7"). */
   EMAIL_VERIFICATION_GRACE_DAYS?: string;
+
+  /** Versión desplegada (wrangler --var APP_VERSION=<tag>); expuesta en /version. */
+  APP_VERSION?: string;
+  /** Commit desplegado (wrangler --var GIT_SHA=<sha>); expuesta en /version. */
+  GIT_SHA?: string;
 
   /** DSN de Sentry (secret). Sin él la telemetría queda desactivada. */
   SENTRY_DSN?: string;

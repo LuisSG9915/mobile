@@ -1,93 +1,38 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { errorSchema, publicAlbumResponseSchema } from "@photos/shared";
-import { and, desc, eq, isNull } from "drizzle-orm";
-import { getDb } from "../db/client";
-import { album, albumMedia, media } from "../db/schema";
+import { errorSchema } from "@photos/shared";
 import type { AppEnv } from "../env";
-import { presignGet, presignGetDownload } from "../lib/s3";
 
-const err = (description: string) => ({
-  content: { "application/json": { schema: errorSchema } },
-  description,
-});
-
-const tokenParam = z.object({ token: z.string().min(1) });
-
-const getSharedAlbumRoute = createRoute({
+/**
+ * Rutas públicas heredadas.
+ *
+ * El álbum público vive ahora en `GET /albums/public/{token}` (albumsApp) para
+ * aplicar el rate limit por IP de `SHARE_LIMITER` y limitar el tamaño/URLs.
+ * Esta ruta se mantiene **solo como compatibilidad**: responde 410 con la ruta
+ * nueva para que ningún enlace antiguo filtre contenido sin límites.
+ */
+const legacySharedRoute = createRoute({
   method: "get",
   path: "/shared/album/{token}",
   tags: ["shared"],
-  summary: "Ver álbum compartido públicamente",
+  summary: "Ruta pública heredada (deprecada)",
   description:
-    "Permite consultar el contenido y miniaturas de un álbum mediante su token de compartir, sin requerir autenticación.",
-  request: { params: tokenParam },
+    "Los enlaces públicos se sirven en /albums/public/{token}. Aquí se responde 410 para no exponer contenido sin rate limit.",
+  request: { params: z.object({ token: z.string().min(1) }) },
   responses: {
-    200: {
-      content: { "application/json": { schema: publicAlbumResponseSchema } },
-      description: "Contenido del álbum compartido",
+    410: {
+      content: { "application/json": { schema: errorSchema } },
+      description: "Enlace heredado: usar /albums/public/{token}",
     },
-    404: err("Álbum compartido no encontrado"),
-    410: err("Enlace caducado o revocado"),
   },
 });
 
-export const sharedApp = new OpenAPIHono<AppEnv>().openapi(getSharedAlbumRoute, async (c) => {
-  const { token } = c.req.valid("param");
-  const db = getDb(c.env.DB);
-
-  const a = await db.select().from(album).where(eq(album.shareToken, token)).get();
-
-  if (!a?.shareToken) {
-    return c.json(
-      {
-        error: "not_found",
-        message: "El álbum compartido no existe o la dirección no es válida.",
-      },
-      404,
-    );
-  }
-
-  const now = Date.now();
-  if (a.shareRevokedAt != null || (a.shareExpiresAt != null && a.shareExpiresAt <= now)) {
-    return c.json(
-      {
-        error: "expired",
-        message: "Este enlace compartido ha caducado o ha sido revocado.",
-      },
-      410,
-    );
-  }
-
-  const rows = await db
-    .select({ media })
-    .from(albumMedia)
-    .innerJoin(media, eq(albumMedia.mediaId, media.id))
-    .where(and(eq(albumMedia.albumId, a.id), isNull(media.deletedAt)))
-    .orderBy(desc(albumMedia.addedAt));
-
-  const items = await Promise.all(
-    rows.map(async ({ media: m }) => ({
-      id: m.id,
-      mediaType: m.mediaType,
-      width: m.width,
-      height: m.height,
-      takenAt: m.takenAt,
-      durationMs: m.durationMs,
-      thumbhash: m.thumbhash,
-      thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-      originalUrl: await presignGet(c.env, m.r2KeyOriginal),
-      downloadUrl: await presignGetDownload(c.env, m.r2KeyOriginal, `${m.id}.${m.ext}`),
-    })),
-  );
-
+export const sharedApp = new OpenAPIHono<AppEnv>().openapi(legacySharedRoute, (c) => {
   return c.json(
     {
-      title: a.title,
-      mediaCount: items.length,
-      createdAt: a.createdAt,
-      expiresAt: a.shareExpiresAt ?? null,
-      items,
+      error: "gone",
+      code: "legacy_share_url",
+      message: "Este enlace ha cambiado de dirección. Pide al dueño un enlace nuevo.",
     },
-    200,
+    410,
   );
 });

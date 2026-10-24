@@ -35,9 +35,47 @@ async function deleteObjects(env: Bindings, keys: string[]) {
  * 4. Reconcilia user_storage_stats contra media (auto-corrige drift).
  * 5. Barre objetos R2 huérfanos con cursor persistente en system_state.
  */
+/**
+ * Latido del cron en `system_state.cron_last_run`: permite alertar si el cron
+ * deja de correr (docs/ops/SLO.md). `finishedAt`/`ok` solo se escriben al
+ * terminar; si el Worker muere a mitad, el latido conserva el último inicio.
+ */
+async function writeCronHeartbeat(
+  db: ReturnType<typeof getDb>,
+  status: { ok: boolean; finishedAt: number | null; error?: string },
+): Promise<void> {
+  try {
+    const current = await db
+      .select()
+      .from(systemState)
+      .where(eq(systemState.key, "cron_last_run"))
+      .get();
+    let startedAt = Date.now();
+    if (current?.value) {
+      try {
+        startedAt = (JSON.parse(current.value) as { startedAt?: number }).startedAt ?? startedAt;
+      } catch {}
+    }
+    await db
+      .insert(systemState)
+      .values({
+        key: "cron_last_run",
+        value: JSON.stringify({ ...status, startedAt }),
+        updatedAt: Date.now(),
+      })
+      .onConflictDoUpdate({
+        target: systemState.key,
+        set: { value: JSON.stringify({ ...status, startedAt }), updatedAt: Date.now() },
+      });
+  } catch (err) {
+    console.error("cron_heartbeat_error", err);
+  }
+}
+
 export async function runCleanup(env: Bindings): Promise<void> {
   const db = getDb(env.DB);
   const now = Date.now();
+  await writeCronHeartbeat(db, { ok: false, finishedAt: null });
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const stalePending = await db
@@ -123,6 +161,7 @@ export async function runCleanup(env: Bindings): Promise<void> {
   } catch (err) {
     console.error("Error al purgar subidas multipart incompletas:", err);
   }
+  await writeCronHeartbeat(db, { ok: true, finishedAt: Date.now() });
 }
 
 /**

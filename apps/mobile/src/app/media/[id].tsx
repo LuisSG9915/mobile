@@ -301,10 +301,28 @@ function ZoomableImage({
   );
 }
 
-function NativeVideoPlayer({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (p) => {
+function NativeVideoPlayer({ uri, fallbackUri }: { uri: string; fallbackUri?: string | null }) {
+  const [src, setSrc] = useState(uri);
+
+  useEffect(() => {
+    setSrc(uri);
+  }, [uri]);
+
+  const player = useVideoPlayer(src, (p) => {
     p.loop = false;
   });
+
+  useEffect(() => {
+    const sub = player.addListener("statusChange", (payload) => {
+      if (payload.status === "error" && fallbackUri && src !== fallbackUri) {
+        setSrc(fallbackUri);
+      }
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [player, fallbackUri, src]);
+
   return (
     <VideoView
       player={player}
@@ -315,7 +333,69 @@ function NativeVideoPlayer({ uri }: { uri: string }) {
   );
 }
 
-function WebVideoPlayer({ uri }: { uri: string }) {
+function WebVideoPlayer({
+  uri,
+  fallbackUri,
+  onDownload,
+}: {
+  uri: string;
+  fallbackUri?: string | null;
+  onDownload?: () => void;
+}) {
+  const [currentSrc, setCurrentSrc] = useState(uri);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setCurrentSrc(uri);
+    setHasError(false);
+  }, [uri]);
+
+  const handleError = () => {
+    if (fallbackUri && currentSrc !== fallbackUri) {
+      setCurrentSrc(fallbackUri);
+    } else {
+      setHasError(true);
+    }
+  };
+
+  if (hasError) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          width: "100%",
+          height: "100%",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+        }}
+      >
+        <Text style={{ color: "#e5e5e5", fontSize: 16, marginBottom: 16, textAlign: "center" }}>
+          Tu navegador no soporta la reproducción directa de este formato/códec de video.
+        </Text>
+        {onDownload ? (
+          <Pressable
+            onPress={onDownload}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: "#2563eb",
+              paddingHorizontal: 20,
+              paddingVertical: 12,
+              borderRadius: 12,
+            }}
+            accessibilityRole="button"
+          >
+            <Download size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 14 }}>
+              Descargar video original
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View
       style={{
@@ -328,10 +408,11 @@ function WebVideoPlayer({ uri }: { uri: string }) {
     >
       {/* biome-ignore lint/a11y/useMediaCaption: videos personales subidos por el usuario */}
       <video
-        src={uri}
+        src={currentSrc}
         controls
         autoPlay
         playsInline
+        onError={handleError}
         style={{
           maxWidth: "100%",
           maxHeight: "80vh",
@@ -344,11 +425,22 @@ function WebVideoPlayer({ uri }: { uri: string }) {
   );
 }
 
-function VideoPage({ uri }: { uri: string }) {
+function VideoPage({
+  uri,
+  previewUri,
+  onDownload,
+}: {
+  uri: string;
+  previewUri?: string | null;
+  onDownload?: () => void;
+}) {
+  const primaryUri = previewUri || uri;
+  const fallbackUri = previewUri ? uri : null;
+
   if (Platform.OS === "web") {
-    return <WebVideoPlayer uri={uri} />;
+    return <WebVideoPlayer uri={primaryUri} fallbackUri={fallbackUri} onDownload={onDownload} />;
   }
-  return <NativeVideoPlayer uri={uri} />;
+  return <NativeVideoPlayer uri={primaryUri} fallbackUri={fallbackUri} />;
 }
 
 function WebImageViewer({
@@ -439,6 +531,7 @@ function MediaPage({
   onSingleTap,
   onZoomChange,
   backdropOpacity,
+  onDownload,
 }: {
   item: CarouselItem;
   active: boolean;
@@ -448,6 +541,7 @@ function MediaPage({
   onSingleTap?: () => void;
   onZoomChange?: (zoomed: boolean) => void;
   backdropOpacity?: SharedValue<number>;
+  onDownload?: () => void;
 }) {
   const remoteId =
     item.remoteId ?? (!item.id.startsWith("l-") && !item.id.startsWith("q-") ? item.id : null);
@@ -466,8 +560,10 @@ function MediaPage({
   if (item.mediaType === "video") {
     // El player solo existe en la página activa (es pesado); las demás
     // páginas de video muestran su miniatura.
-    return active && originalUrl && !originalUrl.includes("/thumbs/") ? (
-      <VideoPage uri={originalUrl} />
+    const activeVideoUri = originalUrl && !originalUrl.includes("/thumbs/") ? originalUrl : null;
+    const resolvedVideoUri = activeVideoUri || previewUrl;
+    return active && resolvedVideoUri ? (
+      <VideoPage uri={resolvedVideoUri} previewUri={previewUrl} onDownload={onDownload} />
     ) : (
       <ThumbPage item={item} />
     );
@@ -804,6 +900,8 @@ export default function MediaViewer() {
       : undefined) ||
     d?.thumbUrl ||
     activeItem?.thumbUrl;
+  const currentPreviewUrl =
+    detail.data?.previewUrl || (activeItem as any)?.previewUrl || d?.previewUrl || null;
   const currentThumbUrl =
     activeItem?.thumbUrl ||
     activeItem?.localUri ||
@@ -1191,8 +1289,13 @@ export default function MediaViewer() {
 
             {/* Renderizado de video o imagen */}
             {currentMediaType === "video" ? (
-              currentOriginalUrl && !currentOriginalUrl.includes("/thumbs/") ? (
-                <WebVideoPlayer uri={currentOriginalUrl} />
+              (currentPreviewUrl || currentOriginalUrl) &&
+              !(currentPreviewUrl || currentOriginalUrl)?.includes("/thumbs/") ? (
+                <WebVideoPlayer
+                  uri={currentPreviewUrl ?? currentOriginalUrl ?? ""}
+                  fallbackUri={currentPreviewUrl ? currentOriginalUrl : null}
+                  onDownload={onDownload}
+                />
               ) : (
                 <View className="flex-1 w-full h-full items-center justify-center relative">
                   {currentThumbUrl ? (
@@ -1269,6 +1372,7 @@ export default function MediaViewer() {
                   onSingleTap={() => setImmersive((v) => !v)}
                   onZoomChange={index === activeIndex ? setZoomed : undefined}
                   backdropOpacity={backdropOpacity}
+                  onDownload={onDownload}
                 />
               </View>
             )}
@@ -1282,7 +1386,7 @@ export default function MediaViewer() {
             <Text className="text-neutral-400">No encontrado</Text>
           </View>
         ) : d.mediaType === "video" ? (
-          <VideoPage uri={d.originalUrl} />
+          <VideoPage uri={d.originalUrl} previewUri={d.previewUrl} onDownload={onDownload} />
         ) : (
           <ZoomableImage
             uri={d.previewUrl || d.originalUrl}

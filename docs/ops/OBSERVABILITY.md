@@ -84,3 +84,25 @@ hace falta para empezar a recibir eventos.
 
 El plan gratuito de Sentry cubre de sobra un proyecto personal (5k errores/mes).
 `tracesSampleRate` está en `0.1` para no acercarse al límite de transacciones.
+
+## Heartbeat del cron y alertas (Plan v2 · H1.7)
+
+`runCleanup` deja un latido en `system_state`:
+
+```json
+{ "key": "cron_last_run", "value": "{\"ok\":true,\"finishedAt\":1792820000000,\"startedAt\":1792819900000}" }
+```
+
+- **Inicio:** se escribe `ok=false, finishedAt=null` al empezar; si el Worker muere a mitad, el latido
+  queda en `ok=false` y la alerta lo detecta.
+- **Fin:** se reescribe con `ok=true` y `finishedAt`.
+- **Alerta:** `.github/workflows/cron-heartbeat.yml` (diario 05:00 UTC) falla el job si el latido
+  tiene más de 26 h o `ok=false`; GitHub envía el correo de fallo al dueño del repo.
+- Requiere los secrets del repo `CLOUDFLARE_API_TOKEN` (D1:Read) y `CLOUDFLARE_ACCOUNT_ID`.
+
+Consulta manual:
+
+```bash
+node node_modules/wrangler/bin/wrangler.js d1 execute photos-db --remote \
+  --command "SELECT value FROM system_state WHERE key = 'cron_last_run'"
+```

@@ -40,6 +40,54 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
   const lastLabel = useRef("");
   const pendingJumpIso = useRef<string | null>(null);
 
+  const totalHeight = geometry.totalHeight ?? geometry.height;
+
+  // Cabeceras de sección estables
+  const sectionHeaders = useMemo(() => {
+    const list: Array<{ rowIndex: number; label: string; key: string }> = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.type === "header") {
+        list.push({ rowIndex: i, label: r.label, key: r.key });
+      }
+    }
+    return list;
+  }, [rows]);
+
+  // Marcadores de fecha y posiciones dependientes de la altura total y cabeceras
+  const dateMarkers = useMemo(() => {
+    if (totalHeight <= 0 || sectionHeaders.length === 0) return [];
+    return sectionHeaders.map((header) => {
+      const line = geometry.lines.find(
+        (l) => l.kind === "header" && l.rowIndex === header.rowIndex,
+      );
+      const y = line ? line.top : (header.rowIndex / rows.length) * totalHeight;
+      return { rowIndex: header.rowIndex, label: header.label, y };
+    });
+  }, [totalHeight, sectionHeaders]);
+
+  // Mapeo rápido de mes a fila de la galería
+  const monthToRowIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.type === "photo") {
+        const ym = new Date(r.photo.takenAt).toISOString().slice(0, 7);
+        if (!map.has(ym)) {
+          let target = i;
+          for (let h = i; h >= 0; h--) {
+            if (rows[h]?.type === "header") {
+              target = h;
+              break;
+            }
+          }
+          map.set(ym, target);
+        }
+      }
+    }
+    return map;
+  }, [sectionHeaders, rows]);
+
   const scrub = useCallback(
     (y: number) => {
       if (trackH <= 0) return;
@@ -50,31 +98,12 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
         const mIdx = Math.min(months.length - 1, Math.max(0, Math.floor(frac * months.length)));
         const targetMonth = months[mIdx];
         if (targetMonth) {
-          // Buscar si el mes ya está en las filas cargadas
-          let foundRowIndex = -1;
-          for (let i = 0; i < rows.length; i++) {
-            const r = rows[i];
-            if (
-              r.type === "photo" &&
-              new Date(r.photo.takenAt).toISOString().slice(0, 7) === targetMonth.ym
-            ) {
-              foundRowIndex = i;
-              break;
-            }
-          }
-
-          if (foundRowIndex >= 0) {
+          const foundRowIndex = monthToRowIndex.get(targetMonth.ym);
+          if (foundRowIndex !== undefined && foundRowIndex >= 0) {
             pendingJumpIso.current = null;
-            let target = foundRowIndex;
-            for (let i = foundRowIndex; i >= 0; i--) {
-              if (rows[i].type === "header") {
-                target = i;
-                break;
-              }
-            }
-            if (target !== lastIndex.current) {
-              lastIndex.current = target;
-              onScrub(target);
+            if (foundRowIndex !== lastIndex.current) {
+              lastIndex.current = foundRowIndex;
+              onScrub(foundRowIndex);
             }
             const label = monthLabel(targetMonth.ym);
             if (label !== lastLabel.current) {
@@ -97,8 +126,8 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
         }
       }
 
-      if (geometry.height <= 0) return;
-      const targetY = frac * geometry.height;
+      if (totalHeight <= 0) return;
+      const targetY = frac * totalHeight;
       const line = lineAtY(geometry, targetY);
       if (!line) return;
       const rowIndex = line.kind === "header" ? line.rowIndex : line.firstRow;
@@ -113,7 +142,7 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
       }
       setBubble({ y: Math.min(Math.max(y, 20), trackH - 20), label });
     },
-    [trackH, geometry, rows, onScrub, months],
+    [trackH, totalHeight, geometry, rows, onScrub, months, monthToRowIndex],
   );
 
   const endScrub = useCallback(() => {
@@ -145,6 +174,16 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
       >
         {/* Pista visual sutil siempre visible para descubrir el gesto. */}
         <View className="absolute right-1 top-4 bottom-4 w-1 rounded-full bg-neutral-300/50 dark:bg-neutral-700/50" />
+        {trackH > 0 && totalHeight > 0 && dateMarkers.length > 0 && dateMarkers.length <= 30
+          ? dateMarkers.map((m, idx) => (
+              <View
+                key={`${m.rowIndex}-${idx}`}
+                className="absolute right-1 w-1 h-0.5 bg-neutral-400/50 dark:bg-neutral-500/50"
+                style={{ top: Math.min(Math.max((m.y / totalHeight) * trackH, 8), trackH - 8) }}
+                pointerEvents="none"
+              />
+            ))
+          : null}
         {bubble ? (
           <View
             className="absolute right-8 rounded-full bg-neutral-900/90 dark:bg-white/90 px-3 py-1.5"

@@ -1,0 +1,51 @@
+name: Backlog (Plan v2)
+description: Tarea con ID, evidencia y estado del tablero
+title: "[H?-?] "
+labels: ["backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Regla del Plan v2: ningún cierre sin evidencia enlazada (commit, test, workflow, captura o informe).
+  - type: input
+    id: item
+    attributes:
+      label: ID del plan
+      description: H1.1, H2.3, I-06...
+      placeholder: H1.2
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Resultado esperado
+      description: Qué cambia para el usuario o el sistema (no el archivo que se toca).
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidencia de cierre
+      description: Comando, test o artefacto que demuestra que está hecho.
+    validations:
+      required: true
+  - type: dropdown
+    id: state
+    attributes:
+      label: Estado
+      options:
+        - todo
+        - in_progress
+        - blocked
+        - done
+    validations:
+      required: true
+  - type: input
+    id: risk
+    attributes:
+      label: Riesgo y rollback
+      description: Qué puede romper y cómo se revierte.
+  - type: input
+    id: owner
+    attributes:
+      label: Dueño y fecha objetivo

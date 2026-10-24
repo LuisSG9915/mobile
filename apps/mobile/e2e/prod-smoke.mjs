@@ -1,9 +1,15 @@
 /**
- * Smoke contra producción (H-007): login en photos-web.workers.dev y
- * subida real — verifica el PUT presignado cross-origin a R2 de producción.
+ * Smoke contra producción: login en la web desplegada y subida real (verifica
+ * el PUT prefirmado cross-origin a R2 de producción).
+ *
+ * Credenciales: SOLO por secretos del repo (`SMOKE_USER_EMAIL`,
+ * `SMOKE_USER_PASSWORD`). No hay valores por defecto: sin ellos el script sale
+ * con código 2 ("no configurado") y el workflow lo trata como skip.
  *
  * Uso:
  *   node e2e/prod-smoke.mjs [--optional]
+ *
+ * Salidas: 0 = OK (o omitido con --optional), 1 = fallo real, 2 = no configurado.
  */
 import { chromium } from "@playwright/test";
 import { encode } from "jpeg-js";
@@ -14,8 +20,16 @@ const isOptional =
   process.env.SMOKE_OPTIONAL === "1";
 
 const WEB = process.env.PROD_WEB_URL ?? "https://photos-web.luis-sg9915.workers.dev";
-const EMAIL = process.env.SMOKE_USER_EMAIL ?? "e2e-prod-web@example.com";
-const PASSWORD = process.env.SMOKE_USER_PASSWORD ?? "password-e2e-123";
+const API = process.env.PROD_API_URL ?? "https://photos-api.luis-sg9915.workers.dev";
+const EMAIL = process.env.SMOKE_USER_EMAIL ?? "";
+const PASSWORD = process.env.SMOKE_USER_PASSWORD ?? "";
+
+function notConfigured(reason) {
+  console.warn(
+    `prod-smoke: no configurado (${reason}). Define SMOKE_USER_EMAIL y SMOKE_USER_PASSWORD.`,
+  );
+  process.exit(isOptional ? 0 : 2);
+}
 
 function makeJpeg(seed, width = 640, height = 480) {
   const data = new Uint8Array(width * height * 4);
@@ -32,6 +46,16 @@ function makeJpeg(seed, width = 640, height = 480) {
   return encode({ data, width, height }, 80).data;
 }
 
+/** Borra el media subido por el smoke (papelera + purga; nunca toca otros usuarios). */
+async function cleanupUploaded(id, bearer) {
+  if (!id || !bearer) return;
+  const headers = { authorization: `Bearer ${bearer}` };
+  await fetch(`${API}/v1/media/${id}`, { method: "DELETE", headers }).catch(() => {});
+  await fetch(`${API}/v1/trash/empty`, { method: "POST", headers }).catch(() => {});
+}
+
+if (!EMAIL || !PASSWORD) notConfigured("faltan credenciales");
+
 let browser;
 try {
   browser = await chromium.launch();
@@ -42,6 +66,9 @@ try {
   }
   throw err;
 }
+
+let mediaId = null;
+let token = null;
 
 try {
   const page = await browser.newPage();
@@ -77,37 +104,26 @@ try {
       .filter({ visible: true })
       .last()
       .waitFor({ timeout: 15_000 })
-      .then(() => "permissions")
-      .catch(() => null),
+      .then(() => "permissions"),
     page
       .getByText("Respaldo", { exact: true })
       .filter({ visible: true })
       .last()
       .waitFor({ timeout: 15_000 })
-      .then(() => "tabs")
-      .catch(() => null),
-  ]);
+      .then(() => "tabs"),
+  ]).catch(() => null);
 
   if (tabsOrPerms === "permissions") {
     await page.getByText("Continuar", { exact: true }).filter({ visible: true }).last().click();
   } else if (!tabsOrPerms) {
-    // Si no entró, intentar registro por si el usuario aún no existe en producción
-    console.log("prod-smoke: usuario no autenticado, intentando registro…");
-    await page.goto(`${WEB}/register`, { timeout: 15_000 }).catch(() => {});
-    const nameInput = page.locator('input[autocomplete="name"]:visible');
-    if (await nameInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await nameInput.fill("Smoke Prod");
-      await page.locator('input[autocomplete="email"]:visible').fill(EMAIL);
-      await page.locator('input[type="password"]:visible').fill(PASSWORD);
-      await page.getByText("Crear cuenta", { exact: true }).last().click();
-      await page
-        .getByText("Continuar", { exact: true })
-        .filter({ visible: true })
-        .last()
-        .click({ timeout: 15_000 })
-        .catch(() => {});
-    }
+    // NUNCA registrar cuentas en producción desde un smoke: es un fallo de credenciales.
+    throw new Error(
+      "login falló: revisa SMOKE_USER_EMAIL / SMOKE_USER_PASSWORD (el smoke no registra cuentas)",
+    );
   }
+
+  token = await page.evaluate(() => localStorage.getItem("photos.session_token"));
+  if (!token) throw new Error("sin token de sesión tras el login");
 
   await page
     .getByText("Respaldo", { exact: true })
@@ -129,17 +145,21 @@ try {
     buffer: makeJpeg(Date.now() % 100000),
   });
 
-  await page
-    .getByText("1 de 1 respaldados", { exact: true })
-    .filter({ visible: true })
-    .first()
-    .waitFor({ timeout: 120_000 });
+  // La subida termina cuando el timeline se refresca; localizamos el id para limpiarlo.
+  const timeline = await page
+    .waitForResponse((r) => r.url().includes("/v1/timeline") && r.status() === 200, {
+      timeout: 120_000,
+    })
+    .then((r) => r.json())
+    .catch(() => null);
 
-  console.log("RESULT: subida completada — '1 de 1 respaldados' visible");
+  if (!timeline) throw new Error("la subida no refrescó el timeline en 120 s");
+  mediaId = timeline?.items?.[0]?.id ?? null;
+
+  console.log("RESULT: subida completada — timeline refrescado");
   console.log("RED:");
   for (const h of hits) console.log(`  ${h}`);
-  const token = await page.evaluate(() => localStorage.getItem("photos.session_token"));
-  console.log("TOKEN:", token ? `${token.slice(0, 12)}…` : "(no hay)");
+  console.log("TOKEN:", token ? `${token.slice(0, 6)}… (no se imprime completo)` : "(no hay)");
 } catch (err) {
   if (isOptional) {
     console.warn(
@@ -149,5 +169,6 @@ try {
   }
   throw err;
 } finally {
+  await cleanupUploaded(mediaId, token);
   await browser.close();
 }

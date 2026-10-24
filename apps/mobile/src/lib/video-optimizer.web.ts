@@ -38,3 +38,12 @@ export async function optimizeVideoForShare(
 export async function saveOptimizedVideoToGallery(uri: string, filename: string): Promise<void> {
   await saveDownloadWeb(uri, filename);
 }
+
+/**
+ * En entorno Web, la compresión H.264 nativa no aplica en el cliente.
+ */
+export async function createVideoPreview(
+  _localUri: string,
+): Promise<{ uri: string; bytes: number } | null> {
+  return null;
+}
