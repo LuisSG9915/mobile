@@ -9,15 +9,28 @@ type EmailMessage = {
   text: string;
 };
 
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!domain) return "***";
+  const maskedLocal = local.length > 2 ? `${local.slice(0, 2)}***` : `${local.slice(0, 1)}***`;
+  return `${maskedLocal}@${domain}`;
+}
+
+function redactUrlTokens(text: string): string {
+  return text.replace(/([?&]token=)[^&\s]+/g, "$1[REDACTED]");
+}
+
 /**
  * Envío de correo transaccional. Con RESEND_API_KEY va por la API REST de
  * Resend (fetch plano, sin dependencia). Sin clave —dev/tests— el correo se
- * escribe al log de wrangler para poder copiar el enlace a mano.
+ * escribe al log de wrangler para poder copiar el enlace a mano (redactando token/email).
  * Nunca lanza: devuelve false si el envío falló (el caller loguea).
  */
 export async function sendEmail(env: Bindings, msg: EmailMessage): Promise<boolean> {
   if (!env.RESEND_API_KEY) {
-    console.log(`[email:dev] to=${msg.to} subject="${msg.subject}"\n${msg.text}`);
+    console.log(
+      `[email:dev] to=${maskEmail(msg.to)} subject="${msg.subject}"\n${redactUrlTokens(msg.text)}`,
+    );
     return true;
   }
   try {

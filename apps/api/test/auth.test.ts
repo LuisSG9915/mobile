@@ -220,4 +220,54 @@ describe("auth", () => {
     });
     expect(okRes.status).toBe(201);
   });
+
+  it("acepta callbackURL nativo (photos://) y web en registro y reenvío de verificación", async () => {
+    // 1. Registro con deep link nativo
+    const nativeSignupRes = await SELF.fetch("http://localhost/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8787" },
+      body: JSON.stringify({
+        email: "native@test.dev",
+        password: "password1234",
+        name: "Native User",
+        callbackURL: "photos:///welcome",
+      }),
+    });
+    expect(nativeSignupRes.status).toBe(200);
+
+    // 2. Registro con origen web permitido
+    const webSignupRes = await SELF.fetch("http://localhost/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8081" },
+      body: JSON.stringify({
+        email: "webuser@test.dev",
+        password: "password1234",
+        name: "Web User",
+        callbackURL: "http://localhost:8081/welcome",
+      }),
+    });
+    expect(webSignupRes.status).toBe(200);
+
+    // 3. Reenvío de correo de verificación con callbackURL nativo
+    const resendRes = await SELF.fetch("http://localhost/api/auth/send-verification-email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8787" },
+      body: JSON.stringify({
+        email: "native@test.dev",
+        callbackURL: "photos:///welcome",
+      }),
+    });
+    expect(resendRes.status).toBe(200);
+
+    // 4. Rechazo con callbackURL no confiable (Better Auth responde 403 Forbidden)
+    const untrustedRes = await SELF.fetch("http://localhost/api/auth/send-verification-email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:8787" },
+      body: JSON.stringify({
+        email: "native@test.dev",
+        callbackURL: "https://evil.example.com/steal",
+      }),
+    });
+    expect(untrustedRes.status).toBe(403);
+  });
 });

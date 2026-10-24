@@ -3,6 +3,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { signUp } from "../../auth/client";
+import { verificationRedirectTarget } from "../../auth/verification";
 import { t } from "../../i18n/es";
 import { useSettings } from "../../lib/store";
 import { Button, Field } from "../../ui";
@@ -22,7 +23,12 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      const res = await signUp.email({ name: name.trim(), email: email.trim(), password });
+      const res = await signUp.email({
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        callbackURL: verificationRedirectTarget(),
+      });
       if (res?.error) {
         setError(res.error.message ?? t.auth.genericError);
         return;

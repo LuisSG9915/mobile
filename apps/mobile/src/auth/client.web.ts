@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/react";
 import Constants from "expo-constants";
+import { verificationRedirectTarget } from "./verification";
 
 /**
  * URL del API. En desarrollo apuntar al wrangler dev local (http://localhost:8787)
@@ -52,7 +53,10 @@ export async function resendVerificationEmail(
   email: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { error } = await authClient.sendVerificationEmail({ email, callbackURL: "/welcome" });
+    const { error } = await authClient.sendVerificationEmail({
+      email,
+      callbackURL: verificationRedirectTarget(),
+    });
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
