@@ -16,6 +16,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
 const tag = args.includes("--tag") ? args[args.indexOf("--tag") + 1] : undefined;
+// Preflight antes de commitear: avisa del árbol sucio pero no bloquea.
+const allowDirty = args.includes("--allow-dirty");
 
 const problems = [];
 const notes = [];
@@ -34,9 +36,9 @@ else {
 
 const dirty = run("git", ["status", "--porcelain"]);
 if (dirty) {
-  problems.push(
-    `árbol sucio (${dirty.split("\n").length} archivos sin commitear): commitea antes de etiquetar`,
-  );
+  const msg = `árbol sucio (${dirty.split("\n").length} archivos sin commitear)`;
+  if (allowDirty) notes.push(`${msg}: se ignora con --allow-dirty (preflight)`);
+  else problems.push(`${msg}: commitea antes de etiquetar`);
 }
 
 const changelogPath = path.join(ROOT, "CHANGELOG.md");
