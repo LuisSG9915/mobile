@@ -6,7 +6,7 @@ import { abortStaleMultipartUploads } from "../lib/s3";
 import {
   reconcileStorageStats,
   releaseStorageReservation,
-  removeStorageUsage,
+  removeStorageUsageBulk,
 } from "../lib/storage-stats";
 
 const BATCH = 500;
@@ -92,12 +92,15 @@ export async function runCleanup(env: Bindings): Promise<void> {
     );
     const pendingIds = stalePending.map((m) => m.id);
     await db.delete(media).where(inArray(media.id, pendingIds));
+    // Una query por usuario, no por fila: el cron tiene un tope de 1.000
+    // consultas D1 por invocación y una papelera grande lo superaba.
+    const pendingByUser = new Map<string, number>();
     for (const m of stalePending) {
-      await releaseStorageReservation(
-        db,
-        m.userId,
-        m.fileSize + m.thumbSize + (m.previewSize ?? 0),
-      );
+      const total = m.fileSize + m.thumbSize + (m.previewSize ?? 0);
+      pendingByUser.set(m.userId, (pendingByUser.get(m.userId) ?? 0) + total);
+    }
+    for (const [userId, bytes] of pendingByUser) {
+      await releaseStorageReservation(db, userId, bytes);
     }
   }
 
@@ -116,12 +119,20 @@ export async function runCleanup(env: Bindings): Promise<void> {
     );
     const trashIds = expiredTrash.map((m) => m.id);
     await db.delete(media).where(inArray(media.id, trashIds));
+    // Agregado por usuario: una actualización por usuario y lote.
+    const trashByUser = new Map<string, { bytes: number; count: number }>();
     for (const m of expiredTrash) {
       // Solo los 'ready' sumaron cuota al confirmarse la subida; los 'pending'
       // borrados suave nunca llegaron a contarse.
-      if (m.status === "ready") {
-        await removeStorageUsage(db, m.userId, m.fileSize + m.thumbSize + (m.previewSize ?? 0));
-      }
+      if (m.status !== "ready") continue;
+      const total = m.fileSize + m.thumbSize + (m.previewSize ?? 0);
+      const acc = trashByUser.get(m.userId) ?? { bytes: 0, count: 0 };
+      acc.bytes += total;
+      acc.count += 1;
+      trashByUser.set(m.userId, acc);
+    }
+    for (const [userId, acc] of trashByUser) {
+      await removeStorageUsageBulk(db, userId, acc.bytes, acc.count);
     }
   }
 

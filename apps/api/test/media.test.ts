@@ -1,10 +1,11 @@
 import { env, SELF } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
 import { media } from "../src/db/schema";
 import { authed, createUser, j, sha } from "./helpers";
 
-async function seedOne(userId: string, deleted = false, n = 0) {
+async function seedOne(userId: string, deleted = false, n = 0, previewSize?: number) {
   const db = getDb(env.DB);
   const s = sha(`${userId.slice(0, 6)}m${n}`);
   const id = crypto.randomUUID();
@@ -21,8 +22,10 @@ async function seedOne(userId: string, deleted = false, n = 0) {
     thumbhash: "AQAAAA==",
     r2KeyOriginal: `users/${userId}/originals/${s}.jpg`,
     r2KeyThumb: `users/${userId}/thumbs/${s}.webp`,
+    r2KeyPreview: previewSize ? `users/${userId}/previews/${s}.webp` : null,
     fileSize: 2_000_000,
     thumbSize: 9_000,
+    previewSize: previewSize ?? null,
     status: "ready",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -199,6 +202,23 @@ describe("media", () => {
     // Papelera de otro usuario no se toca
     const otherTrash = await SELF.fetch("http://localhost/v1/trash", authed(other.cookie));
     expect((await j(otherTrash)).items.length).toBe(1);
+  });
+
+  it("vaciar papelera borra también la preview en R2", async () => {
+    const { cookie, userId } = await createUser();
+    const id = await seedOne(userId, true, 20, 5_000);
+    const s = sha(`${userId.slice(0, 6)}m20`);
+    const previewKey = `users/${userId}/previews/${s}.webp`;
+    await env.BUCKET.put(previewKey, new Uint8Array(5_000));
+
+    const res = await SELF.fetch("http://localhost/v1/trash/empty", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    expect((await j(res)).deletedCount).toBe(1);
+    expect(await env.BUCKET.head(previewKey)).toBeNull();
+    expect(await getDb(env.DB).select().from(media).where(eq(media.id, id)).get()).toBeUndefined();
   });
 
   it("GET /v1/trash pagina correctamente con cursor (deletedAt, id)", async () => {

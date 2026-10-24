@@ -316,29 +316,42 @@ export async function abortStaleMultipartUploads(
   }
   try {
     const client = getClient(env);
-    const res = await client.send(new ListMultipartUploadsCommand({ Bucket: env.R2_BUCKET_NAME }));
     let aborted = 0;
     const now = Date.now();
-    for (const upload of res.Uploads ?? []) {
-      if (upload.Key && upload.UploadId && upload.Initiated) {
-        if (now - upload.Initiated.getTime() > maxAgeMs) {
-          try {
-            await client.send(
-              new AbortMultipartUploadCommand({
-                Bucket: env.R2_BUCKET_NAME,
-                Key: upload.Key,
-                UploadId: upload.UploadId,
-              }),
-            );
-            aborted++;
-          } catch (err) {
-            console.error(
-              `Failed to abort multipart upload ${upload.UploadId} for key ${upload.Key}:`,
-              err,
-            );
-          }
+    // ListMultipartUploads devuelve como máximo 1.000 entradas: sin paginar,
+    // las MPUs que caen en la segunda página nunca se abortarían.
+    let keyMarker: string | undefined;
+    let uploadIdMarker: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const res = await client.send(
+        new ListMultipartUploadsCommand({
+          Bucket: env.R2_BUCKET_NAME,
+          KeyMarker: keyMarker,
+          UploadIdMarker: uploadIdMarker,
+        }),
+      );
+      for (const upload of res.Uploads ?? []) {
+        if (!upload.Key || !upload.UploadId || !upload.Initiated) continue;
+        if (now - upload.Initiated.getTime() <= maxAgeMs) continue;
+        try {
+          await client.send(
+            new AbortMultipartUploadCommand({
+              Bucket: env.R2_BUCKET_NAME,
+              Key: upload.Key,
+              UploadId: upload.UploadId,
+            }),
+          );
+          aborted++;
+        } catch (err) {
+          console.error(
+            `Failed to abort multipart upload ${upload.UploadId} for key ${upload.Key}:`,
+            err,
+          );
         }
       }
+      if (!res.IsTruncated) break;
+      keyMarker = res.NextKeyMarker;
+      uploadIdMarker = res.NextUploadIdMarker;
     }
     return aborted;
   } catch (err) {

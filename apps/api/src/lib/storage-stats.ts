@@ -66,11 +66,24 @@ export async function releaseStorageReservation(
  * tolerar desbalances históricos (filas contadas antes de existir la tabla).
  */
 export async function removeStorageUsage(db: Db, userId: string, bytes: number): Promise<void> {
+  await removeStorageUsageBulk(db, userId, bytes, 1);
+}
+
+/**
+ * Variante para lotes: descuenta bytes y N medios en UNA query. El cron la usa
+ * para no hacer una query por fila (límite de 1.000 por invocación de D1).
+ */
+export async function removeStorageUsageBulk(
+  db: Db,
+  userId: string,
+  bytes: number,
+  count: number,
+): Promise<void> {
   await db
     .update(userStorageStats)
     .set({
       usedBytes: sql`max(0, ${userStorageStats.usedBytes} - ${bytes})`,
-      mediaCount: sql`max(0, ${userStorageStats.mediaCount} - 1)`,
+      mediaCount: sql`max(0, ${userStorageStats.mediaCount} - ${count})`,
       updatedAt: Date.now(),
     })
     .where(eq(userStorageStats.userId, userId));

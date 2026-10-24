@@ -20,7 +20,7 @@ import type { AppEnv } from "../env";
 import { tagMediaItem } from "../lib/ai";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { presignGet, presignGetDownload } from "../lib/s3";
-import { removeStorageUsage } from "../lib/storage-stats";
+import { releaseStorageReservation, removeStorageUsage } from "../lib/storage-stats";
 
 export function parseTags(raw: string | null | undefined): string[] {
   if (!raw) return [];
@@ -542,25 +542,39 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       return c.json({ ok: true as const, deletedCount: 0, remainingCount: 0, hasMore: false }, 200);
     }
 
-    const keys = trashItems.flatMap((m) => [m.r2KeyThumb, m.r2KeyOriginal]);
+    const keys = trashItems.flatMap((m) =>
+      [m.r2KeyThumb, m.r2KeyOriginal, m.r2KeyPreview].filter(Boolean),
+    ) as string[];
     if (keys.length > 0) {
       await c.env.BUCKET.delete(keys);
     }
 
     const ids = trashItems.map((m) => m.id);
+    let deleted = 0;
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
-      await db.delete(media).where(inArray(media.id, chunk));
+      const res = await db
+        .delete(media)
+        .where(and(inArray(media.id, chunk), isNotNull(media.deletedAt)));
+      deleted += res.meta.changes ?? 0;
     }
 
-    let bytesFreed = 0;
-    for (const m of trashItems) {
-      if (m.status === "ready") {
-        bytesFreed += m.fileSize + m.thumbSize;
+    // Si otra petición borró parte del lote, NO descontamos cuota: restar dos
+    // veces corrompería used_bytes. El cron de reconciliación lo corrige.
+    if (deleted === trashItems.length) {
+      let bytesFreed = 0;
+      let reservedFreed = 0;
+      for (const m of trashItems) {
+        const total = m.fileSize + m.thumbSize + (m.previewSize ?? 0);
+        if (m.status === "ready") bytesFreed += total;
+        else reservedFreed += total;
       }
-    }
-    if (bytesFreed > 0) {
-      await removeStorageUsage(db, user.id, bytesFreed);
+      if (bytesFreed > 0) {
+        await removeStorageUsage(db, user.id, bytesFreed);
+      }
+      if (reservedFreed > 0) {
+        await releaseStorageReservation(db, user.id, reservedFreed);
+      }
     }
 
     const countRow = await db
