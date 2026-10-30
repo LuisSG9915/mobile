@@ -275,6 +275,23 @@ export async function setState(
 }
 
 /**
+ * Descarta el journal multipart de un asset (sesión + partes ya subidas).
+ *
+ * `setState` usa `coalesce`, así que no puede vaciar `upload_id`/`parts`: sin
+ * esto, una MPU muerta (R2 aborta las incompletas a los 7 días por lifecycle, u
+ * otro dispositivo la cierra) se reintentaría para siempre con etags que ya no
+ * existen y el archivo nunca terminaría de subir.
+ */
+export async function clearMultipartState(assetId: string): Promise<void> {
+  const db = getQueueDb();
+  db.runSync(
+    `UPDATE queue SET upload_id = NULL, parts = NULL, bytes_sent = 0, updated_at = ?
+     WHERE asset_id = ? AND user_id IS ?`,
+    [Date.now(), assetId, activeUserId],
+  );
+}
+
+/**
  * Estado terminal en una sola operación. En web además borra el blob del
  * asset en la misma transacción; en nativo equivale a setState.
  */
@@ -383,6 +400,20 @@ export function getQueueItems(limit = 2000, offset = 0): QueueItem[] {
   return getQueueDb().getAllSync<QueueItem>(
     "SELECT * FROM queue WHERE user_id IS ? ORDER BY created_at DESC LIMIT ?",
     [activeUserId, limit],
+  );
+}
+
+/**
+ * El item actualmente en proceso, si hay alguno. Separado de getQueueItems:
+ * con colas de decenas de miles de filas, el item en curso puede quedar fuera
+ * de la ventana de 2000 usada para la proyección agregada.
+ */
+export function getActiveItem(): QueueItem | null {
+  return getQueueDb().getFirstSync<QueueItem>(
+    `SELECT * FROM queue WHERE user_id IS ?
+     AND state IN ('hashing','thumbnailing','init','uploading_thumb','uploading_original','completing')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [activeUserId],
   );
 }
 

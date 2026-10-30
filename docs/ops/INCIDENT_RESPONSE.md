@@ -16,14 +16,25 @@
 | **SEV-2** | Respaldo detenido o datos expuestos | Cron muerto, fallo de subida, IDOR/share |
 | **SEV-3** | Degradación parcial | Latencia, error de UI, un usuario bloqueado |
 
+## Declaración y reloj (SEV-1)
+
+1. **Declarar** en el canal y anotar la hora de inicio (`T0`). Hasta que se declara, no hay incidente.
+2. **Contener antes de diagnosticar:** si hay pérdida en curso, parar escrituras (rollback del worker o
+   `wrangler deployments`), no borrar nada más y sacar una copia del estado actual.
+3. **Elegir la fuente de restauración**, en este orden: Time Travel de D1 (minutos) → respaldo del día
+   (`photos-backups`) → copia offsite 3-2-1. Cada escalón pierde datos: decirlo en voz alta.
+4. **Validar antes de reabrir**, no después: `PRAGMA integrity_check` y conteos por tabla contra el
+   último `audit-prod.mjs` conocido.
+5. **Cerrar** con RTO/RPO reales medidos, no estimados, y el postmortem enlazado desde el tablero.
+
 ## Runbooks
 
 ### R1 · D1 corrupta o perdida
 
 1. Detener el deploy y el tráfico de escritura si es posible.
 2. `wrangler d1 time-travel info photos-db` para verificar restauración a un punto previo.
-3. Si Time Travel no cubre: restaurar desde `r2://photos-media/backups/d1/` a una base nueva
-   ([D1_BACKUP.md](D1_BACKUP.md)).
+3. Si Time Travel no cubre: restaurar desde `r2://photos-backups/d1/` (bucket separado del de
+   fotos desde H1.5) a una base nueva ([D1_BACKUP.md](D1_BACKUP.md), pasos 1–2).
 4. Cambiar `database_id`, desplegar y ejecutar `node scripts/audit-prod.mjs`.
 5. Registrar RTO/RPO reales y abrir postmortem.
 

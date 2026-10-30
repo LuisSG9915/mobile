@@ -10,7 +10,7 @@ Si D1 se pierde, las fotos siguen existiendo en R2 pero la app no puede mostrarl
 |---|---|
 | Workflow | `.github/workflows/backup-d1.yml` |
 | Frecuencia | Diario, 03:30 UTC (después del cron de limpieza de las 03:00) |
-| Destino | `r2://photos-media/backups/d1/d1-<timestamp>.sql` |
+| Destino | `r2://photos-backups/d1/d1-<timestamp>.sql` — bucket **distinto** del de producción (`photos-media`) |
 | Integridad | `.sha256` junto a cada export |
 | Validación | Dry-run en SQLite efímero (`sqlite3 :memory: < backup.sql`), `PRAGMA integrity_check;` y conteo de tablas; falla si está vacío o no contiene `CREATE TABLE` |
 | Retención | 90 días vía lifecycle rule (ver abajo) |
@@ -18,6 +18,21 @@ Si D1 se pierde, las fotos siguen existiendo en R2 pero la app no puede mostrarl
 El respaldo incluye esquema y datos (`wrangler d1 export` por defecto). No incluye
 objetos de R2: esos los cubre `scripts/backup-r2.mjs` / `rclone` según
 [`docs/backup-321.md`](../backup-321.md).
+
+## Crear el bucket de respaldos (una sola vez)
+
+Desde H1.5 el respaldo vive fuera del bucket de producción: si las fotos y el catálogo comparten
+destino, un borrado, un token filtrado o un lifecycle mal escrito se lleva las dos copias a la vez.
+
+```bash
+node node_modules/wrangler/bin/wrangler.js r2 bucket create photos-backups
+node node_modules/wrangler/bin/wrangler.js r2 bucket lifecycle add photos-backups \
+  d1-backups d1/ --expire-days 90 --force
+```
+
+El workflow aborta si `BACKUP_BUCKET` coincide con `photos-media` (paso *Guard*), así que la
+separación no se puede perder por descuido. Para usar otro nombre, define la variable de repo
+`BACKUP_BUCKET`.
 
 ## Secrets requeridos
 
@@ -48,14 +63,14 @@ sha256sum backups/d1-manual.sql   # Windows: certutil -hashfile backups\d1-manua
 R2 lifecycle para que los respaldos viejos no crezcan sin límite:
 
 ```bash
-node node_modules/wrangler/bin/wrangler.js r2 bucket lifecycle add photos-media \
-  d1-backups backups/d1/ --expire-days 90 --force
+node node_modules/wrangler/bin/wrangler.js r2 bucket lifecycle add photos-backups \
+  d1-backups d1/ --expire-days 90 --force
 ```
 
 Verificar:
 
 ```bash
-node node_modules/wrangler/bin/wrangler.js r2 bucket lifecycle list photos-media
+node node_modules/wrangler/bin/wrangler.js r2 bucket lifecycle list photos-backups
 ```
 
 ## Restauración
@@ -67,11 +82,11 @@ node node_modules/wrangler/bin/wrangler.js r2 bucket lifecycle list photos-media
 
 ```bash
 node node_modules/wrangler/bin/wrangler.js r2 object get \
-  photos-media/backups/d1/d1-2026-10-20T03-30-00Z.sql \
+  photos-backups/d1/d1-2026-10-20T03-30-00Z.sql \
   --file backups/d1-restore.sql --remote
 
 node node_modules/wrangler/bin/wrangler.js r2 object get \
-  photos-media/backups/d1/d1-2026-10-20T03-30-00Z.sql.sha256 \
+  photos-backups/d1/d1-2026-10-20T03-30-00Z.sql.sha256 \
   --file backups/d1-restore.sql.sha256 --remote
 ```
 

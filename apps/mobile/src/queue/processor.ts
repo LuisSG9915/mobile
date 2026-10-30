@@ -8,9 +8,10 @@ import { ApiError, api } from "../api/client";
 import { useQueueEvents } from "../lib/events";
 import { queryClient } from "../lib/query-client";
 import { useItemProgress, useSettings } from "../lib/store";
-import { createVideoPreview } from "../lib/video-optimizer";
+import { cancelVideoCompression, createVideoPreview } from "../lib/video-optimizer";
 import {
   bumpAttempt,
+  clearMultipartState,
   finishItem,
   getNextPending,
   getQueueDb,
@@ -27,16 +28,48 @@ import {
 } from "./db";
 import { sha256File } from "./hash";
 import { publishByteTick, publishSyncProgress } from "./progress";
-import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
+import {
+  BACKOFF_MS,
+  extFromFilename,
+  extToMediaType,
+  MAX_ATTEMPTS,
+  mapWithConcurrency,
+  PART_PRESIGN_BATCH_SIZE,
+  PART_UPLOAD_CONCURRENCY,
+  withDeadline,
+} from "./shared";
 import { makePreview, makeThumbAndHash, type ThumbResult } from "./thumb";
+import { PartUploadError, uploadPartBlob } from "./upload-part";
 
 let running = false;
 let cancelled = false;
 let forceCellular = false;
 const activeUploadTasks = new Set<FileSystem.UploadTask>();
+/** PUT de parte en vuelo: `cancelQueue` los aborta igual que los UploadTask. */
+const activePartControllers = new Set<AbortController>();
 const precheckedHashes = new Set<string>();
 const thumbCache = new Map<string, ThumbResult>();
 const THUMB_CACHE_MAX = 2;
+
+type MultipartSession = {
+  id: string;
+  uploadId: string;
+  partSize: number;
+  totalParts: number;
+};
+
+/**
+ * La sesión multipart guardada ya no existe en R2: el lifecycle aborta las MPU
+ * incompletas a los 7 días, otro dispositivo puede cerrarla y una fila puede
+ * apuntar a una sesión distinta. Sus partes no se pueden reutilizar, así que el
+ * journal se descarta y se abre una sesión limpia (una sola vez).
+ */
+class MultipartGoneError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MultipartGoneError";
+  }
+}
 
 let refreshPending = false;
 
@@ -79,6 +112,7 @@ function emitStructure() {
 export function cancelQueue() {
   cancelled = true;
   for (const task of activeUploadTasks) void task.cancelAsync().catch(() => {});
+  for (const controller of activePartControllers) controller.abort();
 }
 
 export function isRunning() {
@@ -117,6 +151,22 @@ function parseExifDate(exif: Record<string, unknown> | null | undefined): number
 /** Sin progreso en este tiempo = subida estancada → abortar y reintentar. */
 const STALL_MS = 90_000;
 const WATCHDOG_TICK_MS = 15_000;
+
+/**
+ * Videos >2 GB: el preview H.264 costaría decenas de minutos de MediaCodec en
+ * gama media y el item parece congelado. El original sube igual; el visor usa
+ * la miniatura o el original como fallback.
+ */
+const VIDEO_PREVIEW_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+/** Hash SHA-256: mínimo 4 min + ~8 MB/s de margen por tamaño (eMMC lento). */
+const HASH_MIN_DEADLINE_MS = 240_000;
+/** Miniatura y preview de foto: cualquier cosa >4 min está rota, no lenta. */
+const THUMB_DEADLINE_MS = 240_000;
+/** Compresión ~1.5× la duración real del video en CPU débil; mínimo 5 min. */
+const PREVIEW_MIN_DEADLINE_MS = 300_000;
+const PREVIEW_DEADLINE_RATIO = 1.5;
+/** Lectura de metadatos del asset (puede intentar descarga de red): 3 min. */
+const ASSET_INFO_DEADLINE_MS = 180_000;
 
 async function uploadFile(
   target: { url: string; headers: Record<string, string> },
@@ -160,9 +210,13 @@ async function uploadFile(
 async function processItem(item: QueueItem, allowLookahead = true): Promise<void> {
   const db = getQueueDb();
 
-  const info = await MediaLibrary.getAssetInfoAsync(item.asset_id, {
-    shouldDownloadFromNetwork: true,
-  });
+  const info = await withDeadline(
+    MediaLibrary.getAssetInfoAsync(item.asset_id, {
+      shouldDownloadFromNetwork: true,
+    }),
+    ASSET_INFO_DEADLINE_MS,
+    "leer-info",
+  );
   const localUri = info.localUri ?? item.uri;
   const file = new File(localUri);
   const fileSize = file.size ?? 0;
@@ -193,7 +247,13 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
 
   await setState(item.asset_id, "hashing", { bytes_total: fileSize });
   emitStructure();
-  const sha256 = item.sha256 ?? (await sha256File(localUri));
+  const sha256 =
+    item.sha256 ??
+    (await withDeadline(
+      sha256File(localUri),
+      Math.max(HASH_MIN_DEADLINE_MS, fileSize / 8192),
+      "hash",
+    ));
   if (!item.sha256) await setItemHash(item.asset_id, sha256, fileSize);
 
   // Dedup criptográfica temprana: si el API ya tiene este sha256 'ready', la
@@ -222,12 +282,32 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
   await setState(item.asset_id, "thumbnailing");
   emitStructure();
   const cachedThumb = thumbCache.get(item.asset_id);
-  const thumb = cachedThumb ?? (await makeThumbAndHash(mediaType, localUri));
+  const thumb =
+    cachedThumb ??
+    (await withDeadline(makeThumbAndHash(mediaType, localUri), THUMB_DEADLINE_MS, "miniatura"));
   if (cachedThumb) thumbCache.delete(item.asset_id);
 
-  let preview = mediaType === "video" ? await createVideoPreview(localUri).catch(() => null) : null;
-  if (!preview) {
-    preview = await makePreview(mediaType, localUri);
+  let preview: { uri: string; bytes: number } | null = null;
+  if (mediaType === "video") {
+    if (fileSize <= VIDEO_PREVIEW_MAX_BYTES) {
+      let cancelId: string | null = null;
+      preview = await withDeadline(
+        createVideoPreview(localUri, {
+          onCancelId: (id) => {
+            cancelId = id;
+          },
+        }),
+        Math.max(PREVIEW_MIN_DEADLINE_MS, (durationMs ?? 0) * PREVIEW_DEADLINE_RATIO),
+        "preview-video",
+        () => {
+          if (cancelId) cancelVideoCompression(cancelId);
+        },
+      ).catch(() => null);
+    }
+    // Sin fallback a makePreview en video: el API firma el preview como
+    // video/mp4 y un WebP subido ahí queda como objeto ilegible.
+  } else {
+    preview = await withDeadline(makePreview(mediaType, localUri), THUMB_DEADLINE_MS, "preview");
   }
 
   await setState(item.asset_id, "init", { sha256 });
@@ -235,7 +315,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
 
   // Subida multipart reanudable para archivos > 20 MB
   if (fileSize > MULTIPART_THRESHOLD_BYTES) {
-    const init = await api.multipartInit({
+    const multipartPayload = {
       sha256,
       mediaType,
       mimeType,
@@ -250,6 +330,9 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
       height: Math.max(1, Math.round(height)),
       durationMs,
       thumbhash: thumb.thumbhash,
+    };
+    const init = await api.multipartInit({
+      ...multipartPayload,
       uploadId: item.upload_id ?? undefined,
     });
 
@@ -288,71 +371,149 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
       } catch {}
     }
 
-    const completedMap = new Map(completedParts.map((p) => [p.partNumber, p.etag]));
-    const missingPartNumbers: number[] = [];
-    for (let p = 1; p <= init.totalParts; p++) {
-      if (!completedMap.has(p)) missingPartNumbers.push(p);
-    }
+    let session: MultipartSession = {
+      id: init.id,
+      uploadId: init.uploadId,
+      partSize: init.partSize,
+      totalParts: init.totalParts,
+    };
 
-    if (missingPartNumbers.length > 0) {
-      const { parts: presignedParts } = await api.multipartPresignParts({
-        id: init.id,
-        uploadId: init.uploadId,
-        partNumbers: missingPartNumbers,
-      });
+    const uploadMissingParts = async (
+      current: MultipartSession,
+      done: { partNumber: number; etag: string }[],
+    ): Promise<void> => {
+      const doneMap = new Map(done.map((p) => [p.partNumber, p.etag]));
+      const missingPartNumbers: number[] = [];
+      for (let p = 1; p <= current.totalParts; p++) {
+        if (!doneMap.has(p)) missingPartNumbers.push(p);
+      }
+      if (missingPartNumbers.length === 0) return;
 
-      const partSize = init.partSize;
-      let bytesSent = completedParts.length * partSize;
+      // Progreso real con varias partes en vuelo: lo confirmado + lo que cada
+      // parte lleva enviado (sin contar dos veces el mismo byte).
+      let completedBytes = done.length * current.partSize;
+      const inflightLoaded = new Map<number, number>();
+      const publishProgress = () => {
+        let sent = completedBytes;
+        for (const loaded of inflightLoaded.values()) sent += loaded;
+        publishByteTick(item.asset_id, sent, fileSize);
+      };
 
-      for (const part of presignedParts) {
-        if (cancelled) throw new Error("Subida cancelada.");
-        const start = (part.partNumber - 1) * partSize;
-        const end = Math.min(fileSize, start + partSize);
-        const partLength = end - start;
+      // Prefirmado por lotes: cada lote se sube antes de firmar el siguiente, así
+      // ninguna URL caduca en vuelo (ver PART_PRESIGN_BATCH_SIZE).
+      for (let offset = 0; offset < missingPartNumbers.length; offset += PART_PRESIGN_BATCH_SIZE) {
+        const batch = missingPartNumbers.slice(offset, offset + PART_PRESIGN_BATCH_SIZE);
 
-        const tempPartUri = `${FileSystem.cacheDirectory}part-${item.asset_id}-${part.partNumber}.bin`;
-        const b64 = await FileSystem.readAsStringAsync(localUri, {
-          encoding: "base64",
-          position: start,
-          length: partLength,
-        });
-        await FileSystem.writeAsStringAsync(tempPartUri, b64, { encoding: "base64" });
-
-        const uploadRes = await FileSystem.uploadAsync(part.url, tempPartUri, {
-          httpMethod: "PUT",
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        });
-        safeDelete(tempPartUri);
-
-        if (!uploadRes || (uploadRes.status !== 200 && uploadRes.status !== 204)) {
-          throw new Error(
-            `La subida de la parte ${part.partNumber} falló (HTTP ${uploadRes?.status}).`,
-          );
+        let presignedParts: { partNumber: number; url: string }[];
+        try {
+          ({ parts: presignedParts } = await api.multipartPresignParts({
+            id: current.id,
+            uploadId: current.uploadId,
+            partNumbers: batch,
+          }));
+        } catch (err) {
+          // 409 upload_id_mismatch: la fila apunta a otra MPU → la guardada murió.
+          if (err instanceof ApiError && err.status === 409) {
+            throw new MultipartGoneError(err.message);
+          }
+          throw err;
         }
 
-        const etag = uploadRes.headers?.etag || uploadRes.headers?.ETag || uploadRes.headers?.Etag;
-        if (!etag) {
-          throw new Error(`R2 no devolvió ETag para la parte ${part.partNumber}.`);
-        }
+        await mapWithConcurrency(presignedParts, PART_UPLOAD_CONCURRENCY, async (part) => {
+          if (cancelled) throw new Error("Subida cancelada.");
+          const start = (part.partNumber - 1) * current.partSize;
+          const end = Math.min(fileSize, start + current.partSize);
+          const partLength = end - start;
 
-        bytesSent += partLength;
-        completedParts.push({ partNumber: part.partNumber, etag });
+          // Rango perezoso del original: ni base64 (+33%) ni archivo temporal, y
+          // el PUT reporta progreso por byte (antes saltaba por parte entera).
+          const partController = new AbortController();
+          activePartControllers.add(partController);
+          inflightLoaded.set(part.partNumber, 0);
+
+          try {
+            const { etag } = await uploadPartBlob({
+              url: part.url,
+              blob: new File(localUri).slice(start, end),
+              signal: partController.signal,
+              onProgress: (sent) => {
+                inflightLoaded.set(part.partNumber, sent);
+                publishProgress();
+              },
+            });
+            inflightLoaded.delete(part.partNumber);
+            completedBytes += partLength;
+            done.push({ partNumber: part.partNumber, etag });
+            // Journal ordenado: R2 exige las partes ascendentes al completar.
+            await setState(item.asset_id, "uploading_original", {
+              parts: JSON.stringify([...done].sort((a, b) => a.partNumber - b.partNumber)),
+              bytes_sent: completedBytes,
+            });
+            publishProgress();
+          } catch (err) {
+            inflightLoaded.delete(part.partNumber);
+            // 404 NoSuchUpload: la MPU ya no existe. Reintentar con la misma
+            // sesión no puede funcionar nunca; el caller reinicia con una limpia.
+            if (err instanceof PartUploadError && err.status === 404) {
+              throw new MultipartGoneError(
+                `La sesión multipart ya no existe (parte ${part.partNumber}).`,
+              );
+            }
+            throw err;
+          } finally {
+            activePartControllers.delete(partController);
+          }
+        });
+      }
+    };
+
+    // Dos pasadas como máximo: la segunda solo existe para el caso "la MPU
+    // guardada murió". Un tercer intento convertiría un fallo permanente en un
+    // bucle de red que nunca sube el vídeo.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await uploadMissingParts(session, completedParts);
+        break;
+      } catch (err) {
+        if (!(err instanceof MultipartGoneError) || attempt >= 2) throw err;
+        await clearMultipartState(item.asset_id);
+        completedParts = [];
+        const restarted = await api.multipartInit({ ...multipartPayload });
+        if (restarted.status === "duplicate") {
+          await finishItem(item.asset_id, "duplicate", {
+            remote_id: restarted.id,
+            bytes_sent: fileSize,
+          });
+          useItemProgress.getState().clearItemProgress(item.asset_id);
+          refreshRemoteData();
+          emitStructure();
+          return;
+        }
+        session = {
+          id: restarted.id,
+          uploadId: restarted.uploadId,
+          partSize: restarted.partSize,
+          totalParts: restarted.totalParts,
+        };
         await setState(item.asset_id, "uploading_original", {
-          parts: JSON.stringify(completedParts),
-          bytes_sent: bytesSent,
+          remote_id: session.id,
+          upload_id: session.uploadId,
+          parts: "[]",
+          bytes_sent: 0,
         });
-        publishByteTick(item.asset_id, bytesSent, fileSize);
+        emitStructure();
       }
     }
 
+    completedParts.sort((a, b) => a.partNumber - b.partNumber);
     await setState(item.asset_id, "completing", { bytes_sent: fileSize });
     emitStructure();
     await api.multipartComplete({
-      id: init.id,
-      uploadId: init.uploadId,
+      id: session.id,
+      uploadId: session.uploadId,
       parts: completedParts,
     });
-    await setState(item.asset_id, "done", { remote_id: init.id, bytes_sent: fileSize });
+    await setState(item.asset_id, "done", { remote_id: session.id, bytes_sent: fileSize });
     useItemProgress.getState().clearItemProgress(item.asset_id);
     refreshRemoteData();
     emitStructure();
@@ -477,16 +638,32 @@ async function prehashAndDedup(): Promise<void> {
   const hashed: { item: QueueItem; sha256: string; fileSize: number }[] = [];
   for (const item of items) {
     try {
-      const info = await MediaLibrary.getAssetInfoAsync(item.asset_id, {
-        shouldDownloadFromNetwork: true,
-      });
+      const info = await withDeadline(
+        MediaLibrary.getAssetInfoAsync(item.asset_id, {
+          shouldDownloadFromNetwork: true,
+        }),
+        ASSET_INFO_DEADLINE_MS,
+        "prehash:leer-info",
+      );
       const uri = info.localUri ?? item.uri;
       const fileSize = new File(uri).size ?? 0;
-      const sha256 = await sha256File(uri);
+      // El pre-hash de un archivo grande tarda minutos: marcar `hashing` para
+      // que la UI muestre el item y su fase en vez de parecer congelada.
+      await setState(item.asset_id, "hashing", { bytes_total: fileSize }).catch(() => {});
+      emitStructure();
+      const sha256 = await withDeadline(
+        sha256File(uri),
+        Math.max(HASH_MIN_DEADLINE_MS, fileSize / 8192),
+        "prehash:hash",
+      );
       await setItemHash(item.asset_id, sha256, fileSize);
+      // Con el sha ya persistido vuelve a queued: el flujo normal lo toma con
+      // item.sha256 y evita re-hashear (la dedup por lote decide abajo).
+      await setState(item.asset_id, "queued").catch(() => {});
       precheckedHashes.add(sha256);
       hashed.push({ item, sha256, fileSize });
     } catch {
+      await setState(item.asset_id, "queued").catch(() => {});
       // El item se procesará individualmente y reportará su error.
     }
   }

@@ -1,0 +1,95 @@
+name: Backup R2 · verificación
+
+# H1.5 / I-16: el respaldo físico de R2 se ejecuta a mano y hasta ahora no fallaba
+# aunque tuviera errores dentro. Este workflow comprueba semanalmente que los
+# objetos de producción existen y su SHA-256 coincide con la clave
+# `users/{userId}/originals/{sha256}.{ext}`. No descarga el bucket completo (eso
+# es la copia offsite 3-2-1, en docs/backup-321.md): verifica una muestra.
+#
+# Secrets requeridos en el repo:
+#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY  (S3 API de R2)
+#
+# Si el workflow no puede ejecutarse por falta de secrets, falla en voz alta: un
+# check que pasa sin haber verificado nada es peor que no tenerlo.
+
+on:
+  schedule:
+    # Lunes 04:00 UTC, dos horas después del respaldo diario de D1.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "Número de objetos a verificar"
+        required: false
+        default: "25"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-r2-verify
+  cancel-in-progress: false
+
+env:
+  BUCKET: photos-media
+  SAMPLE: ${{ github.event.inputs.sample || '25' }}
+
+jobs:
+  verify:
+    name: Verificar muestra de R2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Guard · credenciales S3 de R2 presentes
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${R2_ACCOUNT_ID}" ] || missing="${missing} R2_ACCOUNT_ID"
+          [ -n "${R2_ACCESS_KEY_ID}" ] || missing="${missing} R2_ACCESS_KEY_ID"
+          [ -n "${R2_SECRET_ACCESS_KEY}" ] || missing="${missing} R2_SECRET_ACCESS_KEY"
+          if [ -n "${missing}" ]; then
+            echo "::error::Faltan secrets para verificar R2:${missing}"
+            exit 1
+          fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verificar integridad de una muestra
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/backup-r2.mjs --verify-sample "${SAMPLE}" --bucket "${BUCKET}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Verificación de R2"
+            echo ""
+            echo "- Bucket: \`${BUCKET}\`"
+            echo "- Muestra: ${SAMPLE} objetos"
+            echo "- Resultado: ${{ job.status }}"
+            echo ""
+            echo "Copia offsite 3-2-1: \`docs/backup-321.md\` · Restauración: \`docs/ops/RESTORE_DRILL.md\`"
+          } >> "$GITHUB_STEP_SUMMARY"

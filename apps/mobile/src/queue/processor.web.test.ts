@@ -27,7 +27,17 @@ vi.mock("../web/thumb", () => ({
     bytes: 2,
   })),
 }));
-vi.mock("../web/upload", () => ({ uploadBlob: vi.fn(async () => {}) }));
+vi.mock("../web/upload", () => ({
+  UploadHttpError: class UploadHttpError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
+  uploadBlob: vi.fn(async () => {}),
+  uploadPartBlob: vi.fn(async () => '"etag"'),
+}));
 vi.mock("../lib/query-client", () => ({
   queryClient: { invalidateQueries: vi.fn(async () => {}) },
 }));

@@ -146,6 +146,8 @@ export const t = {
     title: "Respaldo",
     synced: (done: number, total: number) => `${done} de ${total} elementos respaldados`,
     bytes: (up: string, total: string) => `${up} de ${total}`,
+    rate: (speed: string, eta: string | null) =>
+      eta ? `${speed}/s · quedan ${eta}` : `${speed}/s`,
     current: (name: string) => `Subiendo ${name}`,
     remaining: (n: number) => `${n} pendientes`,
     failed: (n: number) => `${n} con errores`,
@@ -156,6 +158,18 @@ export const t = {
     idle: "Sin respaldos pendientes",
     error: "Respaldo con errores",
     syncing: "Respaldando…",
+    /** Etiqueta de la fase del item en curso (QueueState transitorio). */
+    phase: (phase: string | null | undefined) => {
+      const labels: Record<string, string> = {
+        hashing: "Analizando",
+        thumbnailing: "Creando miniatura",
+        init: "Preparando subida",
+        uploading_thumb: "Subiendo miniatura",
+        uploading_original: "Subiendo original",
+        completing: "Terminando",
+      };
+      return (phase && labels[phase]) || "";
+    },
   },
   viewer: {
     info: "Información",

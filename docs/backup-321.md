@@ -145,7 +145,9 @@ Con esta configuración:
 
 Este documento cubre los **binarios** en R2. El catálogo (usuarios, álbumes,
 favoritos, shares, metadatos y claves R2) vive en D1 y se respalda a diario en
-`r2://photos-media/backups/d1/` con el workflow `.github/workflows/backup-d1.yml`.
+`r2://photos-backups/d1/` con el workflow `.github/workflows/backup-d1.yml`. Ese bucket es
+**distinto** del de producción a propósito (3-2-1): un borrado o un token filtrado no debe llevarse
+las fotos y el catálogo a la vez.
 
 Procedimiento de restauración y secrets requeridos:
 [`docs/ops/D1_BACKUP.md`](ops/D1_BACKUP.md).

@@ -10,14 +10,15 @@
 
 | Métrica | Objetivo | Justificación |
 | :--- | :---: | :--- |
-| **RPO (Recovery Point Objective)** | **24 horas** | El backup diario corre a las 03:30 UTC en `.github/workflows/backup-d1.yml`. En el peor de los casos, la pérdida máxima de metadatos es de 24 h. |
-| **RTO (Recovery Time Objective)** | **4 horas** | Tiempo total estimado para detección, descarga de artefactos desde R2, provisionamiento de `photos-db-restore`, rehidratación SQL y validación de integridad. |
+| **RPO de catálogo (D1)** | **24 horas** | El backup diario corre a las 03:30 UTC en `.github/workflows/backup-d1.yml`, a un bucket separado (`photos-backups`). En el peor de los casos la pérdida máxima de metadatos es de 24 h. |
+| **RPO de binarios (R2)** | **7 días** | Los originales son la fuente de verdad y la app los re-sube desde los dispositivos; la copia offsite 3-2-1 se actualiza semanalmente/manualmente ([backup-321.md](../backup-321.md)). Un RPO de 0 solo existe para lo que ya está en un dispositivo. |
+| **RTO (Recovery Time Objective)** | **4 horas** | Detección, descarga de artefactos desde R2, provisionamiento de `photos-db-restore`, rehidratación SQL y validación de integridad. Se mide con los relojes de los pasos 1 y 5 de este documento. |
 
 ---
 
 ## 2. Entorno Aislado
 
-El simulacro se realiza **estrictamente sobre una base aislada** (`photos-db-restore`), sin tocar la base activa de producción `photos-db` ni el bucket de producción.
+El simulacro se realiza **estrictamente sobre una base aislada** (`photos-db-restore`), sin tocar la base activa de producción `photos-db` ni el bucket de producción. El respaldo se lee de `photos-backups`, que desde H1.5 está separado del bucket de fotos: restaurar no requiere dar permiso de escritura sobre `photos-media`.
 
 > [!WARNING]
 > **REGLA DE SEGURIDAD:**
@@ -30,18 +31,18 @@ El simulacro se realiza **estrictamente sobre una base aislada** (`photos-db-res
 ### Paso 1: Localizar y descargar el respaldo más reciente de R2
 
 ```bash
-# Listar los respaldos disponibles en R2
-node node_modules/wrangler/bin/wrangler.js r2 object list photos-media \
-  --prefix backups/d1/ --remote
+# Listar los respaldos disponibles en el bucket de respaldos
+node node_modules/wrangler/bin/wrangler.js r2 object list photos-backups \
+  --prefix d1/ --remote
 
 # Descargar el volcado SQL y su checksum sha256 (sustituir <TIMESTAMP> por el deseado)
 mkdir -p backups
 node node_modules/wrangler/bin/wrangler.js r2 object get \
-  photos-media/backups/d1/d1-<TIMESTAMP>.sql \
+  photos-backups/d1/d1-<TIMESTAMP>.sql \
   --file backups/d1-restore.sql --remote
 
 node node_modules/wrangler/bin/wrangler.js r2 object get \
-  photos-media/backups/d1/d1-<TIMESTAMP>.sql.sha256 \
+  photos-backups/d1/d1-<TIMESTAMP>.sql.sha256 \
   --file backups/d1-restore.sql.sha256 --remote
 ```
 
@@ -106,7 +107,7 @@ rm -f backups/d1-restore.sql backups/d1-restore.sql.sha256
 
 - **Fecha de ejecución:** `[PENDIENTE: YYYY-MM-DD]`
 - **Operador responsable:** `[PENDIENTE: Nombre / Rol]`
-- **Archivo de respaldo probado:** `r2://photos-media/backups/d1/d1-[TIMESTAMP].sql`
+- **Archivo de respaldo probado:** `r2://photos-backups/d1/d1-[TIMESTAMP].sql`
 - **Hash SHA-256 verificado:** `[PENDIENTE: OK / MISMATCH]`
 - **ID de base aislada utilizada:** `[PENDIENTE: UUID]`
 - **Tiempo total de restauración:** `[PENDIENTE: MM minutos]` (Objetivo RTO: < 240 min)

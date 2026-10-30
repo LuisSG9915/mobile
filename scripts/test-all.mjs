@@ -40,7 +40,8 @@ const E2E_ARTIFACTS = path.join(outDir, "artifacts", "e2e");
 const steps = [
   {
     layer: "pipeline",
-    command: `node --test "${path.join(ROOT, "scripts", "test-pipeline.test.mjs")}"`,
+    // Runner + veredicto del respaldo R2: el respaldo debe fallar en CI, no solo en el disco.
+    command: `node --test "${path.join(ROOT, "scripts", "test-pipeline.test.mjs")}" "${path.join(ROOT, "scripts", "backup-r2-result.test.mjs")}" "${path.join(ROOT, "scripts", "board-audit.test.mjs")}" "${path.join(ROOT, "scripts", "release-audit.test.mjs")}" "${path.join(ROOT, "scripts", "android-release.test.mjs")}"`,
   },
   {
     layer: "lint",

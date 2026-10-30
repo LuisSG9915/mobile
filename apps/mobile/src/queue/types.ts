@@ -54,5 +54,11 @@ export type SyncProgressState = {
   filesTotal: number;
   filesRemaining: number;
   currentFileName: string;
+  /** Estado del item en curso (hashing, uploading_original…); null si no hay. */
+  currentPhase: QueueState | null;
+  /** Ventana móvil de la velocidad real de subida, en bytes por segundo. */
+  bytesPerSecond: number;
+  /** Segundos estimados para terminar; `null` si aún no hay velocidad medida. */
+  etaSeconds: number | null;
   status: SyncProgressStatus;
 };

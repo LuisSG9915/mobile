@@ -30,6 +30,8 @@ pnpm --filter @photos/mobile deploy:web      # build + wrangler deploy (worker p
 pnpm test:all                  # todas las capas -> test-results/<runId>/ + REPORT.md (exit 1 si algo ejecutado falla)
 pnpm test:pipeline             # selftest del runner/reporte (node:test + fixtures, sin wrangler/R2)
 pnpm test:report               # regenera el reporte de una corrida (node scripts/test-report.mjs <dir>)
+pnpm release:check --tag vX.Y.Z # preflight de release (scripts/release-check.mjs; ver docs/ops/RELEASE.md)
+pnpm check:board               # audita docs/PLAN_MEJORAS.md: estado real, enlaces vivos, sin pendientes dentro
 pnpm --filter @photos/mobile test        # vitest + happy-dom (módulos *.web.ts)
 pnpm --filter @photos/mobile test:e2e    # Playwright (levanta wrangler + expo web solos)
 ```
@@ -53,7 +55,7 @@ La app Expo también corre en navegador. Particularidades:
 ## Operación (P0)
 
 - **Errores:** Sentry es opcional y queda apagado sin DSN. Móvil: `EXPO_PUBLIC_SENTRY_DSN` (exige rebuild nativo por el módulo/plugin). Worker: `wrangler secret put SENTRY_DSN`. Guía: `docs/ops/OBSERVABILITY.md`.
-- **Respaldo del catálogo D1:** workflow diario `.github/workflows/backup-d1.yml` → `r2://photos-media/backups/d1/` (SQL + sha256, retención 90 días). Requiere los secrets `CLOUDFLARE_API_TOKEN` (D1:Edit + Workers R2 Storage:Edit) y `CLOUDFLARE_ACCOUNT_ID`. Restauración: `docs/ops/D1_BACKUP.md`.
+- **Respaldo del catálogo D1:** workflow diario `.github/workflows/backup-d1.yml` → `r2://photos-backups/d1/` (bucket **separado** del de producción; SQL + sha256, retención 90 días; el workflow aborta si `BACKUP_BUCKET` apunta al bucket de fotos). Requiere los secrets `CLOUDFLARE_API_TOKEN` (D1:Edit + Workers R2 Storage:Edit) y `CLOUDFLARE_ACCOUNT_ID`. Restauración: `docs/ops/D1_BACKUP.md`.
 - **Versión visible:** `appVersion()`/`appBuild()` (`lib/telemetry.ts`) leen la versión real del binario que gestiona EAS, no la de `app.json`.
 - **Error boundary global:** exportado en `app/_layout.tsx`; captura en Sentry y permite compartir diagnóstico.
 

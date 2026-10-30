@@ -1,6 +1,8 @@
+import { Image } from "expo-image";
 import { Tabs } from "expo-router";
 import { CloudUpload, Folder, Images, Settings } from "lucide-react-native";
-import { ActivityIndicator, Platform, Text, View } from "react-native";
+import { useEffect } from "react";
+import { ActivityIndicator, AppState, Platform, Text, View } from "react-native";
 import { t } from "../../i18n/es";
 import { useSyncProgressAuto } from "../../queue/progress";
 import { useBackupRunner } from "../../queue/runner";
@@ -13,6 +15,16 @@ export default function TabsLayout() {
   useBackupRunner(ready);
   // Proyección reactiva de la cola para el anillo del avatar y la barra de Respaldo.
   useSyncProgressAuto();
+
+  // Al minimizar, liberar el caché de bitmaps en memoria: Android recorta el
+  // proceso bajo presión (TRIM_MEMORY) y ~200 MB de Glide inflan el PSS.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "background") void Image.clearMemoryCache().catch(() => {});
+    });
+    return () => sub.remove();
+  }, []);
 
   if (Platform.OS === "web" && error) {
     return (

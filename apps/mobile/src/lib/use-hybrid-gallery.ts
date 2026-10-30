@@ -23,9 +23,22 @@ export type AlbumFilter =
 /**
  * Último listado local por alcance (toda la biblioteca / álbum / álbumes con
  * flag). El visor lo usa para montar el carrusel con índice válido desde el
- * primer frame, sin esperar a que MediaLibrary vuelva a paginar.
+ * primer frame, sin esperar a que MediaLibrary vuelva a paginar. Se conservan
+ * varios alcances para que al salir de un álbum a "Todo" la lista anterior se
+ * restaure al instante en vez de quedar con datos del alcance previo.
  */
-let localAssetsCache: { key: string; assets: LocalAsset[] } | null = null;
+const LOCAL_SCOPES_KEPT = 3;
+const localAssetsCache = new Map<string, LocalAsset[]>();
+
+function cacheScope(key: string, assets: LocalAsset[]) {
+  localAssetsCache.delete(key);
+  localAssetsCache.set(key, assets);
+  while (localAssetsCache.size > LOCAL_SCOPES_KEPT) {
+    const oldest = localAssetsCache.keys().next().value;
+    if (oldest === undefined) break;
+    localAssetsCache.delete(oldest);
+  }
+}
 
 function localScopeKey(albumId: string | null | undefined, synced: string[] | null): string {
   return `${albumId ?? "all"}|${synced === null ? "ALL" : synced.join(",")}`;
@@ -55,14 +68,16 @@ export function useHybridGallery(
   const scopeKey = localScopeKey(localAlbumId, syncedAlbumIds);
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
-  const [localAssets, setLocalAssets] = useState<LocalAsset[]>(() =>
-    localAssetsCache?.key === scopeKey ? localAssetsCache.assets : [],
+  const [localAssets, setLocalAssets] = useState<LocalAsset[]>(
+    () => localAssetsCache.get(scopeKey) ?? [],
   );
 
   // Cambio de alcance (álbum/filtro): reutilizar el listado cacheado de ese
-  // alcance mientras el refresco real llega.
+  // alcance mientras el refresco real llega; si no hay caché, limpiar para no
+  // mostrar assets del alcance anterior (filtros como syncedAlbumIds los
+  // reducirían a una cuadrícula vacía).
   useEffect(() => {
-    if (localAssetsCache?.key === scopeKey) setLocalAssets(localAssetsCache.assets);
+    setLocalAssets(localAssetsCache.get(scopeKey) ?? []);
   }, [scopeKey]);
 
   const refreshLocal = useCallback(
@@ -70,7 +85,7 @@ export function useHybridGallery(
       const key = scopeKey;
       const commit = (assets: LocalAsset[]) => {
         if (scopeRef.current !== key || signal?.aborted) return;
-        localAssetsCache = { key, assets };
+        cacheScope(key, assets);
         setLocalAssets(assets);
       };
       try {

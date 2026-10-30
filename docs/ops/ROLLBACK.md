@@ -20,7 +20,8 @@ Wrangler no revierte migraciones de D1. Nunca se hace `db:migrate:remote` hacia 
 
 1. **Preferido:** forward-fix (nueva migración que corrige el esquema) con la app cerrada.
 2. Si el esquema quedó inconsistente: `target = d1-restore-to-new-db` con el `backup_key` más reciente
-   (`backups/d1/...`), validar `PRAGMA integrity_check` y conteos, cambiar `database_id` en
+   (`d1/...` en el bucket `photos-backups`), validar `PRAGMA integrity_check` y conteos, cambiar
+   `database_id` en
    `apps/api/wrangler.jsonc` y desplegar.
 3. RPO aceptado: hasta 24 h (backup diario). Ver `docs/ops/SLO.md`.
 

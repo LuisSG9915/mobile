@@ -1,6 +1,6 @@
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useQuery } from "@tanstack/react-query";
-import { Image } from "expo-image";
+import { Image, type ImageSource } from "expo-image";
 import { router } from "expo-router";
 import {
   AlertCircle,
@@ -28,6 +28,7 @@ import {
   Modal,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  PixelRatio,
   Platform,
   Pressable,
   RefreshControl,
@@ -122,6 +123,23 @@ const PhotoCell = memo(
     onLongPress,
   }: CellProps) {
     const uri = photo.localUri ?? photo.thumbUrl;
+    // Las URLs prefirmadas cambian en cada fetch; sin clave estable
+    // expo-image no reutiliza el disco y la celda queda en negro.
+    const cacheKey = photo.remoteId ? `thumb-${photo.remoteId}` : photo.key;
+    // Videos respaldados: la miniatura remota (WebP ~20 KB) carga al instante;
+    // decodificar el mp4 local con MediaMetadataRetriever tarda 4-5 s por celda
+    // en primera vista. La URI local queda como fallback si la prefirmada
+    // expiró o no hay red.
+    // Acotar el bitmap decodificado al tamaño real de la celda: sin esto el
+    // frame de un video llega full-res (1080p ≈ 8 MB) aunque la celda mida 120 dp.
+    const px = Math.round((size - GRID_GAP) * PixelRatio.get());
+    const source: ImageSource[] =
+      photo.mediaType === "video" && photo.thumbUrl && photo.localUri
+        ? [
+            { uri: photo.thumbUrl, cacheKey, width: px, height: px },
+            { uri: photo.localUri, cacheKey: `${cacheKey}-local`, width: px, height: px },
+          ]
+        : [{ uri: uri ?? undefined, cacheKey, width: px, height: px }];
     return (
       <Pressable
         accessibilityLabel={photo.mediaType === "video" ? "video" : "foto"}
@@ -138,17 +156,17 @@ const PhotoCell = memo(
       >
         {uri ? (
           <Image
-            source={{
-              uri,
-              // Las URLs prefirmadas cambian en cada fetch; sin clave estable
-              // expo-image no reutiliza el disco y la celda queda en negro.
-              cacheKey: photo.remoteId ? `thumb-${photo.remoteId}` : photo.key,
-            }}
+            source={source}
             placeholder={photo.thumbhash ? { thumbhash: photo.thumbhash } : undefined}
             contentFit="cover"
             transition={200}
             recyclingKey={photo.key}
             priority={highPriority ? "high" : "normal"}
+            // RGB_565: la mitad de memoria por bitmap en la cuadrícula.
+            decodeFormat="rgb"
+            // memory-disk evita re-decodificar al reciclar celdas (y el bitmap
+            // reciclado que Glide intenta reusar en disco-only).
+            cachePolicy="memory-disk"
             style={{ width: "100%", height: "100%" }}
           />
         ) : null}
@@ -940,6 +958,10 @@ export default function GalleryScreen() {
             onTouchCancel={() => setDragSelecting(false)}
           >
             <FlashList<GalleryRow>
+              // FlashList 2.0.2 queda en blanco tras un swap grande de `data`
+              // (solo monta la primera fila hasta un scroll): remontar la lista
+              // cuando cambia el alcance de los datos fuerza un layout limpio.
+              key={`${timelineFilter}|${albumFilter ? `${albumFilter.type}:${albumFilter.albumId}` : "all"}|${syncedAlbumIds?.join(",") ?? "ALL"}|${timelineBefore ?? ""}|${columns}`}
               ref={listRef}
               data={rows}
               keyExtractor={(r) => r.key}
@@ -950,7 +972,10 @@ export default function GalleryScreen() {
               overrideItemLayout={(layout, item) => {
                 if (item.type === "header") layout.span = columns;
               }}
-              drawDistance={Math.round(width * 2)}
+              // drawDistance acotado: cada celda de video decodifica un frame
+              // (~8 MB transitorio); 2×viewport de margen dejaba decenas de
+              // decodes concurrentes y el SO mataba la app por presión.
+              drawDistance={Math.round(width)}
               removeClippedSubviews={Platform.OS !== "web"}
               onScroll={handleScroll}
               scrollEventThrottle={16}

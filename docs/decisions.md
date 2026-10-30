@@ -148,12 +148,40 @@ callbackURL={redirectTo}`; ese GET valida y hace 302 a `callbackURL?token=…` o
 - En dispositivo físico dev, el enlace del correo lleva `BETTER_AUTH_URL` — con
   localhost solo sirve si el correo se abre en el mismo PC.
 
-## Pendiente operativo
+## Decisiones de plan adoptadas el 2026-10-29
 
-- `AUTH_LIMITER` necesita `wrangler deploy` para existir en prod.
-- Recuperación de cuenta en prod necesita `wrangler secret put RESEND_API_KEY`
-  y un `EMAIL_FROM` con dominio verificado en Resend.
-- `uso.txt` (raíz): eliminado y credenciales desacopladas.
+Tomadas al revisar la auditoría externa (`docs/AUDITORIA_EXTERNA_2026-10-29.md`) y el informe de
+subidas en segundo plano; quedan aquí para no re-litigarlas.
+
+1. **S1 empieza por H1.1, no por H1.8.** Primero se cierra la pérdida de datos (multipart que no
+   llama a `multipartComplete` en nativo, `uploadId` sin persistir, etags de otra MPU), porque un
+   vídeo que no termina de subir es integridad y su medición es prerrequisito de H1.8. La velocidad
+   (H1.8) va después, con la línea base ya tomada.
+2. **Segundo plano: Fase 0, sin rebuild nativo.** Se aprueba (a) + (b) de `PLAN_MEJORAS` §3.2:
+   copy honesto en Android igual a `noteIos`, retirada de `FOREGROUND_SERVICE_DATA_SYNC` huérfano y
+   journal de partes con ETags en la cola existente + reconciliación por `HEAD`/`ListParts` al
+   arrancar. **No** se construye el módulo `upload-engine` (Fase 1): no existe librería mantenida que
+   ahorre el trabajo y el coste son semanas de nativo más dev-client y revisión de Play. Se revisa
+   solo si el uso real muestra subidas largas con la app cerrada.
+3. **Cuota y almacenamiento: medir antes de tocar límites.** No se baja la cuota por usuario a 5 GB
+   ni se mueve nada a Infrequent Access hasta tener el modelo de consumo con datos reales (H2.6).
+   Motivo: los 10 GB-mes gratis de R2 se calculan con el **pico diario medio**, así que el margen real
+   depende del patrón de subida, no del total almacenado.
+4. **Workers Paid ya está activo (5 $/mes).** Por tanto el techo de 10 ms de CPU por invocación, el
+   límite de 50 subrequests y la ausencia de Logpush **no aplican**: la referencia operativa son 30 s
+   de CPU por defecto (`limits.cpu_ms` configurable), 10.000 subrequests y D1 Paid (25 000 M filas
+   leídas + 50 M escritas al mes). No volver a planificar ni a optimizar contra los límites de Free.
+
+## Dónde viven los pendientes operativos
+
+Aquí solo se registran decisiones tomadas: un pendiente dentro de un archivo de decisiones es
+trabajo escondido. Los que había se asignaron a su fila del tablero y a `docs/ops/` el 2026-10-29:
+
+- `AUTH_LIMITER` sin desplegar en prod → fila **H1.6** del tablero (junto con headers y Resend).
+- Recuperación de cuenta en prod sin `RESEND_API_KEY` ni `EMAIL_FROM` verificado → fila **H1.6**.
+- `uso.txt` con credenciales en la raíz → resuelto: archivo eliminado y credenciales desacopladas.
+
+`pnpm check:board` falla si vuelve a aparecer un `- [ ]` en este archivo.
 - D1 local: migraciones aplicadas (`0001` y `0002` al día vía `db:migrate:local`).
 
 ## No hecho a propósito (alcance aprobado: urgentes + robustez)
@@ -174,3 +202,66 @@ callbackURL={redirectTo}`; ese GET valida y hace 302 a `callbackURL?token=…` o
 - Escaneo incremental en MediaLibrary: resuelto con filtro `createdAfter` (ventana 24 h) y soporte `forceScan`.
 - Borrado en lote en Cron de D1 (`inArray`) y eliminación de OOM en sweep de R2.
 
+## Invariantes de integridad (subida multipart)
+
+- **Una sesión multipart muerta se detecta y se abandona, no se reintenta.** R2 aborta las MPU
+  incompletas a los 7 días (`docs/ops/R2_LIFECYCLE.md`) y otro dispositivo puede cerrar la misma
+  sesión, así que `uploadId` + `parts` guardados pueden apuntar a algo que ya no existe. Señales
+  canónicas: `404 NoSuchUpload` al subir una parte y `409 upload_id_mismatch` al presignar. Ambas
+  deben descartar el journal (`clearMultipartState`: `upload_id`/`parts` a NULL, porque `setState` usa
+  `coalesce` y no puede vaciarlos) y reabrir **una** sesión limpia; tras dos pasadas el intento falla
+  y el reintento externo acota el resto. Motivo: sin este corte el cliente reintenta para siempre una
+  sesión imposible y el vídeo nunca sube, que es justo el síntoma que H1.1 debía eliminar.
+- **Sin `ETag` de R2 no hay parte válida.** Los dos clientes exigen el header; un ETag inventado
+  produce un `multipartComplete` rechazado con `parts_mismatch` y el servidor borra la fila de metadata.
+- **16 MiB por parte, 3 en vuelo, lotes de prefirmado de 12.** El tamaño de parte está en
+  `packages/shared/src/constants.ts` y lo consumen API (`partSize`/`expectedParts`) y clientes, así que
+  no puede divergir. Razones: menos Class A requests (200 MB: 40 → 13 partes), y el TTL de 900 s de
+  `presign-parts` deja de ser un problema porque cada lote se sube antes de firmar el siguiente. Coste
+  asumido: hasta 3 × 16 MiB de `ArrayBuffer` en memoria (~48 MiB de pico) por subida; con 5 MiB eran
+  ~15 MiB y el doble de peticiones. Las partes van ascendentes al completar (R2 lo exige) y el journal
+  de `parts` se guarda ya ordenado para que un reinicio no dependa del orden de llegada.
+
+
+## Compuerta de release (H1.4)
+
+- **Una release exige tag, binario y nota fechada; el workflow no puede pasar sin los tres.** Las
+  reglas están en `scripts/lib/release-audit.mjs` (puras, con 15 tests) y no en el YAML, porque el
+  diagnóstico de `v1.0.9`/`v1.1.0` es que el gate anterior solo miraba árbol limpio y migraciones:
+  pasaba con `[Unreleased]` lleno y con un `eas build` que moría después de gastar el build.
+- **`[Unreleased]` debe quedar vacía al etiquetar.** Consecuencia deliberada: un tag cortado desde un
+  árbol con notas sin fechar falla el preflight. Alternativa descartada: permitir notas sueltas y
+  generarlas al vuelo, que es como `v1.1.0` quedó con 13 bullets que luego se reescribieron.
+- **El tag es anotado y apunta a HEAD.** Un tag ligero no lleva mensaje y se puede re-apuntar a otro
+  commit; el preflight rechaza ambos casos en local (`--allow-existing` solo audita).
+- **La release se verifica por su activo, no por el color del job.** Tras publicar, el workflow
+  consulta `gh release view --json assets` y exige un `.apk`; el APK descargado se valida por firma
+  ZIP. Motivo: un `curl` a una URL prefirmada caducada devuelve un HTML de 200 bytes que se adjunta
+  como si fuera un APK.
+
+## APK sin EAS (H1.4)
+
+- **El APK de release lo compila Gradle, no EAS.** El plan gratuito de EAS está agotado (motivo real
+  por el que `v1.0.9` y `v1.1.0` quedaron sin binario, no un fallo de configuración). El workflow
+  `release-apk.yml` hace `npx expo prebuild --platform android --clean --no-install` y
+  `./gradlew assembleRelease` en `ubuntu-latest` (JDK 17 + Android SDK), sin minutos de EAS. Alternativa
+  descartada: `eas build --local`, que exige el toolchain Android en la máquina de quien publica y no es
+  reproducible en CI.
+- **La firma se inyecta después de prebuild.** `android/` no se versiona (CNG), así que
+  `scripts/android-prepare.mjs` añade `signingConfigs.release` y `buildTypes.release.signingConfig` a
+  `android/app/build.gradle`, escribe la keystore desde `ANDROID_KEYSTORE_BASE64` y las contraseñas en
+  `gradle.properties`. Sin esto el release se firma con la keystore de **debug**: dos builds dejan de
+  instalarse uno sobre otro y Obtainium no puede actualizar. Las reglas viven en
+  `scripts/lib/android-release.mjs` (10 tests) y se validan con `--dry-run` contra el `build.gradle`
+  real que genera prebuild.
+- **`versionCode` sale del tag** (`v1.2.3` → `10203`), no del número de ejecución del workflow:
+  re-ejecutar un build fallido no debe producir un `versionCode` distinto para la misma versión. Riesgo
+  aceptado: el esquema se agota en `v210.0.0`.
+- **El build de Gradle necesita `SENTRY_ORG`/`SENTRY_PROJECT` (y desactivar la subida sin token).** El plugin de
+  `@sentry/react-native` corre al final del pipeline (`createBundleReleaseJsAndAssets_SentryUpload_*`) y sin org
+  aborta con «An organization ID or slug is required», tumbando un APK que ya estaba compilado. Se pasa
+  `SENTRY_ORG`/`SENTRY_PROJECT` como variables de repo y `SENTRY_DISABLE_AUTO_UPLOAD=true` cuando no hay
+  `SENTRY_AUTH_TOKEN`; los source maps son opcionales, el APK no.
+- **Solo se compilan ABIs de teléfono (`arm64-v8a`, `armeabi-v7a`).** Compilar x86/x86_64 duplica el tiempo del job
+  y el tamaño del APK, y esos ABIs solo los usan emuladores, que trabajan con dev-client. Se pasa con
+  `-PreactNativeArchitectures`.

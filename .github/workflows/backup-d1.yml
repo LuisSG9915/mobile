@@ -3,9 +3,15 @@ name: Backup D1
 # Respaldo diario del catálogo (usuarios, álbumes, favoritos, shares, metadatos).
 # Los originales viven en R2 y los cubre scripts/backup-r2.mjs; esto cubre D1.
 #
+# 3-2-1 (H1.5): el respaldo va a un bucket DISTINTO del de producción. Si D1 y el
+# catálogo comparten destino con las fotos, un borrado, un token filtrado o un
+# lifecycle mal escrito se lleva las dos copias a la vez.
+#
 # Secrets requeridos en el repo:
 #   CLOUDFLARE_API_TOKEN  → permisos "D1:Edit" y "Workers R2 Storage:Edit"
 #   CLOUDFLARE_ACCOUNT_ID → 461d52ab67ae2435c8dde9a0887f27cb
+# Variable opcional:
+#   BACKUP_BUCKET         → bucket de respaldos (por defecto photos-backups)
 #
 # Restauración: docs/ops/D1_BACKUP.md
 
@@ -22,13 +28,31 @@ concurrency:
   group: backup-d1
   cancel-in-progress: false
 
+env:
+  # Bucket de respaldos, separado del de producción (`photos-media`).
+  BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET || 'photos-backups' }}
+  MEDIA_BUCKET: photos-media
+
 jobs:
   export:
-    name: Export D1 → R2
+    name: Export D1 → R2 (bucket de respaldos)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Guard · el respaldo no puede vivir en el bucket de producción
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_BUCKET}" ]; then
+            echo "::error::BACKUP_BUCKET está vacío: no se sabe dónde guardar el respaldo."
+            exit 1
+          fi
+          if [ "${BACKUP_BUCKET}" = "${MEDIA_BUCKET}" ]; then
+            echo "::error::BACKUP_BUCKET (${BACKUP_BUCKET}) es el bucket de producción; define uno aparte (por defecto photos-backups)."
+            exit 1
+          fi
+          echo "Destino del respaldo: r2://${BACKUP_BUCKET}/d1/"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -83,10 +107,10 @@ jobs:
         run: |
           set -euo pipefail
           node node_modules/wrangler/bin/wrangler.js r2 object put \
-            "photos-media/backups/d1/d1-${STAMP}.sql" \
+            "${BACKUP_BUCKET}/d1/d1-${STAMP}.sql" \
             --file "$OUT" --remote --content-type "application/sql"
           node node_modules/wrangler/bin/wrangler.js r2 object put \
-            "photos-media/backups/d1/d1-${STAMP}.sql.sha256" \
+            "${BACKUP_BUCKET}/d1/d1-${STAMP}.sql.sha256" \
             --file "${OUT}.sha256" --remote --content-type "text/plain"
 
       - name: Summary
@@ -95,7 +119,7 @@ jobs:
             echo "### Respaldo D1 completado"
             echo ""
             echo "- Archivo: \`d1-${STAMP}.sql\`"
-            echo "- Destino: \`r2://photos-media/backups/d1/\`"
+            echo "- Destino: \`r2://${BACKUP_BUCKET}/d1/\` (bucket separado del de producción)"
             echo "- Tamaño: $(du -h "$OUT" | cut -f1)"
             echo ""
             echo "Restauración: \`docs/ops/D1_BACKUP.md\`"

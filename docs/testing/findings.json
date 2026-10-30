@@ -225,5 +225,95 @@
     "proposal": "Dar minWidth/flex al botón o reducir padding del label.",
     "effort": "XS",
     "relatedTests": []
+  },
+  {
+    "id": "H-021",
+    "title": "Un item colgado congelaba toda la cola de respaldo (running=true permanente)",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "Sesión adb en Huawei LMR-LX9 (release 1.1.0): awaits nativos sin techo en processItem (getAssetInfoAsync, sha256File, makeThumbAndHash, createVideoPreview, blob.arrayBuffer) — uno colgado dejaba `running` en true para siempre y todo runBackupPass posterior no-opeaba en silencio (if (running) return). 'Reanudar' no hacía nada hasta reiniciar la app. Además en dispositivo: prehashAndDedup llamaba getAssetInfoAsync/sha256File sin deadline (item en 'queued', invisible) y computeSyncProgress solo veía los primeros 2000 items -> fase oculta en colas grandes.",
+    "proposal": "withDeadline por fase (shared.ts) con PhaseTimeoutError reintentable; presupuestos: leer-info 180s, hash max(4min, ~8MB/s), miniatura/preview 240s, leer-parte 120s.",
+    "effort": "M",
+    "relatedTests": [
+      "resuelve el valor cuando la promesa entra en el presupuesto",
+      "rechaza PhaseTimeoutError si la promesa nunca resuelve",
+      "ejecuta onTimeout antes de rechazar (cancelación nativa)"
+    ]
+  },
+  {
+    "id": "H-022",
+    "title": "createVideoPreview re-comprimía cada video completo sin techo ni cancelación",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "processor.ts comprimía CADA video a 720p/4Mbps vía react-native-compressor antes de subir; un video de 5.2GB en Kirin 710 = decenas de minutos de MediaCodec al 100% con la cola rehén y la UI sin progreso visible.",
+    "proposal": "Saltar preview si fileSize >2GB (VIDEO_PREVIEW_MAX_BYTES); deadline max(5min, duración*1.5) con cancelCompression nativo vía getCancellationId; fallo/timeout -> subir sin preview.",
+    "effort": "M",
+    "relatedTests": []
+  },
+  {
+    "id": "H-023",
+    "title": "Fallback de preview subía un WebP firmado como video/mp4",
+    "area": "mobile-native",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "Si la compresión fallaba, makePreview devolvía WebP que se subía al key previews/{sha}.mp4 con content-type firmado video/mp4 (uploads.ts pMime) — objeto ilegible para cualquier reproductor.",
+    "proposal": "Video sin compresión -> preview=null (no se firma ni sube preview); el visor cae a miniatura/original.",
+    "effort": "XS",
+    "relatedTests": []
+  },
+  {
+    "id": "H-024",
+    "title": "App nativa consume ~950MB RAM y entra en swap en gama media",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "mejora",
+    "evidence": "Huawei LMR-LX9: dumpsys meminfo TOTAL PSS ~800-908MB (Private Other 316MB, Graphics 207MB, Native 143MB), SWAP PSS >100MB, TRIM_MEMORY_RUNNING_MODERATE cada ~90s en logcat. El teléfono entero se siente inestable/lento con la app abierta. Post-fix (Huawei real): antes el SO mataba la app en fg durante scroll de videos (SWAP_KillDecision); después sobrevive al mismo estrés. PSS ~547MB estable (vs ~900MB), Private Other 62MB (vs 316MB), Native Heap 134MB (vs 170MB). Queda por atacar el grafo JS de ~20k items en memoria.",
+    "proposal": "Hecho: decodeFormat rgb_565 (mitad por bitmap), width/height acotados a celda, drawDistance 2x->1x viewport, memory-disk cache, clearMemoryCache al minimizar. Pendiente mayor: paginar el grafo HybridPhoto de 20k items en lugar de materializarlo completo.",
+    "effort": "L",
+    "relatedTests": []
+  },
+  {
+    "id": "H-025",
+    "title": "Miniaturas de video en galería tardan 4-5s por celda (cuadrícula negra)",
+    "area": "mobile-native",
+    "severity": "media",
+    "status": "mejora",
+    "evidence": "logcat: 'Glide: Finished loading BitmapDrawable ... in 4200-4600 ms' por cada mp4 del álbum WhatsApp Video (~49 de 1111 cargas >1s). Entrar a un álbum de videos muestra celdas negras por minutos en primera vista. Post-fix: videos respaldados usan miniatura remota WebP (ms) con fallback a localUri; bitmaps acotados a tamaño de celda. En estrés de scroll la cuadrícula pinta la mayoría de celdas; los mp4 no sincronizados aún decodifican frame la 1ª vez (costo inherente a MediaMetadataRetriever) pero ya no tumba la app.",
+    "proposal": "Hecho: source array thumbUrl->localUri en videos + decode acotado + drawDistance menor. Pendiente opcional: miniaturas del sistema (ContentResolver.loadThumbnail) vía módulo nativo.",
+    "effort": "L",
+    "relatedTests": []
+  },
+  {
+    "id": "H-026",
+    "title": "ExpoImage 'Trying to use a recycled bitmap' al hacer scroll",
+    "area": "mobile-native",
+    "severity": "media",
+    "status": "resuelto",
+    "evidence": "logcat: E ExpoImage: Trying to use a recycled bitmap (x3) mientras se hacía scroll en la galería — algunas celdas no pintan o parpadean. Post-fix: cachePolicy='memory-disk' en PhotoCell -> 0 errores 'recycled bitmap' en logcat tras scroll agresivo del filtro Videos (antes reproducible cada sesión).",
+    "proposal": "Revisar versión de expo-image (hay fixes upstream) y si se reutiliza un Bitmap reciclado en alguna celda custom; reproducir y aislar el caso.",
+    "effort": "M",
+    "relatedTests": []
+  },
+  {
+    "id": "H-027",
+    "title": "Build local de Gradle sin EXPO_PUBLIC_API_URL produce app apuntando a localhost:8787",
+    "area": "mobile-native",
+    "severity": "alta",
+    "status": "resuelto",
+    "evidence": "assembleRelease local ejecuta Metro sin los env de eas.json -> API_URL cae al fallback localhost:8787 -> toda llamada al API muere en timeout 30s: cola 'Subiendo' eterna, 0 items completados, CPU ~100% en retries. Detectado en Huawei real (wrangler tail sin tráfico).",
+    "proposal": "Al compilar local: exportar los env del perfil release-apk (EXPO_PUBLIC_API_URL, ADMIN_EMAIL, SENTRY_DSN) y SENTRY_DISABLE_AUTO_UPLOAD=true (no hay SENTRY_AUTH_TOKEN). Largo plazo: mover env a app.json extra o script de build local.",
+    "effort": "XS",
+    "relatedTests": []
+  },
+  {
+    "id": "H-028",
+    "title": "/（FlashList 2.0.2 ）",
+    "status": "",
+    "evidence": "：→X'Todo'，'Videos'，uiautomator  ScrollView 1（）， local=807/remote=719→1161  FlashList ；，。",
+    "rootCause": "：① use-hybrid-gallery localAssetsCache ， 'all|synced'  syncedAlbumIds ；② FlashList 2.0.2  data （1161→2→1161），。",
+    "fix": "① localAssetsCache  Map  scopeKey 3，，；② index.tsx  FlashList  key={filter|album|synced|before|columns}，。：→X、Todo→Videos→Todo 。",
+    "proposal": "：search.tsx/trash.tsx/albums/[id].tsx  FlashList ；， key 。 flash-list ≥2.3.x  bug  key hack。"
   }
 ]

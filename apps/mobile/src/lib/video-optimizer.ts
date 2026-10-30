@@ -10,6 +10,12 @@ export type OptimizeVideoOptions = {
   uri: string;
   preset: VideoPreset;
   onProgress?: (progress: number) => void;
+  /**
+   * Recibe el cancellationId nativo apenas arranca la compresión; con él el
+   * caller puede abortar vía `Video.cancelCompression(id)` si se agota el
+   * presupuesto de tiempo.
+   */
+  onCancelId?: (cancellationId: string) => void;
 };
 
 export type OptimizedVideoResult = {
@@ -66,6 +72,7 @@ export async function optimizeVideoForShare(
           maxSize,
           bitrate,
           minimumFileSizeForCompress: 2,
+          getCancellationId: options.onCancelId,
         },
         (progress) => {
           onProgress?.(progress);
@@ -130,6 +137,7 @@ export async function saveOptimizedVideoToGallery(uri: string, filename: string)
  */
 export async function createVideoPreview(
   localUri: string,
+  opts?: { onCancelId?: (cancellationId: string) => void },
 ): Promise<{ uri: string; bytes: number } | null> {
   if (Platform.OS === "web") {
     return null;
@@ -138,6 +146,7 @@ export async function createVideoPreview(
     const res = await optimizeVideoForShare({
       uri: localUri,
       preset: "whatsapp_hd",
+      onCancelId: opts?.onCancelId,
     });
     if (res.uri && res.uri !== localUri) {
       const info = await FileSystem.getInfoAsync(res.uri);
@@ -149,4 +158,14 @@ export async function createVideoPreview(
     console.warn("createVideoPreview falló, usando original:", e);
   }
   return null;
+}
+
+/**
+ * Aborta una compresión en curso por su cancellationId (lo entrega
+ * `getCancellationId`). Best-effort: si el nativo ya terminó, no hace nada.
+ */
+export function cancelVideoCompression(cancellationId: string): void {
+  try {
+    Video.cancelCompression(cancellationId);
+  } catch {}
 }

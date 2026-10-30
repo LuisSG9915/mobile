@@ -37,7 +37,13 @@ export const PREVIEW_MAX_DIMENSION = 1600;
 /** Umbral para activar subida multipart reanudable (20 MB) */
 export const MULTIPART_THRESHOLD_BYTES = 20 * 1024 * 1024;
 /** Tamaño de parte para subida multipart (5 MB, mínimo de R2/S3) */
-export const MULTIPART_PART_SIZE = 5 * 1024 * 1024;
+/**
+ * 16 MiB: un vídeo de 200 MB pasa de 40 a 13 partes y uno de 1 GB de 205 a 64
+ * (menos Class A requests, menos ida y vuelta). El cliente sube 3 en vuelo, así
+ * que el pico en memoria son ~48 MiB de ArrayBuffer; con 5 MiB eran ~15 MiB pero
+ * el doble de peticiones.
+ */
+export const MULTIPART_PART_SIZE = 16 * 1024 * 1024;
 /** TTL de las URLs prefirmadas de subida (15 min) */
 export const PRESIGN_PUT_TTL_SECONDS = 900;
 /** Ventana de redondeo para URLs de lectura cacheables (6 h) */

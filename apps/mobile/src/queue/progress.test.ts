@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useItemProgress, useSyncProgress } from "../lib/store";
-import { computeSyncProgress, publishByteTick } from "./progress";
+import { computeSyncProgress, publishByteTick, resetRateWindow } from "./progress";
 import type { QueueItem } from "./types";
 
 beforeEach(() => {
   useItemProgress.setState({ progressByAssetId: {} });
+  resetRateWindow();
 });
 
 function item(over: Partial<QueueItem> = {}): QueueItem {
@@ -50,6 +51,7 @@ describe("computeSyncProgress", () => {
     expect(p.filesTotal).toBe(3);
     expect(p.filesRemaining).toBe(2);
     expect(p.currentFileName).toBe("subiendo.jpg");
+    expect(p.currentPhase).toBe("uploading_original");
     expect(p.bytesUploaded).toBe(1500);
     expect(p.totalBytes).toBe(3000);
   });
@@ -120,5 +122,62 @@ describe("useItemProgress", () => {
     expect(useItemProgress.getState().progressByAssetId.a).toBe(1);
     useItemProgress.getState().setItemProgress("a", -0.2);
     expect(useItemProgress.getState().progressByAssetId.a).toBe(0);
+  });
+});
+
+describe("velocidad y ETA (ventana móvil)", () => {
+  const MB = 1024 * 1024;
+
+  it("deriva bytes por segundo y ETA de dos muestras", () => {
+    const first = computeSyncProgress(
+      [item({ state: "uploading_original", bytes_total: 10 * MB, bytes_sent: 0 })],
+      true,
+      1_000,
+    );
+    expect(first.bytesPerSecond).toBe(0);
+    expect(first.etaSeconds).toBeNull();
+
+    const second = computeSyncProgress(
+      [item({ state: "uploading_original", bytes_total: 10 * MB, bytes_sent: 2 * MB })],
+      true,
+      3_000,
+    );
+
+    expect(second.bytesPerSecond).toBe(MB); // 2 MiB en 2 s
+    expect(second.etaSeconds).toBe(8); // faltan 8 MiB
+  });
+
+  it("en pausa no reporta velocidad ni ETA", () => {
+    computeSyncProgress([item({ state: "uploading_original", bytes_sent: 0 })], true, 1_000);
+    const paused = computeSyncProgress(
+      [item({ state: "uploading_original", bytes_total: 4 * MB, bytes_sent: MB })],
+      false,
+      3_000,
+    );
+
+    expect(paused.bytesPerSecond).toBe(0);
+    expect(paused.etaSeconds).toBeNull();
+  });
+
+  it("un retroceso del contador reinicia la ventana en vez de dar velocidad negativa", () => {
+    computeSyncProgress(
+      [item({ state: "uploading_original", bytes_total: 10 * MB, bytes_sent: 5 * MB })],
+      true,
+      1_000,
+    );
+    const reset = computeSyncProgress(
+      [item({ state: "uploading_original", bytes_total: 10 * MB, bytes_sent: 0 })],
+      true,
+      3_000,
+    );
+
+    expect(reset.bytesPerSecond).toBe(0);
+
+    const afterRestart = computeSyncProgress(
+      [item({ state: "uploading_original", bytes_total: 10 * MB, bytes_sent: MB })],
+      true,
+      4_000,
+    );
+    expect(afterRestart.bytesPerSecond).toBe(MB);
   });
 });

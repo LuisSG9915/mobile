@@ -345,6 +345,24 @@ export function setState(
 }
 
 /**
+ * Descarta el journal multipart de un asset (misma semántica que `db.ts`):
+ * `applyState` no puede vaciar `upload_id`/`parts` porque ignora los `null`, así
+ * que una MPU muerta quedaría reintentándose con etags inexistentes.
+ */
+export function clearMultipartState(assetId: string): Promise<void> {
+  return mutation(async (ctx) => {
+    const updated = await store.updateItem(ctx.userId, assetId, (row) => {
+      row.upload_id = null;
+      row.parts = null;
+      row.bytes_sent = 0;
+      row.updated_at = Date.now();
+      return row;
+    });
+    if (updated) applyRow(updated);
+  });
+}
+
+/**
  * Marca el estado terminal y borra el blob del asset en UNA transacción.
  * Reemplaza el patrón setState + forgetFile en el processor web.
  */
@@ -455,6 +473,14 @@ export function getQueueItems(limit = 20_000, offset = 0): QueueItem[] {
   return [...queue.values()]
     .sort((a, b) => b.created_at - a.created_at)
     .slice(offset, offset + limit);
+}
+
+export function getActiveItem(): QueueItem | null {
+  return (
+    [...queue.values()]
+      .filter((r) => TRANSIENT_STATES.includes(r.state))
+      .sort((a, b) => b.updated_at - a.updated_at)[0] ?? null
+  );
 }
 
 export function getFailed(limit = 50): QueueItem[] {

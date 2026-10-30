@@ -7,9 +7,10 @@ import { getFile } from "../web/files";
 import { sha256File } from "../web/hash";
 import { getActiveContext } from "../web/queue-store";
 import { makeThumb, makeWebPreview } from "../web/thumb";
-import { uploadBlob, uploadPartBlob } from "../web/upload";
+import { UploadHttpError, uploadBlob, uploadPartBlob } from "../web/upload";
 import {
   bumpAttempt,
+  clearMultipartState,
   finishItem,
   getNextPending,
   getQueuedWithoutHash,
@@ -25,7 +26,15 @@ import {
   setState,
 } from "./db";
 import { publishByteTick, publishSyncProgress } from "./progress";
-import { BACKOFF_MS, extFromFilename, extToMediaType, MAX_ATTEMPTS } from "./shared";
+import {
+  BACKOFF_MS,
+  extFromFilename,
+  extToMediaType,
+  MAX_ATTEMPTS,
+  mapWithConcurrency,
+  PART_PRESIGN_BATCH_SIZE,
+  PART_UPLOAD_CONCURRENCY,
+} from "./shared";
 
 const CANCELLED_MSG = "Subida cancelada.";
 
@@ -33,6 +42,25 @@ let running = false;
 let cancelled = false;
 let controller: AbortController | null = null;
 const precheckedHashes = new Set<string>();
+
+type MultipartSession = {
+  id: string;
+  uploadId: string;
+  partSize: number;
+  totalParts: number;
+};
+
+/**
+ * La sesión multipart guardada ya no existe en R2 (lifecycle a 7 días, cierre
+ * desde otro dispositivo o fila apuntando a otra sesión). Paridad con
+ * `processor.ts`: se descarta el journal y se abre una sesión limpia una vez.
+ */
+class MultipartGoneError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MultipartGoneError";
+  }
+}
 
 /** Detiene la pasada en curso: aborta las peticiones/XHR en vuelo. */
 export function cancelQueue() {
@@ -139,22 +167,22 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
 
   // Subida multipart para archivos grandes (> 20 MB)
   if (file.size > MULTIPART_THRESHOLD_BYTES) {
+    const multipartPayload = {
+      sha256,
+      mediaType,
+      mimeType,
+      ext,
+      fileSize: file.size,
+      thumbSize: thumb.bytes,
+      previewSize: preview?.bytes,
+      takenAt: item.created_at,
+      width: thumb.width,
+      height: thumb.height,
+      durationMs: null,
+      thumbhash: thumb.thumbhash,
+    };
     const init = await api.multipartInit(
-      {
-        sha256,
-        mediaType,
-        mimeType,
-        ext,
-        fileSize: file.size,
-        thumbSize: thumb.bytes,
-        previewSize: preview?.bytes,
-        takenAt: item.created_at,
-        width: thumb.width,
-        height: thumb.height,
-        durationMs: null,
-        thumbhash: thumb.thumbhash,
-        uploadId: item.upload_id ?? undefined,
-      },
+      { ...multipartPayload, uploadId: item.upload_id ?? undefined },
       { signal },
     );
     throwIfAborted(signal);
@@ -193,62 +221,140 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
       } catch {}
     }
 
-    const completedMap = new Map(completedParts.map((p) => [p.partNumber, p.etag]));
-    const missingPartNumbers: number[] = [];
-    for (let p = 1; p <= init.totalParts; p++) {
-      if (!completedMap.has(p)) missingPartNumbers.push(p);
-    }
+    let session: MultipartSession = {
+      id: init.id,
+      uploadId: init.uploadId,
+      partSize: init.partSize,
+      totalParts: init.totalParts,
+    };
 
-    if (missingPartNumbers.length > 0) {
-      const { parts: presignedParts } = await api.multipartPresignParts(
-        {
-          id: init.id,
-          uploadId: init.uploadId,
-          partNumbers: missingPartNumbers,
-        },
-        { signal },
-      );
-      throwIfAborted(signal);
+    const uploadMissingParts = async (
+      current: MultipartSession,
+      done: { partNumber: number; etag: string }[],
+    ): Promise<void> => {
+      const doneMap = new Map(done.map((p) => [p.partNumber, p.etag]));
+      const missingPartNumbers: number[] = [];
+      for (let p = 1; p <= current.totalParts; p++) {
+        if (!doneMap.has(p)) missingPartNumbers.push(p);
+      }
+      if (missingPartNumbers.length === 0) return;
 
-      const partSize = init.partSize;
-      let bytesSent = completedParts.length * partSize;
+      // Progreso real con varias partes en vuelo (paridad con nativo).
+      let completedBytes = done.length * current.partSize;
+      const inflightLoaded = new Map<number, number>();
+      const publishProgress = () => {
+        let sent = completedBytes;
+        for (const loaded of inflightLoaded.values()) sent += loaded;
+        publishByteTick(item.asset_id, sent, file.size);
+      };
 
-      for (const part of presignedParts) {
+      // Prefirmado por lotes (paridad con processor.ts): una URL de parte vive
+      // 900 s, así que no se firman 200 de golpe.
+      for (let offset = 0; offset < missingPartNumbers.length; offset += PART_PRESIGN_BATCH_SIZE) {
+        const batch = missingPartNumbers.slice(offset, offset + PART_PRESIGN_BATCH_SIZE);
+
+        let presignedParts: { partNumber: number; url: string }[];
+        try {
+          ({ parts: presignedParts } = await api.multipartPresignParts(
+            { id: current.id, uploadId: current.uploadId, partNumbers: batch },
+            { signal },
+          ));
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 409) {
+            throw new MultipartGoneError(err.message);
+          }
+          throw err;
+        }
         throwIfAborted(signal);
-        const start = (part.partNumber - 1) * partSize;
-        const end = Math.min(file.size, start + partSize);
-        const slice = file.slice(start, end);
 
-        const etag = await uploadPartBlob(
-          part.url,
-          slice,
-          (loaded) => {
-            publishByteTick(item.asset_id, bytesSent + loaded, file.size);
-          },
-          signal,
-        );
+        await mapWithConcurrency(presignedParts, PART_UPLOAD_CONCURRENCY, async (part) => {
+          throwIfAborted(signal);
+          const start = (part.partNumber - 1) * current.partSize;
+          const end = Math.min(file.size, start + current.partSize);
+          const slice = file.slice(start, end);
+          inflightLoaded.set(part.partNumber, 0);
 
-        bytesSent += end - start;
-        completedParts.push({ partNumber: part.partNumber, etag });
-        await setState(item.asset_id, "uploading_original", {
-          parts: JSON.stringify(completedParts),
-          bytes_sent: bytesSent,
+          let etag: string;
+          try {
+            etag = await uploadPartBlob(
+              part.url,
+              slice,
+              (loaded) => {
+                inflightLoaded.set(part.partNumber, loaded);
+                publishProgress();
+              },
+              signal,
+            );
+          } catch (err) {
+            inflightLoaded.delete(part.partNumber);
+            // 404 NoSuchUpload: la MPU murió; reintentar la misma sesión no puede
+            // funcionar nunca.
+            if (err instanceof UploadHttpError && err.status === 404) {
+              throw new MultipartGoneError(
+                `La sesión multipart ya no existe (parte ${part.partNumber}).`,
+              );
+            }
+            throw err;
+          }
+
+          inflightLoaded.delete(part.partNumber);
+          completedBytes += end - start;
+          done.push({ partNumber: part.partNumber, etag });
+          // Journal ordenado: R2 exige las partes ascendentes al completar.
+          await setState(item.asset_id, "uploading_original", {
+            parts: JSON.stringify([...done].sort((a, b) => a.partNumber - b.partNumber)),
+            bytes_sent: completedBytes,
+          });
+          publishProgress();
         });
-        publishByteTick(item.asset_id, bytesSent, file.size);
+      }
+    };
+
+    // Dos pasadas como máximo (ver processor.ts): la segunda solo cubre la MPU
+    // que dejó de existir entre pasadas.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await uploadMissingParts(session, completedParts);
+        break;
+      } catch (err) {
+        if (!(err instanceof MultipartGoneError) || attempt >= 2) throw err;
+        await clearMultipartState(item.asset_id);
+        completedParts = [];
+        const restarted = await api.multipartInit({ ...multipartPayload }, { signal });
+        if (restarted.status === "duplicate") {
+          await finishItem(item.asset_id, "duplicate", {
+            remote_id: restarted.id,
+            bytes_sent: file.size,
+          });
+          useItemProgress.getState().clearItemProgress(item.asset_id);
+          refreshRemoteData();
+          emitStructure();
+          return;
+        }
+        session = {
+          id: restarted.id,
+          uploadId: restarted.uploadId,
+          partSize: restarted.partSize,
+          totalParts: restarted.totalParts,
+        };
+        await setState(item.asset_id, "uploading_original", {
+          remote_id: session.id,
+          upload_id: session.uploadId,
+          parts: "[]",
+          bytes_sent: 0,
+        });
+        emitStructure();
       }
     }
 
+    completedParts.sort((a, b) => a.partNumber - b.partNumber);
     await setState(item.asset_id, "completing", { bytes_sent: file.size });
     emitStructure();
     await api.multipartComplete(
-      {
-        id: init.id,
-        uploadId: init.uploadId,
-        parts: completedParts,
-      },
+      { id: session.id, uploadId: session.uploadId, parts: completedParts },
       { signal },
     );
-    await finishItem(item.asset_id, "done", { remote_id: init.id, bytes_sent: file.size });
+    await finishItem(item.asset_id, "done", { remote_id: session.id, bytes_sent: file.size });
     useItemProgress.getState().clearItemProgress(item.asset_id);
     refreshRemoteData();
     emitStructure();

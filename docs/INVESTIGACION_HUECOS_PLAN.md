@@ -425,6 +425,12 @@ está acreditado.
 **Cierre.** `exit 1` si `errorCount > 0`; job programado con `--verify-sample`; destino separado;
 lifecycle verificado en CI; restore mensual a una base nueva con smoke.
 
+**Estado (2026-10-29).** Cerrado en código: `exit 1` ante cualquier fallo o bucket vacío
+(`scripts/lib/backup-r2-result.mjs` + `scripts/backup-r2-result.test.mjs`), destino separado
+(`photos-backups` con *Guard* en `backup-d1.yml`), verificación semanal
+(`.github/workflows/backup-r2-verify.yml`). Queda el restore mensual firmado, que necesita secrets
+reales y decisión de fecha.
+
 #### I-17 · Sin heartbeat ni alertas; telemetría sin destino
 
 **Evidencia.** El handler solo hace `ctx.waitUntil(runCleanup(env))` (`index.ts:133-135`); no hay

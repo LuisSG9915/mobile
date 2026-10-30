@@ -6,6 +6,8 @@ export type OptimizeVideoOptions = {
   uri: string;
   preset: VideoPreset;
   onProgress?: (progress: number) => void;
+  /** Solo nativo; en web no hay compresión nativa que cancelar. */
+  onCancelId?: (cancellationId: string) => void;
 };
 
 export type OptimizedVideoResult = {
@@ -44,6 +46,10 @@ export async function saveOptimizedVideoToGallery(uri: string, filename: string)
  */
 export async function createVideoPreview(
   _localUri: string,
+  _opts?: { onCancelId?: (cancellationId: string) => void },
 ): Promise<{ uri: string; bytes: number } | null> {
   return null;
 }
+
+/** No-op en web: no hay compresor nativo. */
+export function cancelVideoCompression(_cancellationId: string): void {}

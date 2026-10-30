@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { evaluateBackup, formatBackupSummary } from "./lib/backup-r2-result.mjs";
 
 // Cargar variables de entorno desde apps/api/.dev.vars si existe y no están definidas en el entorno
 function loadLocalDevVars() {
@@ -65,6 +66,7 @@ const outDir = path.resolve(
   getArg("--out", process.env.BACKUP_DIR || "./backups/r2-photos"),
 );
 const prefix = getArg("--prefix", "");
+const allowEmpty = args.includes("--allow-empty");
 const verifySampleIdx = args.indexOf("--verify-sample");
 const isVerifySample = verifySampleIdx !== -1;
 const sampleCount =
@@ -78,7 +80,7 @@ if (!accountId || !accessKeyId || !secretAccessKey) {
     "Por favor define R2_ACCOUNT_ID, R2_ACCESS_KEY_ID y R2_SECRET_ACCESS_KEY en tu entorno o en apps/api/.dev.vars.",
   );
   console.error(
-    "Uso alternativo: node scripts/backup-r2.mjs --account <id> --key <key> --secret <secret> [--bucket <name>] [--out <dir>]",
+    "Uso alternativo: node scripts/backup-r2.mjs --account <id> --key <key> --secret <secret> [--bucket <name>] [--out <dir>] [--verify-sample N] [--allow-empty]",
   );
   process.exit(1);
 }
@@ -204,8 +206,14 @@ async function main() {
     console.log(`Fallidos:          ${failedCount}`);
     console.log("==================================================\n");
 
-    if (failedCount > 0) {
-      process.exit(1);
+    const verdict = evaluateBackup({
+      errorCount: failedCount,
+      objectsCount: objects.length,
+      allowEmpty,
+    });
+    if (!verdict.ok) {
+      console.error(`\n✗ Verificación INCOMPLETA: ${verdict.reason}.`);
+      process.exit(verdict.exitCode);
     }
     return;
   }
@@ -214,6 +222,8 @@ async function main() {
   let downloadedBytes = 0;
   let skippedCount = 0;
   let errorCount = 0;
+  /** @type {string[]} */
+  const failedKeys = [];
 
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
@@ -266,21 +276,34 @@ async function main() {
       process.stdout.write("✓ OK\n");
     } catch (err) {
       errorCount++;
+      failedKeys.push(key);
       process.stdout.write(`✗ ERROR: ${err.message}\n`);
+      // Un archivo a medias en el destino rompería el incremental del próximo
+      // run (mismo tamaño, contenido distinto): se descarta y se reintenta.
+      try {
+        fs.rmSync(localFilePath, { force: true });
+      } catch {
+        // Nada: si no se puede limpiar, el fallo ya está contabilizado.
+      }
     }
   }
 
-  console.log("\n==================================================");
-  console.log("   🎉 Respaldo completado exitosamente            ");
-  console.log("==================================================");
-  console.log(`Archivos escaneados:   ${objects.length}`);
-  console.log(`Archivos omitidos:     ${skippedCount} (ya estaban actualizados)`);
-  console.log(`Archivos descargados:  ${downloadedCount} (${formatBytes(downloadedBytes)})`);
-  if (errorCount > 0) {
-    console.log(`Archivos con error:    ${errorCount}`);
+  const summary = formatBackupSummary({
+    outDir,
+    scanned: objects.length,
+    skipped: skippedCount,
+    downloaded: downloadedCount,
+    downloadedHuman: formatBytes(downloadedBytes),
+    errors: errorCount,
+    failedKeys,
+  });
+  for (const line of summary) console.log(line);
+
+  const verdict = evaluateBackup({ errorCount, objectsCount: objects.length, allowEmpty });
+  if (!verdict.ok) {
+    console.error(`\n✗ Respaldo R2 INCOMPLETO: ${verdict.reason}.`);
+    process.exit(verdict.exitCode);
   }
-  console.log(`Ubicación de copia:    ${outDir}`);
-  console.log("==================================================\n");
 }
 
 main().catch((err) => {

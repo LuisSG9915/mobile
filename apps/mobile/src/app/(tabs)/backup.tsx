@@ -7,7 +7,7 @@ import { toast } from "sonner-native";
 import { resendVerificationEmail, useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
 import { useQueueEvents } from "../../lib/events";
-import { formatBytes, formatRelative } from "../../lib/format";
+import { formatBytes, formatDuration, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import {
@@ -121,20 +121,35 @@ export default function BackupScreen() {
                 : t.backup.synced(stats.done, stats.total)}
           </Text>
           <Text className="text-sm text-neutral-500 text-center">{statusText}</Text>
-          {sync.status === "syncing" && sync.totalBytes > 0 ? (
+          {sync.status === "syncing" && (sync.totalBytes > 0 || sync.currentFileName) ? (
             <View className="w-full gap-1.5">
-              <View className="h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
-                <View
-                  className="h-full bg-accent rounded-full"
-                  style={{
-                    width: `${Math.min(100, (sync.bytesUploaded / sync.totalBytes) * 100)}%`,
-                  }}
-                />
-              </View>
+              {sync.totalBytes > 0 ? (
+                <View className="h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                  <View
+                    className="h-full bg-accent rounded-full"
+                    style={{
+                      width: `${Math.min(100, (sync.bytesUploaded / sync.totalBytes) * 100)}%`,
+                    }}
+                  />
+                </View>
+              ) : null}
               <Text className="text-xs text-neutral-500 text-center" numberOfLines={1}>
-                {t.syncP.bytes(formatBytes(sync.bytesUploaded), formatBytes(sync.totalBytes))}
-                {sync.currentFileName ? ` · ${sync.currentFileName}` : ""}
+                {sync.totalBytes > 0
+                  ? t.syncP.bytes(formatBytes(sync.bytesUploaded), formatBytes(sync.totalBytes))
+                  : ""}
+                {sync.currentFileName
+                  ? `${sync.totalBytes > 0 ? " · " : ""}${sync.currentFileName}`
+                  : ""}
+                {sync.currentPhase ? ` — ${t.syncP.phase(sync.currentPhase)}` : ""}
               </Text>
+              {sync.bytesPerSecond > 0 ? (
+                <Text className="text-xs text-neutral-400 text-center" numberOfLines={1}>
+                  {t.syncP.rate(
+                    formatBytes(sync.bytesPerSecond),
+                    formatDuration(sync.etaSeconds != null ? sync.etaSeconds * 1000 : null),
+                  )}
+                </Text>
+              ) : null}
             </View>
           ) : null}
           {lastBackup ? (

@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MULTIPART_PART_SIZE } from "@photos/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installFakeXhr } from "../test-support/fake-xhr";
 import type { QueueItem, QueueState } from "./types";
 
 /**
@@ -25,6 +27,14 @@ const h = vi.hoisted(() => ({
   multipartInitCalls: 0,
   multipartCompleteCalls: 0,
   completeUploadCalls: 0,
+  /** Status por PUT de parte; se consume en orden y por defecto 200. */
+  partUploadStatuses: [] as number[],
+  partUploads: 0,
+  presignCalls: [] as number[][],
+  /** Partes ya subidas en el momento de cada presignado (prueba el encadenado). */
+  partUploadsAtPresign: [] as number[],
+  presignFailStatus: null as number | null,
+  cleared: [] as string[],
 }));
 
 vi.mock("expo-file-system", () => ({
@@ -33,6 +43,11 @@ vi.mock("expo-file-system", () => ({
     size = h.fileSize;
     constructor(uri: string) {
       this.uri = uri;
+    }
+    // Lo único que usa upload-part.ts: un Blob perezoso que se materializa a
+    // ArrayBuffer. Se devuelve un buffer diminuto: el test no mide memoria.
+    slice(_start?: number, _end?: number) {
+      return { arrayBuffer: async () => new ArrayBuffer(4) };
     }
     delete() {}
   },
@@ -64,10 +79,14 @@ vi.mock("expo-file-system/legacy", () => ({
   cacheDirectory: "file:///cache/",
   readAsStringAsync: async () => "AAAA",
   writeAsStringAsync: async () => {},
-  uploadAsync: async (_url: string) => ({
-    status: 200,
-    headers: { etag: '"etag-part"' },
-  }),
+  uploadAsync: async (_url: string) => {
+    h.partUploads++;
+    const status = h.partUploadStatuses.length ? (h.partUploadStatuses.shift() ?? 200) : 200;
+    return {
+      status,
+      headers: status === 200 ? { etag: '"etag-part"' } : {},
+    };
+  },
 }));
 
 vi.mock("expo-media-library/legacy", () => ({
@@ -118,18 +137,23 @@ vi.mock("../api/client", () => {
         h.completeUploadCalls++;
         return {};
       },
-      multipartInit: async (input: { sha256: string; fileSize: number; previewSize?: number }) => {
+      multipartInit: async (input: {
+        sha256: string;
+        fileSize: number;
+        previewSize?: number;
+        uploadId?: string;
+      }) => {
         h.multipartInitCalls++;
         const failure = h.multipartInitFailures.get(input.sha256);
         if (failure) {
           throw new ApiError(failure.status, failure.code, failure.message);
         }
-        const partSize = 5 * 1024 * 1024;
+        const partSize = MULTIPART_PART_SIZE;
         return {
           status: "upload",
           id: `remote-${input.sha256}`,
-          uploadId: `up-${input.sha256}`,
-          resumed: false,
+          uploadId: input.uploadId ?? `up-${input.sha256}-${h.multipartInitCalls}`,
+          resumed: Boolean(input.uploadId),
           key: `users/u/originals/${input.sha256}.jpg`,
           partSize,
           totalParts: Math.max(1, Math.ceil(input.fileSize / partSize)),
@@ -138,12 +162,20 @@ vi.mock("../api/client", () => {
           ...(input.previewSize ? { preview: { url: "https://r2/preview", headers: {} } } : {}),
         };
       },
-      multipartPresignParts: async ({ partNumbers }: { partNumbers: number[] }) => ({
-        parts: partNumbers.map((partNumber) => ({
-          partNumber,
-          url: `https://r2/part/${partNumber}`,
-        })),
-      }),
+      multipartPresignParts: async ({ partNumbers }: { partNumbers: number[] }) => {
+        h.presignCalls.push([...partNumbers]);
+        h.partUploadsAtPresign.push(h.partUploads);
+        // Solo la primera pasada falla: así se prueba que el reinicio recupera.
+        if (h.presignFailStatus !== null && h.presignCalls.length === 1) {
+          throw new ApiError(h.presignFailStatus, "upload_id_mismatch", "Sesión distinta.");
+        }
+        return {
+          parts: partNumbers.map((partNumber) => ({
+            partNumber,
+            url: `https://r2/part/${partNumber}`,
+          })),
+        };
+      },
       multipartComplete: async () => {
         h.multipartCompleteCalls++;
         return { id: "remote", status: "ready" };
@@ -210,6 +242,9 @@ vi.mock("./db", () => ({
     if (item) item.state = state;
     if (!h.finished.includes(assetId)) h.finished.push(assetId);
   },
+  clearMultipartState: async (assetId: string) => {
+    h.cleared.push(assetId);
+  },
   setItemHash: async () => {},
   bumpAttempt: async () => {},
   setNextRetryAt: async () => {},
@@ -239,6 +274,8 @@ function makeItem(id: string): MockItem {
   };
 }
 
+let fakeXhr: ReturnType<typeof installFakeXhr> | null = null;
+
 type NativeProcessor = typeof import("./processor");
 
 async function importNativeProcessor(): Promise<NativeProcessor> {
@@ -261,6 +298,23 @@ beforeEach(() => {
   h.multipartInitCalls = 0;
   h.multipartCompleteCalls = 0;
   h.completeUploadCalls = 0;
+  h.partUploadStatuses = [];
+  h.partUploads = 0;
+  h.presignCalls = [];
+  h.partUploadsAtPresign = [];
+  h.presignFailStatus = null;
+  h.cleared = [];
+  // Las partes ya no se suben con uploadAsync: van por XHR (upload-part.ts).
+  fakeXhr = installFakeXhr(() => {
+    h.partUploads++;
+    const status = h.partUploadStatuses.length ? (h.partUploadStatuses.shift() ?? 200) : 200;
+    return status === 200 ? { status, etag: '"etag-part"' } : { status };
+  });
+});
+
+afterEach(() => {
+  fakeXhr?.restore();
+  fakeXhr = null;
 });
 
 describe("processQueue nativo: concurrencia", () => {
@@ -368,5 +422,101 @@ describe("processQueue nativo: concurrencia", () => {
     expect(h.multipartCompleteCalls).toBe(1);
     expect(h.completeUploadCalls).toBe(0);
     expect(h.pending[0].state).toBe("done");
+  });
+});
+
+describe("processQueue nativo: reanudación multipart y sesiones muertas", () => {
+  it("reanuda una sesión viva: solo presigna y sube las partes que faltan", async () => {
+    h.fileSize = 40 * 1024 * 1024; // 3 partes de 16 MiB
+    const item = makeItem("video-resume");
+    item.upload_id = "up-existente";
+    item.parts = JSON.stringify([{ partNumber: 1, etag: '"e1"' }]);
+    h.pending = [item];
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(h.cleared).toEqual([]);
+    expect(h.multipartInitCalls).toBe(1);
+    expect(h.presignCalls).toEqual([[2, 3]]);
+    expect(h.partUploads).toBe(2);
+    expect(h.multipartCompleteCalls).toBe(1);
+    expect(item.state).toBe("done");
+  });
+
+  it("un 404 en una parte descarta el journal y completa con una sesión nueva", async () => {
+    h.fileSize = 40 * 1024 * 1024; // 3 partes de 16 MiB
+    const item = makeItem("video-muerta");
+    item.upload_id = "up-muerta";
+    item.parts = JSON.stringify([{ partNumber: 1, etag: '"e1"' }]);
+    h.pending = [item];
+    // 1.ª pasada: la parte 2 devuelve 404 NoSuchUpload. 2.ª pasada: todo 200.
+    h.partUploadStatuses = [404];
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(h.cleared).toEqual(["video-muerta"]);
+    expect(h.multipartInitCalls).toBe(2);
+    expect(h.presignCalls).toEqual([
+      [2, 3],
+      [1, 2, 3],
+    ]);
+    expect(h.multipartCompleteCalls).toBe(1);
+    expect(item.state).toBe("done");
+  });
+
+  it("un 409 al presignar también se trata como sesión muerta", async () => {
+    h.fileSize = 21 * 1024 * 1024;
+    const item = makeItem("video-409");
+    item.upload_id = "up-de-otro-dispositivo";
+    h.pending = [item];
+    h.presignFailStatus = 409;
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(h.cleared).toEqual(["video-409"]);
+    expect(h.multipartInitCalls).toBe(2);
+    expect(h.multipartCompleteCalls).toBe(1);
+    expect(item.state).toBe("done");
+  });
+
+  it("si dos pasadas seguidas dan 404 el intento corta y el siguiente completa la copia", async () => {
+    h.fileSize = 21 * 1024 * 1024;
+    const item = makeItem("video-siempre-404");
+    item.upload_id = "up-muerta";
+    h.pending = [item];
+    h.partUploadStatuses = [404, 404];
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    // Cada intento hace como máximo 2 inits (la original + la reiniciada) y el
+    // reintento externo acota el resto: no hay inits sin fin. Cuando R2 deja de
+    // devolver 404 la copia termina, así que el fallo no es permanente.
+    expect(h.multipartInitCalls).toBeGreaterThanOrEqual(2);
+    expect(h.multipartInitCalls).toBeLessThanOrEqual(6);
+    expect(h.cleared.length).toBeGreaterThanOrEqual(1);
+    expect(h.multipartCompleteCalls).toBe(1);
+    expect(item.state).toBe("done");
+    expect(h.backupPaused).toBe(false);
+  });
+
+  it("prefirma de 12 en 12 y sube cada lote antes de firmar el siguiente", async () => {
+    h.fileSize = 200 * 1024 * 1024; // 13 partes de 16 MiB
+    const item = makeItem("video-200mb");
+    h.pending = [item];
+
+    const processor = await importNativeProcessor();
+    await processor.processQueue({ concurrency: 1, skipBatchPrehash: true });
+
+    expect(h.presignCalls).toEqual([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [13]]);
+    // Cada presignado ocurre cuando el lote anterior ya está subido: ninguna URL
+    // espera 900 s a que le llegue el turno.
+    expect(h.partUploadsAtPresign).toEqual([0, 12]);
+    expect(h.partUploads).toBe(13);
+    expect(h.multipartCompleteCalls).toBe(1);
+    expect(item.state).toBe("done");
   });
 });

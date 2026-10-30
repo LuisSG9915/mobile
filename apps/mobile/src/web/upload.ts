@@ -7,6 +7,20 @@ const STALL_MS = 90_000;
 const WATCHDOG_TICK_MS = 15_000;
 
 /**
+ * Fallo HTTP con el status a la vista, para que el caller distinga el 404 de
+ * una sesión multipart que ya no existe de un 403 de firma caducada. Sin esto,
+ * un PUT a una MPU abortada por el lifecycle de R2 se reintentaba para siempre.
+ */
+export class UploadHttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "UploadHttpError";
+    this.status = status;
+  }
+}
+
+/**
  * PUT directo a la URL prefirmada de R2 con progreso (XHR, porque fetch no
  * expone progreso de subida). Solo se envía content-type; el navegador calcula
  * content-length y la firma SigV4 sigue siendo válida.
@@ -53,7 +67,7 @@ export function uploadBlob(
     xhr.onload = () => {
       stopListening();
       if (xhr.status === 200 || xhr.status === 204) resolve();
-      else reject(new Error(`La subida falló (HTTP ${xhr.status}).`));
+      else reject(new UploadHttpError(xhr.status, `La subida falló (HTTP ${xhr.status}).`));
     };
     xhr.onerror = () => {
       stopListening();
@@ -109,10 +123,18 @@ export function uploadPartBlob(
     xhr.onload = () => {
       stopListening();
       if (xhr.status === 200 || xhr.status === 204) {
-        const rawEtag = xhr.getResponseHeader("ETag") || `"${Date.now()}"`;
+        const rawEtag = xhr.getResponseHeader("ETag");
+        // Sin ETag no se puede ensamblar: inventarlo producía un finalize que R2
+        // rechazaba con parts_mismatch y borraba la fila de metadata entera.
+        if (!rawEtag) {
+          reject(new UploadHttpError(xhr.status, "R2 no devolvió ETag para la parte."));
+          return;
+        }
         resolve(rawEtag);
       } else {
-        reject(new Error(`La subida de la parte falló (HTTP ${xhr.status}).`));
+        reject(
+          new UploadHttpError(xhr.status, `La subida de la parte falló (HTTP ${xhr.status}).`),
+        );
       }
     };
     xhr.onerror = () => {

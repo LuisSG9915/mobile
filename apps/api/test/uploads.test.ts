@@ -387,7 +387,7 @@ describe("uploads/multipart", () => {
     const json = await j(res);
     expect(json.status).toBe("upload");
     expect(json.uploadId).toBeTruthy();
-    expect(json.totalParts).toBe(5); // 25 MB / 5 MB = 5
+    expect(json.totalParts).toBe(2); // 25 MB / 16 MB = 2
     expect(json.thumb).toBeTruthy();
     expect(json.preview).toBeTruthy();
 

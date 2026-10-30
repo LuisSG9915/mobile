@@ -120,6 +120,9 @@ export const useSyncProgress = create<
   filesTotal: 0,
   filesRemaining: 0,
   currentFileName: "",
+  currentPhase: null,
+  bytesPerSecond: 0,
+  etaSeconds: null,
   status: "idle",
   update: (s) => set(s),
 }));
