@@ -52,36 +52,49 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
   // Marcadores de fecha y posiciones dependientes de la altura total y cabeceras
   const dateMarkers = useMemo(() => {
     if (totalHeight <= 0 || sectionHeaders.length === 0) return [];
+    const headerLineMap = new Map<number, number>();
+    for (const l of geometry.lines) {
+      if (l.kind === "header") {
+        headerLineMap.set(l.rowIndex, l.top);
+      }
+    }
     return sectionHeaders.map((header) => {
-      const line = geometry.lines.find(
-        (l) => l.kind === "header" && l.rowIndex === header.rowIndex,
-      );
-      const y = line ? line.top : (header.rowIndex / rows.length) * totalHeight;
+      const lineTop = headerLineMap.get(header.rowIndex);
+      const y = lineTop !== undefined ? lineTop : (header.rowIndex / rows.length) * totalHeight;
       return { rowIndex: header.rowIndex, label: header.label, y };
     });
-  }, [totalHeight, sectionHeaders]);
+  }, [totalHeight, sectionHeaders, geometry.lines, rows.length]);
 
-  // Mapeo rápido de mes a fila de la galería
+  // Mapeo rápido de mes a fila de la galería (recorrido lineal O(N) sin instanciación excesiva)
   const monthToRowIndex = useMemo(() => {
     const map = new Map<string, number>();
+    let currentHeaderRow = 0;
+    let lastTakenAtDay = -1;
+    let lastYm = "";
+
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (r.type === "photo") {
-        const ym = new Date(r.photo.takenAt).toISOString().slice(0, 7);
+      if (r.type === "header") {
+        currentHeaderRow = i;
+      } else if (r.type === "photo") {
+        const taken = r.photo.takenAt;
+        const day = Math.floor(taken / 86_400_000);
+        let ym = lastYm;
+        if (day !== lastTakenAtDay) {
+          lastTakenAtDay = day;
+          const d = new Date(taken);
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+          ym = `${y}-${m}`;
+          lastYm = ym;
+        }
         if (!map.has(ym)) {
-          let target = i;
-          for (let h = i; h >= 0; h--) {
-            if (rows[h]?.type === "header") {
-              target = h;
-              break;
-            }
-          }
-          map.set(ym, target);
+          map.set(ym, currentHeaderRow);
         }
       }
     }
     return map;
-  }, [sectionHeaders, rows]);
+  }, [rows]);
 
   const scrub = useCallback(
     (y: number) => {

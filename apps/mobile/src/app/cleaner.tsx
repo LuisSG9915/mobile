@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import { Check, ChevronLeft, Sparkles, Trash2 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  FlatList,
   Platform,
   Pressable,
   RefreshControl,
@@ -20,7 +21,7 @@ import { t } from "../i18n/es";
 import { formatBytes } from "../lib/format";
 import { deleteLocalAssets, freeSyncedSpace, getSyncedLocal } from "../lib/free-space";
 import { invalidateMediaLifecycleQueries } from "../lib/query-client";
-import { getQueueItems } from "../queue/db";
+import { getLocalAssetIdsByRemoteIds } from "../queue/db";
 import { Button, EmptyState } from "../ui";
 
 export default function CleanerScreen() {
@@ -48,9 +49,8 @@ export default function CleanerScreen() {
   }, [query.data]);
 
   const offerLocalCleanup = (deleteIds: string[]) => {
-    const localIds = getQueueItems()
-      .filter((item) => item.remote_id && deleteIds.includes(item.remote_id))
-      .map((item) => item.asset_id);
+    const localMap = getLocalAssetIdsByRemoteIds(deleteIds);
+    const localIds = Array.from(localMap.values());
     if (localIds.length === 0) return;
     const run = () => {
       void deleteLocalAssets(localIds)
@@ -113,7 +113,10 @@ export default function CleanerScreen() {
 
   const clusters = query.data?.clusters ?? [];
   const totalPhotos = query.data?.totalPhotos ?? 0;
-  const syncedOlder = Platform.OS === "web" ? { assetIds: [], totalBytes: 0 } : getSyncedLocal(30);
+  const syncedOlder = useMemo(
+    () => (Platform.OS === "web" ? { assetIds: [], totalBytes: 0 } : getSyncedLocal(30)),
+    [query.data],
+  );
 
   // Tamaño de las miniaturas en la cuadrícula horizontal
   const thumbSize = Math.min(180, (width - 48) / 2.5);
@@ -146,63 +149,69 @@ export default function CleanerScreen() {
           action={() => router.back()}
         />
       ) : (
-        <ScrollView
-          className="flex-1"
+        <FlatList
+          data={clusters}
+          keyExtractor={(cluster) => cluster.id}
           contentContainerStyle={{ paddingBottom: 100 }}
+          removeClippedSubviews={Platform.OS !== "web"}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={5}
           refreshControl={
             <RefreshControl
               refreshing={query.isRefetching}
               onRefresh={() => void query.refetch()}
             />
           }
-        >
-          {/* Banner de resumen */}
-          {clusters.length > 0 ? (
-            <View className="m-4 p-4 rounded-2xl bg-accent/10 border border-accent/20 flex-row items-center gap-3">
-              <View className="w-10 h-10 rounded-full bg-accent/20 items-center justify-center">
-                <Sparkles size={20} color="#6366f1" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
-                  {clusters.length === 1
-                    ? "1 grupo de fotos detectado"
-                    : `${clusters.length} grupos de fotos detectados`}
-                </Text>
-                <Text className="text-xs text-neutral-500">
-                  {`${totalPhotos} fotos en total. Revisa cuáles quieres conservar.`}
-                </Text>
-              </View>
-            </View>
-          ) : null}
+          ListHeaderComponent={
+            <>
+              {/* Banner de resumen */}
+              {clusters.length > 0 ? (
+                <View className="m-4 p-4 rounded-2xl bg-accent/10 border border-accent/20 flex-row items-center gap-3">
+                  <View className="w-10 h-10 rounded-full bg-accent/20 items-center justify-center">
+                    <Sparkles size={20} color="#6366f1" />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
+                      {clusters.length === 1
+                        ? "1 grupo de fotos detectado"
+                        : `${clusters.length} grupos de fotos detectados`}
+                    </Text>
+                    <Text className="text-xs text-neutral-500">
+                      {`${totalPhotos} fotos en total. Revisa cuáles quieres conservar.`}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
 
-          {/* Sugerencia de liberación de espacio local (> 30 días) */}
-          {syncedOlder.assetIds.length > 0 ? (
-            <View className="mx-4 mb-4 p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 flex-row items-center justify-between">
-              <View className="flex-1 mr-3">
-                <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
-                  {`Liberar ${formatBytes(syncedOlder.totalBytes)} en tu dispositivo`}
-                </Text>
-                <Text className="text-xs text-neutral-500">
-                  {`${syncedOlder.assetIds.length} fotos con más de 30 días ya respaldadas en la nube.`}
-                </Text>
-              </View>
-              <Button
-                size="sm"
-                label="Liberar"
-                onPress={() => {
-                  void freeSyncedSpace(30, true).then((n) => {
-                    if (n > 0) {
-                      toast.success(`Se liberaron ${n} fotos locales.`);
-                      void invalidateMediaLifecycleQueries(qc);
-                    }
-                  });
-                }}
-              />
-            </View>
-          ) : null}
-
-          {/* Lista de grupos/clusters */}
-          {clusters.map((cluster) => {
+              {/* Sugerencia de liberación de espacio local (> 30 días) */}
+              {syncedOlder.assetIds.length > 0 ? (
+                <View className="mx-4 mb-4 p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50 flex-row items-center justify-between">
+                  <View className="flex-1 mr-3">
+                    <Text className="text-sm font-semibold text-neutral-900 dark:text-white">
+                      {`Liberar ${formatBytes(syncedOlder.totalBytes)} en tu dispositivo`}
+                    </Text>
+                    <Text className="text-xs text-neutral-500">
+                      {`${syncedOlder.assetIds.length} fotos con más de 30 días ya respaldadas en la nube.`}
+                    </Text>
+                  </View>
+                  <Button
+                    size="sm"
+                    label="Liberar"
+                    onPress={() => {
+                      void freeSyncedSpace(30, true).then((n) => {
+                        if (n > 0) {
+                          toast.success(`Se liberaron ${n} fotos locales.`);
+                          void invalidateMediaLifecycleQueries(qc);
+                        }
+                      });
+                    }}
+                  />
+                </View>
+              ) : null}
+            </>
+          }
+          renderItem={({ item: cluster }) => {
             const dateStr = cluster.dateGroup;
             return (
               <View
@@ -267,8 +276,8 @@ export default function CleanerScreen() {
                 </ScrollView>
               </View>
             );
-          })}
-        </ScrollView>
+          }}
+        />
       )}
 
       {/* Barra de acción inferior flotante */}

@@ -17,6 +17,7 @@ import {
   getQueueDb,
   getQueuedWithoutHash,
   getQueuedWithSha,
+  getQueueStats,
   isBackupPaused,
   type QueueItem,
   recoverInterrupted,
@@ -26,6 +27,7 @@ import {
   setNextRetryAt,
   setState,
 } from "./db";
+import { startUploadForeground, stopUploadForeground } from "./foreground";
 import { sha256File } from "./hash";
 import { publishByteTick, publishSyncProgress } from "./progress";
 import {
@@ -116,6 +118,7 @@ export function cancelQueue() {
   cancelled = true;
   for (const task of activeUploadTasks) void task.cancelAsync().catch(() => {});
   for (const controller of activePartControllers) controller.abort();
+  stopUploadForeground();
 }
 
 export function isRunning() {
@@ -349,6 +352,10 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
       return;
     }
 
+    // /init solo responde si la cuenta ya puede subir: el bloqueo por correo
+    // sin verificar dejó de aplicar. Limpiar el aviso persistido (si no, la
+    // tarjeta «Verifica tu correo» se queda pegada tras verificar).
+    setNeedsEmailVerification(false);
     const canResume = init.resumed === true;
     await setState(item.asset_id, "uploading_thumb", {
       remote_id: init.id,
@@ -551,6 +558,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
     return;
   }
 
+  setNeedsEmailVerification(false);
   await setState(item.asset_id, "uploading_thumb", { remote_id: init.id });
   emitStructure();
   await uploadFile(init.thumb, thumb.uri);
@@ -728,6 +736,10 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   const inFlight = new Set<string>();
   let videosInFlight = 0;
   precheckedHashes.clear();
+  // Primer plano del SO mientras se sube: si el usuario minimiza, la cola
+  // sigue viva y la notificación muestra el progreso. Se arranca aquí (app
+  // visible) porque Android 12+ prohíbe iniciar un FGS desde segundo plano.
+  if (getQueueStats().pending > 0 && !isBackupPaused()) startUploadForeground();
   try {
     // La app pudo morir a mitad de un item (kill): devolver los estados
     // transitorios a queued con bytes_sent=0 antes de elegir el siguiente.
@@ -864,5 +876,6 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
     clearThumbCache();
     flushRemoteData();
     publishSyncProgress(false);
+    stopUploadForeground();
   }
 }

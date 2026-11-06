@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS queue (
   PRIMARY KEY (user_id, asset_id)
 );
 CREATE INDEX IF NOT EXISTS queue_state ON queue(user_id, state, updated_at);
+CREATE INDEX IF NOT EXISTS queue_user_remote ON queue(user_id, remote_id);
+CREATE INDEX IF NOT EXISTS queue_user_sha ON queue(user_id, sha256);
 
 CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
@@ -92,12 +94,20 @@ function migrateMultipartColumns(db: SQLite.SQLiteDatabase): void {
   }
 }
 
+function migratePerformanceIndices(db: SQLite.SQLiteDatabase): void {
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS queue_user_remote ON queue(user_id, remote_id);
+    CREATE INDEX IF NOT EXISTS queue_user_sha ON queue(user_id, sha256);
+  `);
+}
+
 export function getQueueDb(): SQLite.SQLiteDatabase {
   if (!dbInstance) {
     dbInstance = SQLite.openDatabaseSync("photos_queue.db");
     dbInstance.execSync(DDL);
     migrateToUserScope(dbInstance);
     migrateMultipartColumns(dbInstance);
+    migratePerformanceIndices(dbInstance);
   }
   return dbInstance;
 }
@@ -390,7 +400,7 @@ export function getPendingItems(limit = 100): QueueItem[] {
 }
 
 /** Todos los items de la cola (incluye done/duplicate) para la galería híbrida. */
-export function getQueueItems(limit = 2000, offset = 0): QueueItem[] {
+export function getQueueItems(limit = 20_000, offset = 0): QueueItem[] {
   if (offset > 0) {
     return getQueueDb().getAllSync<QueueItem>(
       "SELECT * FROM queue WHERE user_id IS ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -444,6 +454,44 @@ export async function recoverInterrupted(): Promise<void> {
      WHERE user_id IS ? AND state IN ('hashing','thumbnailing','init','uploading_thumb','uploading_original','completing')`,
     [Date.now(), activeUserId],
   );
+}
+
+/** Comprueba si existe copia local enlazada a un ID remoto mediante el índice de SQLite. */
+export function hasLocalCopySync(remoteId: string): boolean {
+  const row = getQueueDb().getFirstSync<{ asset_id: string }>(
+    "SELECT asset_id FROM queue WHERE user_id IS ? AND remote_id = ? AND state IN ('done','duplicate') LIMIT 1",
+    [activeUserId, remoteId],
+  );
+  return Boolean(row);
+}
+
+/** Devuelve el asset_id local de un elemento remoto respaldado o null. */
+export function getLocalAssetIdByRemoteId(remoteId: string): string | null {
+  const row = getQueueDb().getFirstSync<{ asset_id: string }>(
+    "SELECT asset_id FROM queue WHERE user_id IS ? AND remote_id = ? AND state IN ('done','duplicate') LIMIT 1",
+    [activeUserId, remoteId],
+  );
+  return row?.asset_id ?? null;
+}
+
+/** Mapea una lista de remote_ids a sus asset_ids locales correspondientes. */
+export function getLocalAssetIdsByRemoteIds(remoteIds: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!remoteIds.length) return map;
+  const db = getQueueDb();
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < remoteIds.length; i += CHUNK_SIZE) {
+    const chunk = remoteIds.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = db.getAllSync<{ asset_id: string; remote_id: string }>(
+      `SELECT asset_id, remote_id FROM queue WHERE user_id IS ? AND remote_id IN (${placeholders}) AND state IN ('done','duplicate')`,
+      [activeUserId, ...chunk],
+    );
+    for (const r of rows) {
+      if (r.remote_id && r.asset_id) map.set(r.remote_id, r.asset_id);
+    }
+  }
+  return map;
 }
 
 /** En nativo los getters leen SQLite en vivo: refrescar no hace falta. */

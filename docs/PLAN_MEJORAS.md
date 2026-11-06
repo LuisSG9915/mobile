@@ -122,7 +122,7 @@ marco de referencia.
 | **H1.6** | Seguridad mínima | IDOR cerrado; álbum público limitado (500), `SHARE_LIMITER`, `allowDownload=false` por defecto, URLs acotadas; CSP/HSTS web; reenvío de verificación **con `callbackURL` a la app/web**; smoke sin credenciales en repo | Tests en [verification.test.ts](../apps/mobile/src/auth/verification.test.ts) y [auth.test.ts](../apps/api/test/auth.test.ts); 3 tests shares/IDOR; **falta**: `AUTH_LIMITER` desplegado, secreto de Resend con dominio verificado y headers en prod | S3 | `in_progress` |
 | **H1.7** | Un fallo avisa | `cron_last_run` + workflow `cron-heartbeat.yml`; **incluye I-07**: cuota agregada por usuario en el cron (hecho); SLO en `docs/ops/SLO.md` | Heartbeat y batching testeados en [cron-heartbeat.test.ts](../apps/api/test/cron-heartbeat.test.ts); workflow validado estáticamente; **falta**: prueba de alerta en prod (requiere secrets) | S3 | `in_progress` |
 | **H1.8** | Subir un vídeo tarda lo que tarda la red, y el progreso es por byte | Quitar base64 del camino multipart (**U1 ✅**); partes de 16 MiB con 3 en vuelo (**U2 ✅**); prefirmar por lotes (**U3 ✅**); MB/s y ETA dentro de la proyección existente (**U4 ✅**). Detalle y criterios en §3.1 | Código y tests de U1–U4 cerrados: parte en `ArrayBuffer` sin base64 ([`upload-part.ts`](../apps/mobile/src/queue/upload-part.ts)), pool de 3 con partes de 16 MiB y prefirmado por lotes de 12 ([`shared.ts`](../apps/mobile/src/queue/shared.ts), [`processor.ts`](../apps/mobile/src/queue/processor.ts)), velocidad y ETA en la ventana móvil de [`progress.ts`](../apps/mobile/src/queue/progress.ts). **Falta**: medición antes/después con 100 MB y 500 MB en Wi-Fi y LTE anotada en [findings.json](testing/findings.json) — requisito para cerrar la fila | S2 | `in_progress` |
-| **H1.9** | La app no promete lo que el SO no da | Fase 0 de §3.2 («no perder nada», sin rebuild): retirar `FOREGROUND_SERVICE_DATA_SYNC` de [app.json](../apps/mobile/app.json) (declarado, sin servicio que lo use); nota de Android igual a `noteIos` en [es.ts](../apps/mobile/src/i18n/es.ts); journal de partes con ETags en la cola existente + reconciliación por `HEAD`/`ListParts` al arrancar; decisión y coste de la Fase 1 (`upload-engine` nativo) escritos en [decisions.md](decisions.md) | `app.json` sin permisos huérfanos; matar la app a mitad de una subida multipart y verificar que al reabrir solo sube lo que falta; decisión de Fase 1 ya escrita en `decisions.md` (2026-10-29) | S2–S3 | `todo` |
+| **H1.9** | La subida sigue en segundo plano en Android, con límites honestos | Foreground service `dataSync` en módulo local Expo ([`modules/upload-foreground`](../apps/mobile/modules/upload-foreground)): mantiene el proceso y un wake lock parcial mientras `processQueue` sube; notificación de progreso ≤1/s con canal propio, parada al vaciar la cola y `onTimeout` de Android 15 (pausa visible + aviso). Permiso `POST_NOTIFICATIONS` contextual en onboarding y al reanudar. Copy de Android en [es.ts](../apps/mobile/src/i18n/es.ts) y nota en Respaldo. La cola sigue en JS: no es el `upload-engine` nativo de §3.2(c) | Servicio verificado en dispositivo (Android 12): `isForeground=true`, `foregroundServiceType=dataSync`, wake lock `Photos::upload`, supervivencia a Home, pantalla apagada y `dumpsys deviceidle force-idle`; **subida real en segundo plano** de 2 MB con pantalla apagada (12 ítems más en 20 s y notificación 471/882 · 984 KB/s); 5 tests de puente + 4 de texto. **Falta**: timeout de 6 h en un Android 15 e iOS. `RESEND_API_KEY` no está configurado en el Worker: la verificación de la cuenta se hizo marcando `email_verified` en D1 (el envío solo se loguea) | S2–S3 | `in_progress` |
 
 **DoD de H1:** `pnpm lint`, `pnpm typecheck`, `pnpm test` y `pnpm test:pipeline` verdes; los tests
 nuevos fallan en el código viejo y pasan en el nuevo; `v1.1.0` publicado; restore drill firmado; 0 P0
@@ -187,6 +187,19 @@ entra en (b) como simplificación, no como arreglo del segundo plano.
 
 Recomendación: (a) + (b) en H1; (c) solo si el uso real demuestra que la gente sube vídeos largos con
 la app cerrada — y entonces, con la medición de H1.8 en la mano para justificar las semanas.
+
+**Implementado el 2026-11-06 (Android, alcance acotado):** (c) parcial, sin motor nativo de subida.
+[`modules/upload-foreground`](../apps/mobile/modules/upload-foreground) es un módulo Expo local con un
+`Service` `dataSync` que arranca `processQueue` en primer plano (notificación + wake lock parcial) y se
+para al terminar la pasada. La cola y el transporte siguen en JS: si el usuario desliza la app fuera de
+recientes, el servicio se detiene y el trabajo se recupera al abrirla (WorkManager/`recoverInterrupted`).
+En Android 15 el sistema limita `dataSync` a 6 h/24 h; `onTimeout` pausa la cola y deja un aviso
+permanente. No sustituye a la Fase 1 completa (UIDT ni `URLSession` de iOS), que queda pendiente.
+Probado en un Android 12 físico: con el servicio ya arrancado y el wake lock tomado, la cola sube con
+la pantalla apagada (12 ítems en 20 s, 984 KB/s). Si el usuario apaga la pantalla en el hueco entre el
+tap y `onStartCommand`, el SO puede demorar el arranque (se midió `startForegroundDelayMs≈47 s`): el
+wake lock solo protege a partir de que el servicio existe, por eso `runBackupPass` lo arranca antes de
+escanear cuando ya hay trabajo pendiente.
 
 ---
 

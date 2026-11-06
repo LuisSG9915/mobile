@@ -1,0 +1,3 @@
+# Artefactos de Gradle del módulo local (el APK se genera en apps/mobile/android).
+android/build/
+android/.gradle/

@@ -202,6 +202,26 @@ trabajo escondido. Los que había se asignaron a su fila del tablero y a `docs/o
 - Escaneo incremental en MediaLibrary: resuelto con filtro `createdAfter` (ventana 24 h) y soporte `forceScan`.
 - Borrado en lote en Cron de D1 (`inArray`) y eliminación de OOM en sweep de R2.
 
+## Subida en segundo plano en Android (2026-11-06)
+
+- **Se construye un foreground service `dataSync`, no el `upload-engine` completo.** La decisión del
+  2026-10-29 descartaba la Fase 1 por coste; el requisito cambió y ahora hay dispositivo para probar.
+  El alcance mínimo que resuelve «minimizo y sigue subiendo» es un `Service` que eleva el proceso a
+  primer plano y mantiene un `PARTIAL_WAKE_LOCK`; la cola, el hashing, las miniaturas y el transporte
+  siguen en JS. No se reescribe la subida en Kotlin.
+- **El servicio arranca desde primer plano, antes de que el usuario minimice.** Android 12+ prohíbe
+  `startForegroundService` desde segundo plano; por eso `processQueue` lo arranca al empezar la pasada
+  y la UI solo lo ve como una notificación más mientras la app está abierta. Si el rechazo ocurre
+  igualmente, el puente aplica un cooldown de 60 s y reintenta al volver a primer plano.
+- **Se para al terminar la pasada, no al minimizar.** Así el mismo servicio cubre la subida en primer
+  plano y en segundo plano sin transiciones frágiles; al vaciarse la cola la notificación desaparece.
+- **Límites asumidos y visibles:** Android 15+ corta `dataSync` a las 6 h/24 h (`onTimeout` pausa la
+  cola y avisa); deslizar la app fuera de recientes para el servicio (`stopWithTask=true`) y la cola se
+  recupera al abrir; sin `POST_NOTIFICATIONS` el servicio sigue vivo pero la notificación solo se ve en
+  el Administrador de tareas. iOS sigue con `expo-background-task`/nota del sistema.
+- **Descartado por ahora:** UIDT (`setUserInitiated`) y subir el transporte a Kotlin. Añaden semanas de
+  nativo y revisión de Play sin resolver el caso «app cerrada por completo», que ningún API de JS da.
+
 ## Invariantes de integridad (subida multipart)
 
 - **Una sesión multipart muerta se detecta y se abandona, no se reintenta.** R2 aborta las MPU

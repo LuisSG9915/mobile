@@ -1,6 +1,11 @@
 import * as MediaLibrary from "expo-media-library/legacy";
 import { api } from "../api/client";
-import { getQueueItems, removeQueueItems } from "../queue/db";
+import {
+  getLocalAssetIdByRemoteId,
+  getQueueItems,
+  hasLocalCopySync,
+  removeQueueItems,
+} from "../queue/db";
 import { useLibraryEvents, useQueueEvents } from "./events";
 
 /**
@@ -33,6 +38,13 @@ export function getSyncedLocal(olderThanDays?: number): {
   };
 }
 
+export class RemoteIntegrityError extends Error {
+  constructor(message = "No se pudo verificar el respaldo remoto.") {
+    super(message);
+    this.name = "RemoteIntegrityError";
+  }
+}
+
 /**
  * Verifica la existencia e integridad remota en R2/D1 mediante el endpoint
  * /uploads/check-hashes antes de borrar cualquier archivo local.
@@ -44,15 +56,25 @@ export async function verifyRemoteIntegrity(
   const valid = items.filter((i) => Boolean(i.sha256 && i.asset_id));
   if (!valid.length) return [];
   const hashes = Array.from(new Set(valid.map((i) => i.sha256 as string)));
-  try {
-    const res = await api.checkHashes(hashes);
-    const existingSet = new Set(res.existing.map((e) => e.sha256));
-    return valid.filter((i) => existingSet.has(i.sha256 as string)).map((i) => i.asset_id);
-  } catch {
-    // Si la API no está disponible o falla la verificación, abortamos para proteger los archivos
-    return [];
+  const existingSet = new Set<string>();
+  const CHUNK_SIZE = 250;
+  for (let i = 0; i < hashes.length; i += CHUNK_SIZE) {
+    const chunk = hashes.slice(i, i + CHUNK_SIZE);
+    try {
+      const res = await api.checkHashes(chunk);
+      for (const e of res.existing) {
+        existingSet.add(e.sha256);
+      }
+    } catch (err) {
+      throw new RemoteIntegrityError(
+        err instanceof Error ? err.message : "Error al verificar integridad remota",
+      );
+    }
   }
+  return valid.filter((i) => existingSet.has(i.sha256 as string)).map((i) => i.asset_id);
 }
+
+
 
 /**
  * ¿Queda una copia local del elemento remoto? Cierto si la cola conserva la
@@ -60,9 +82,7 @@ export async function verifyRemoteIntegrity(
  * (Si el asset ya se borró del sistema, deleteAssetsAsync devolverá false.)
  */
 export function hasLocalCopy(remoteId: string): boolean {
-  return getQueueItems().some(
-    (i) => i.remote_id === remoteId && (i.state === "done" || i.state === "duplicate"),
-  );
+  return hasLocalCopySync(remoteId);
 }
 
 /**
@@ -96,11 +116,9 @@ export async function deleteLocalAsset(assetId: string): Promise<boolean> {
  * había copia local o el usuario canceló el diálogo del sistema.
  */
 export async function deleteLocalCopy(remoteId: string): Promise<boolean> {
-  const item = getQueueItems().find(
-    (i) => i.remote_id === remoteId && (i.state === "done" || i.state === "duplicate"),
-  );
-  if (!item) return false;
-  return deleteLocalAsset(item.asset_id);
+  const assetId = getLocalAssetIdByRemoteId(remoteId);
+  if (!assetId) return false;
+  return deleteLocalAsset(assetId);
 }
 
 /**

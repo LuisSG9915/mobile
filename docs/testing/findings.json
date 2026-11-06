@@ -270,7 +270,7 @@
     "severity": "alta",
     "status": "mejora",
     "evidence": "Huawei LMR-LX9: dumpsys meminfo TOTAL PSS ~800-908MB (Private Other 316MB, Graphics 207MB, Native 143MB), SWAP PSS >100MB, TRIM_MEMORY_RUNNING_MODERATE cada ~90s en logcat. El teléfono entero se siente inestable/lento con la app abierta. Post-fix (Huawei real): antes el SO mataba la app en fg durante scroll de videos (SWAP_KillDecision); después sobrevive al mismo estrés. PSS ~547MB estable (vs ~900MB), Private Other 62MB (vs 316MB), Native Heap 134MB (vs 170MB). Queda por atacar el grafo JS de ~20k items en memoria.",
-    "proposal": "Hecho: decodeFormat rgb_565 (mitad por bitmap), width/height acotados a celda, drawDistance 2x->1x viewport, memory-disk cache, clearMemoryCache al minimizar. Pendiente mayor: paginar el grafo HybridPhoto de 20k items en lugar de materializarlo completo.",
+    "proposal": "Hecho: decodeFormat rgb_565, width/height acotados, drawDistance 1x, memory-disk cache, clearMemoryCache al minimizar. Fase 1: tope 20k->8k (LOCAL_ASSETS_CAP). Fase 2: ventana de 500 items con carga por cursor (listLocalAssetsPage) + loadMoreLocal en scroll para el caso 'toda la biblioteca'; álbumes/álbumes con flag siguen carga completa acotada. Pendiente: reconciliación/caché para modo ventana y paginación del lado remoto coordinada.",
     "effort": "L",
     "relatedTests": []
   },
@@ -310,7 +310,7 @@
   {
     "id": "H-028",
     "title": "/（FlashList 2.0.2 ）",
-    "status": "",
+    "status": "mejora",
     "evidence": "：→X'Todo'，'Videos'，uiautomator  ScrollView 1（）， local=807/remote=719→1161  FlashList ；，。",
     "rootCause": "：① use-hybrid-gallery localAssetsCache ， 'all|synced'  syncedAlbumIds ；② FlashList 2.0.2  data （1161→2→1161），。",
     "fix": "① localAssetsCache  Map  scopeKey 3，，；② index.tsx  FlashList  key={filter|album|synced|before|columns}，。：→X、Todo→Videos→Todo 。",

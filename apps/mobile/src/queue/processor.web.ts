@@ -198,6 +198,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
       return;
     }
 
+    setNeedsEmailVerification(false);
     const canResume = init.resumed === true;
     await setState(item.asset_id, "uploading_thumb", {
       remote_id: init.id,
@@ -393,6 +394,7 @@ async function processItem(item: QueueItem, signal: AbortSignal): Promise<void> 
     return;
   }
 
+  setNeedsEmailVerification(false);
   await setState(item.asset_id, "uploading_thumb", { remote_id: init.id });
   emitStructure();
   await uploadBlob(init.thumb, thumb.blob, undefined, signal);

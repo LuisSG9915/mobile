@@ -6,7 +6,8 @@ import { useEffect } from "react";
 import { ActivityIndicator, Pressable, Share, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { Toaster } from "sonner-native";
+import { Toaster, toast } from "sonner-native";
+import { onAuthError } from "../api/client";
 import { useSession } from "../auth/client";
 import { queryClient } from "../lib/query-client";
 import {
@@ -17,6 +18,7 @@ import {
   setTelemetryUser,
 } from "../lib/telemetry";
 import { registerBackupTask } from "../queue/background";
+import { setBackupPaused } from "../queue/db";
 
 initTelemetry();
 
@@ -68,6 +70,15 @@ function RootNavigator() {
 export default function RootLayout() {
   useEffect(() => {
     void registerBackupTask();
+    let lastToastTs = 0;
+    return onAuthError(() => {
+      setBackupPaused(true);
+      const now = Date.now();
+      if (now - lastToastTs > 10_000) {
+        lastToastTs = now;
+        toast.error("Tu sesión ha expirado. Por favor, inicia sesión de nuevo.");
+      }
+    });
   }, []);
 
   return (

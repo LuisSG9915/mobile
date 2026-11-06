@@ -17,6 +17,7 @@ import {
 } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -57,9 +58,11 @@ export default function AlbumDetailScreen() {
     enabled: Boolean(albumId),
   });
 
-  const timelineQuery = useQuery({
+  const timelineQuery = useInfiniteQuery({
     queryKey: ["timeline-for-album"],
-    queryFn: () => api.timeline(undefined, 200),
+    queryFn: ({ pageParam }) => api.timeline(pageParam, 60),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: addPhotosModalVisible,
   });
 
@@ -214,8 +217,15 @@ export default function AlbumDetailScreen() {
   const itemSize = (width - gap * (numColumns - 1)) / numColumns;
 
   const items = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
-  const existingIds = new Set(items.map((i) => i.id));
-  const availableToAdd = (timelineQuery.data?.items ?? []).filter((m) => !existingIds.has(m.id));
+  const existingIds = useMemo(() => new Set(items.map((i) => i.id)), [items]);
+  const allTimelineItems = useMemo(
+    () => timelineQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [timelineQuery.data],
+  );
+  const availableToAdd = useMemo(
+    () => allTimelineItems.filter((m) => !existingIds.has(m.id)),
+    [allTimelineItems, existingIds],
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top", "bottom"]}>
@@ -484,7 +494,7 @@ export default function AlbumDetailScreen() {
             </Pressable>
           </View>
 
-          {availableToAdd.length === 0 ? (
+          {availableToAdd.length === 0 && !timelineQuery.isLoading ? (
             <View className="flex-1 justify-center px-6">
               <Text className="text-center text-neutral-500">
                 Todas las fotos de tu biblioteca ya están en este álbum.
@@ -496,6 +506,19 @@ export default function AlbumDetailScreen() {
               keyExtractor={(item) => item.id}
               numColumns={numColumns}
               key={numColumns}
+              onEndReached={() => {
+                if (timelineQuery.hasNextPage && !timelineQuery.isFetchingNextPage) {
+                  void timelineQuery.fetchNextPage();
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={
+                timelineQuery.isFetchingNextPage ? (
+                  <View className="py-4 items-center justify-center">
+                    <ActivityIndicator size="small" color="#4f46e5" />
+                  </View>
+                ) : null
+              }
               renderItem={({ item }: { item: TimelineItem }) => {
                 const isSelected = selectedToAdd.includes(item.id);
                 return (

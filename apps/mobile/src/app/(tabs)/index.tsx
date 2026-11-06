@@ -62,6 +62,7 @@ import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { isBackupPaused, retryFailed, setBackupPaused } from "../../queue/db";
 import { allowUploadOnCellularOnce, isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
+import { mapWithConcurrency } from "../../queue/shared";
 import { EmptyState, SelectAlbumsModal, SyncBadge } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { FastScrubber, ymToEndOfMonthIso } from "../../ui/FastScrubber";
@@ -315,11 +316,8 @@ export default function GalleryScreen() {
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.
   const [timelineBefore, setTimelineBefore] = useState<string | undefined>(undefined);
-  const { photos, rows, query, refreshLocal } = useHybridGallery(
-    timelineFilter,
-    albumFilter,
-    timelineBefore,
-  );
+  const { photos, rows, query, refreshLocal, loadMoreLocal, localHasMore, localLoadingMore } =
+    useHybridGallery(timelineFilter, albumFilter, timelineBefore);
 
   const listRef = useRef<FlashListRef<GalleryRow>>(null);
   const gridRef = useRef<View>(null);
@@ -706,7 +704,9 @@ export default function GalleryScreen() {
       const runDeleteRemote = async () => {
         setBusyAction(true);
         try {
-          await Promise.all(remoteIds.map((id) => api.deleteMedia(id)));
+          await mapWithConcurrency(remoteIds, 5, async (id) => {
+            await api.deleteMedia(id);
+          });
           toast.success(t.gallery.deletedN(n));
           setSelected(null);
           void query.refetch();
@@ -758,7 +758,9 @@ export default function GalleryScreen() {
           await deleteLocalAssets(localAssetIds).catch(() => {});
         }
         if (remoteIds.length > 0) {
-          await Promise.all(remoteIds.map((id) => api.deleteMedia(id)));
+          await mapWithConcurrency(remoteIds, 5, async (id) => {
+            await api.deleteMedia(id);
+          });
         }
         toast.success(t.gallery.deletedN(selectedPhotos.length));
         setSelected(null);
@@ -1106,6 +1108,7 @@ export default function GalleryScreen() {
               scrollEventThrottle={16}
               onEndReached={() => {
                 if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
+                if (localHasMore && !localLoadingMore) void loadMoreLocal();
               }}
               onEndReachedThreshold={0.8}
               refreshControl={

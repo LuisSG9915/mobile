@@ -31,7 +31,7 @@ import { t } from "../../i18n/es";
 import { type DeviceAlbum, listLocalAlbums } from "../../lib/local-assets";
 import { useSettings } from "../../lib/store";
 import { cancelQueue } from "../../queue/processor";
-import { scanLibrary } from "../../queue/scanner";
+import { runBackupPass } from "../../queue/runner";
 import { Button } from "../../ui";
 
 const isWeb = Platform.OS === "web";
@@ -108,20 +108,20 @@ export default function AlbumsScreen() {
       toast.info(`"${album.title}" excluido del carrusel y respaldo`);
     }
     cancelQueue();
-    void scanLibrary({ forceScan: true });
+    void runBackupPass({ forceScan: true });
   };
 
   const handleSelectAll = () => {
     syncAllAlbums();
     toast.success("Todos los álbumes incluidos en el carrusel y respaldo");
-    void scanLibrary({ forceScan: true });
+    void runBackupPass({ forceScan: true });
   };
 
   const handleDeselectAll = () => {
     syncNoAlbums();
     toast.info("Todos los álbumes excluidos del carrusel y respaldo");
     cancelQueue();
-    void scanLibrary({ forceScan: true });
+    void runBackupPass({ forceScan: true });
   };
 
   const handleOpenLocalAlbum = (album: DeviceAlbum) => {

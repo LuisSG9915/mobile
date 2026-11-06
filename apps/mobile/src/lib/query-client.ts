@@ -2,7 +2,19 @@ import { QueryClient } from "@tanstack/react-query";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 30_000, retry: 2 },
+    queries: {
+      staleTime: 30_000,
+      retry: (failureCount, error) => {
+        const status =
+          error && typeof error === "object" && "status" in error
+            ? (error as { status: unknown }).status
+            : undefined;
+        if (typeof status === "number" && [401, 403, 404].includes(status)) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+    },
   },
 });
 

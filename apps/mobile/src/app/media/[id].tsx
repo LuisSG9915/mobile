@@ -1193,13 +1193,45 @@ export default function MediaViewer() {
     heartOpacity.value = withDelay(400, withTiming(0, { duration: 250 }));
   };
 
-  const handleDoubleTap = () => {
+  const handleDoubleTap = useCallback(() => {
     hapticLight();
     triggerHeartAnimation();
     if (!isFav && !isLocalItem) {
       fav.mutate(activeId);
     }
-  };
+  }, [isFav, isLocalItem, fav, activeId]);
+
+  const handleSingleTap = useCallback(() => {
+    setImmersive((v) => !v);
+  }, []);
+
+  const renderCarouselItem = useCallback(
+    ({ item, index }: { item: CarouselItem; index: number }) => (
+      <View style={{ width, height: "100%" }}>
+        <MediaPage
+          item={item}
+          active={index === activeIndex}
+          near={Math.abs(index - activeIndex) <= 1}
+          onDismiss={onDismiss}
+          onDoubleTap={handleDoubleTap}
+          onSingleTap={handleSingleTap}
+          onZoomChange={index === activeIndex ? setZoomed : undefined}
+          backdropOpacity={backdropOpacity}
+          onDownload={onDownload}
+        />
+      </View>
+    ),
+    [
+      width,
+      activeIndex,
+      onDismiss,
+      handleDoubleTap,
+      handleSingleTap,
+      setZoomed,
+      backdropOpacity,
+      onDownload,
+    ],
+  );
 
   const contextLocation = activeItem?.city ?? detail.data?.city ?? d?.locationName ?? null;
   const contextText = [d ? formatDateTime(d.takenAt) : null, contextLocation ?? d?.cameraModel]
@@ -1361,30 +1393,17 @@ export default function MediaViewer() {
             showsHorizontalScrollIndicator={false}
             initialScrollIndex={foundIndex >= 0 ? foundIndex : undefined}
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
-            windowSize={3}
-            initialNumToRender={3}
+            windowSize={2}
+            initialNumToRender={2}
+            maxToRenderPerBatch={2}
+            removeClippedSubviews={Platform.OS !== "web"}
+            updateCellsBatchingPeriod={50}
             extraData={activeIndex}
             onMomentumScrollEnd={(e) => {
               setZoomed(false);
               setScrolledIndex(Math.round(e.nativeEvent.contentOffset.x / width));
             }}
-            renderItem={({ item, index }) => (
-              // Página con tamaño explícito: sin flex (en web flex-basis:0
-              // colapsaría el width; sin height el contenido flex-1 mide 0).
-              <View style={{ width, height: "100%" }}>
-                <MediaPage
-                  item={item}
-                  active={index === activeIndex}
-                  near={Math.abs(index - activeIndex) <= 1}
-                  onDismiss={onDismiss}
-                  onDoubleTap={handleDoubleTap}
-                  onSingleTap={() => setImmersive((v) => !v)}
-                  onZoomChange={index === activeIndex ? setZoomed : undefined}
-                  backdropOpacity={backdropOpacity}
-                  onDownload={onDownload}
-                />
-              </View>
-            )}
+            renderItem={renderCarouselItem}
           />
         ) : showSpinner ? (
           <View className="flex-1 items-center justify-center">

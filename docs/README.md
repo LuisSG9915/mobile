@@ -11,6 +11,15 @@
 - [`GEMINI_3_8_FLASH_PLAN.md`](GEMINI_3_8_FLASH_PLAN.md) — guion ejecutable para Gemini 3.8 Flash y
   puerta local (`scripts/gemini-gate.mjs`).
 
+## Producto
+
+- [`PROPUESTA_PRODUCTO_2026-11.md`](PROPUESTA_PRODUCTO_2026-11.md) — propuesta de producto
+  (pulido, apuestas, roadmap post-H1). No sustituye al plan vigente.
+- [`GEMINI_3_8_FLASH_PULIDO_2026-11.md`](GEMINI_3_8_FLASH_PULIDO_2026-11.md) — guion ejecutable del
+  Tramo 1 (pulido de honestidad) para Gemini 3.8 Flash.
+- [`scripts/gemini-gate-pulido.mjs`](../scripts/gemini-gate-pulido.mjs) — puerta de verificación de
+  ese tramo (checks estáticos + typecheck + tests mobile + pipeline).
+
 ## Histórico
 
 - [`ROADMAP.md`](../ROADMAP.md) — fases 1–5.

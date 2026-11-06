@@ -223,6 +223,12 @@ vi.mock("./db", () => ({
     return [];
   },
   getQueuedWithSha: () => [],
+  getQueueStats: () => ({
+    total: h.pending.length,
+    done: h.pending.filter((i) => i.state === "done" || i.state === "duplicate").length,
+    pending: h.pending.filter((i) => i.state !== "done" && i.state !== "duplicate").length,
+    failed: h.pending.filter((i) => i.state === "failed").length,
+  }),
   isBackupPaused: () => h.backupPaused,
   recoverInterrupted: async () => {},
   setState: async (assetId: string, state: QueueState, extra?: { last_error?: string | null }) => {

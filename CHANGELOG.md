@@ -6,6 +6,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
 ## [Unreleased]
 
 ### Añadido
+- **Respaldo en segundo plano en Android**: foreground service `dataSync` en el módulo local
+  [`modules/upload-foreground`](apps/mobile/modules/upload-foreground) que mantiene viva la cola al
+  minimizar, con notificación de progreso (1/s), wake lock parcial, parada al vaciar la cola y pausa
+  visible si Android 15 agota el cupo de 6 h. La UI avisa de los límites y pide `POST_NOTIFICATIONS`
+  en contexto. iOS mantiene el comportamiento del sistema.
 - Salto temporal con alcance visible: chip «Desde <mes> · N elementos» con **Ver todas**, modal con el mes activo
   resaltado y entrada «Volver a todas las fotos». El visor conserva el alcance (`before`) al abrir una foto desde
   un mes antiguo, así que el carrusel incluye la foto pulsada.

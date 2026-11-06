@@ -5,8 +5,13 @@ import { AppState } from "react-native";
 import { useQueueEvents } from "../lib/events";
 import { useSettings } from "../lib/store";
 import { registerBackupTask } from "./background";
-import { getLastScanTs, getQueueStats, isBackupPaused, retryFailed } from "./db";
-import { processQueue } from "./processor";
+import { getLastScanTs, getQueueStats, isBackupPaused, retryFailed, setBackupPaused } from "./db";
+import {
+  onUploadForegroundTimeout,
+  startUploadForeground,
+  stopUploadForeground,
+} from "./foreground";
+import { cancelQueue, isRunning, processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
 export type BackupPassOptions = { forceScan?: boolean; incrementalWindowMs?: number };
@@ -26,6 +31,11 @@ const BACKGROUND_BURST_CONCURRENCY = 3;
  * una vez. processQueue es barato con cola vacía — el throttle es para el scan.
  */
 export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void> {
+  // El escaneo puede tardar minutos en una biblioteca grande y el usuario
+  // puede bloquear el móvil mientras tanto. Arrancar el FGS antes (con trabajo
+  // ya pendiente) evita que el SO congele la pasada antes de que exista el
+  // servicio; processQueue lo reutiliza y lo para al terminar.
+  if (getQueueStats().pending > 0 && !isBackupPaused()) startUploadForeground();
   if (
     opts.forceScan ||
     opts.incrementalWindowMs !== undefined ||
@@ -128,7 +138,23 @@ export function useBackupRunner(enabled: boolean) {
     let disposed = false;
     let librarySub: { remove: () => void } | null = null;
     let libraryTimer: ReturnType<typeof setTimeout> | null = null;
+    // El primer pass se difiere 2 s para no competir con el pintado inicial;
+    // el FGS se arranca ya para que bloquear el móvil en ese hueco no congele
+    // la cola antes de que exista el servicio.
+    if (getQueueStats().pending > 0 && !isBackupPaused()) startUploadForeground();
     const cleanupAutoResume = initNetworkAutoResume();
+
+    /**
+     * Android 15+ agotó el cupo de 6 h del FGS `dataSync`: la subida en
+     * segundo plano ya no puede continuar. Se pausa de forma visible en vez de
+     * dejar la cola en un estado que el SO va a matar sin explicación.
+     */
+    const unsubscribeTimeout = onUploadForegroundTimeout(() => {
+      stopUploadForeground();
+      setBackupPaused(true);
+      cancelQueue();
+      useQueueEvents.getState().emit();
+    });
     // Las pasadas son de mejor esfuerzo: un fallo (scan, red, permisos) no
     // debe propagarse como rechazo no manejado.
     const pass = () => {
@@ -158,8 +184,15 @@ export function useBackupRunner(enabled: boolean) {
     };
 
     const sub = AppState.addEventListener("change", (s) => {
-      if (s === "active") pass();
-      else if (s === "background") startBackgroundBurst();
+      if (s === "active") {
+        // Si la subida seguía viva al volver (p. ej. el FGS falló al
+        // backgroundear), se recupera el primer plano del SO ahora que sí se
+        // permite iniciarlo.
+        if (isRunning()) startUploadForeground();
+        pass();
+      } else if (s === "background") {
+        startBackgroundBurst();
+      }
     });
     const interval = setInterval(() => {
       if (AppState.currentState === "active") pass();
@@ -190,6 +223,7 @@ export function useBackupRunner(enabled: boolean) {
       clearInterval(interval);
       if (libraryTimer) clearTimeout(libraryTimer);
       librarySub?.remove();
+      unsubscribeTimeout();
       cleanupAutoResume();
     };
   }, [enabled]);

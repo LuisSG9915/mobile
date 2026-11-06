@@ -249,7 +249,7 @@ describe("getters síncronos con scoping", () => {
     db.getQueueItems();
     const [sql, params] = sqliteDb.getAllSync.mock.calls.at(-1) as [string, unknown[]];
     expect(sql).toContain("WHERE user_id IS ?");
-    expect(params).toEqual(["u1", 2000]);
+    expect(params).toEqual(["u1", 20000]);
   });
 
   it("sin sesión los getters solo ven filas sin dueño (user_id NULL)", async () => {
@@ -258,7 +258,32 @@ describe("getters síncronos con scoping", () => {
     db.getQueueItems();
     const [sql, params] = sqliteDb.getAllSync.mock.calls.at(-1) as [string, unknown[]];
     expect(sql).toContain("WHERE user_id IS ?");
-    expect(params).toEqual([null, 2000]);
+    expect(params).toEqual([null, 20000]);
+  });
+
+  it("hasLocalCopySync y getLocalAssetIdByRemoteId consultan por remote_id", async () => {
+    sqliteDb.getFirstSync.mockReturnValueOnce({ asset_id: "a1" });
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    expect(db.hasLocalCopySync("r1")).toBe(true);
+    const [sql1, params1] = sqliteDb.getFirstSync.mock.calls.at(-1) as [string, unknown[]];
+    expect(sql1).toContain("WHERE user_id IS ? AND remote_id = ?");
+    expect(params1).toEqual(["u1", "r1"]);
+
+    sqliteDb.getFirstSync.mockReturnValueOnce({ asset_id: "a2" });
+    expect(db.getLocalAssetIdByRemoteId("r2")).toBe("a2");
+  });
+
+  it("getLocalAssetIdsByRemoteIds mapea lista de ids remotos", async () => {
+    const db = await importNativeDb();
+    await db.initializeQueue("u1");
+    sqliteDb.getAllSync.mockReturnValueOnce([
+      { asset_id: "a1", remote_id: "r1" },
+      { asset_id: "a2", remote_id: "r2" },
+    ]);
+    const map = db.getLocalAssetIdsByRemoteIds(["r1", "r2"]);
+    expect(map.get("r1")).toBe("a1");
+    expect(map.get("r2")).toBe("a2");
   });
 
   it("getQueueStats agrega done/pending/failed del usuario", async () => {

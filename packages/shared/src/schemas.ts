@@ -490,6 +490,7 @@ export type CleanerCleanupResponse = z.infer<typeof cleanerCleanupResponseSchema
 export const searchQuerySchema = z.object({
   q: z.string().trim().optional(),
   tag: z.string().trim().optional(),
+  city: z.string().trim().optional(),
   filter: searchFilterSchema.optional().default("all"),
   dateFrom: z
     .string()

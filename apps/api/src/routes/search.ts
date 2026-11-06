@@ -96,7 +96,7 @@ export const searchApp = new OpenAPIHono<AppEnv>()
   })
   .openapi(searchRoute, async (c) => {
     const user = c.get("user");
-    const { q, tag, filter, dateFrom, dateTo, minBytes, maxBytes, cursor, limit } =
+    const { q, tag, city, filter, dateFrom, dateTo, minBytes, maxBytes, cursor, limit } =
       c.req.valid("query");
 
     let cur: { t: number; id: string } | null = null;
@@ -128,6 +128,7 @@ export const searchApp = new OpenAPIHono<AppEnv>()
 
     if (minBytes != null) baseConditions.push(gte(media.fileSize, minBytes));
     if (maxBytes != null) baseConditions.push(lte(media.fileSize, maxBytes));
+    if (city) baseConditions.push(eq(media.city, city));
 
     if (tag) {
       baseConditions.push(

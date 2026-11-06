@@ -18,8 +18,9 @@ import {
   needsEmailVerification,
   retryFailed,
   setBackupPaused,
+  setNeedsEmailVerification,
 } from "../../queue/db";
-import { requestMediaPermissions } from "../../queue/permissions";
+import { requestMediaPermissions, requestNotificationPermission } from "../../queue/permissions";
 import { isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
 import { Button, Card, ProgressRing } from "../../ui";
@@ -70,6 +71,13 @@ export default function BackupScreen() {
 
   const togglePause = () => {
     if (paused) {
+      // Contexto claro para el permiso: el progreso se mostrará en una
+      // notificación mientras la app esté en segundo plano.
+      void requestNotificationPermission();
+      // El aviso de verificación puede haber quedado viejo (se verificó desde
+      // el correo u otro dispositivo). Si el correo sigue sin verificar, el
+      // próximo /init lo vuelve a marcar.
+      setNeedsEmailVerification(false);
       setBackupPaused(false);
       useQueueEvents.getState().emit();
       void runBackupPass().catch(() => {});
@@ -334,6 +342,8 @@ export default function BackupScreen() {
 
         {Platform.OS === "ios" ? (
           <Text className="text-xs text-neutral-400 text-center">{t.backup.noteIos}</Text>
+        ) : Platform.OS === "android" ? (
+          <Text className="text-xs text-neutral-400 text-center">{t.backup.noteAndroid}</Text>
         ) : null}
       </ScrollView>
     </SafeAreaView>

@@ -44,6 +44,9 @@ export const t = {
     photosWhy: "Para leer tu biblioteca y subir los archivos que elijas.",
     mediaLocation: "Ubicación de las fotos",
     mediaLocationWhy: "Para guardar dónde se tomó cada foto (opcional, se puede desactivar).",
+    notifications: "Notificaciones",
+    notificationsWhy:
+      "Para mostrarte el progreso del respaldo mientras la app está en segundo plano.",
     continue: "Continuar",
     deniedTitle: "Permiso denegado",
     deniedBody:
@@ -83,6 +86,14 @@ export const t = {
     pickSkipped: (n: number) => `${n} archivo(s) se omitieron: formato no admitido.`,
     noteIos:
       "En iOS el respaldo en segundo plano lo decide el sistema; abre la app para acelerarlo.",
+    noteAndroid:
+      "El respaldo sigue con la app en segundo plano. Si la cierras por completo, se reanuda al abrirla.",
+    notificationTitle: "Respaldando fotos y videos",
+    notificationProgress: (done: number, total: number) => `${done} de ${total}`,
+    notificationPreparing: "Preparando archivos…",
+    notificationTimeoutTitle: "Respaldo pausado",
+    notificationTimeoutBody:
+      "El sistema detuvo la subida en segundo plano (límite de 6 h). Abre la app para reanudarla.",
     freeSpace: "Liberar espacio",
     freeSpaceBody: (n: number, size: string) =>
       `${n} elementos ya respaldados ocupan ${size} en este dispositivo.`,

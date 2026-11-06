@@ -13,7 +13,7 @@ import {
   matchLocalToRemote,
   mergeGallery,
 } from "./gallery";
-import { listLocalAssets } from "./local-assets";
+import { listLocalAssets, listLocalAssetsPage } from "./local-assets";
 import { useSettings, useSyncProgress } from "./store";
 import { useTimeline } from "./timeline";
 
@@ -29,6 +29,16 @@ export type AlbumFilter =
  * restaure al instante en vez de quedar con datos del alcance previo.
  */
 const LOCAL_SCOPES_KEPT = 3;
+
+/**
+ * Tope de assets locales materializados en memoria para el grafo híbrido.
+ * H-024 (pendiente mayor): paginar el grafo completo en lugar de materializarlo.
+ * Mientras tanto, acotamos el tope para no sostener 20k HybridPhoto en gama media.
+ * Los más antiguos siguen accesibles por el timeline remoto (paginado por `before`).
+ */
+const LOCAL_ASSETS_CAP = 8_000;
+const FIRST_LOCAL_PAGE = 500;
+const LOCAL_PAGE_SIZE = 1000;
 const localAssetsCache = new Map<string, LocalAsset[]>();
 
 /**
@@ -76,7 +86,7 @@ export function useHybridGallery(
   // fusión+filas recorre toda la biblioteca y a 300 ms consumía casi todo el
   // presupuesto del hilo JS (cuadrícula negra, navegación congelada).
   const syncStatus = useSyncProgress((s) => s.status);
-  const tick = useThrottledQueueTick(syncStatus === "syncing" ? 1500 : 300);
+  const tick = useThrottledQueueTick(syncStatus === "syncing" ? 2500 : 500);
   // Solo se re-lista MediaLibrary al montar, al refrescar a mano y cuando la
   // biblioteca cambia de verdad (escaneo o "Liberar espacio"), no ante cada
   // tick de la cola — el listado completo es demasiado caro para cada badge.
@@ -93,30 +103,73 @@ export function useHybridGallery(
   const [localAssets, setLocalAssets] = useState<LocalAsset[]>(
     () => localAssetsCache.get(scopeKey) ?? [],
   );
+  // Paginación por cursor del listado local (H-024 Fase 2): solo se usa en el
+  // caso "toda la biblioteca" (sin álbum ni filtro de álbumes con flag). En los
+  // demás casos se sigue cargando el conjunto completo acotado por LOCAL_ASSETS_CAP.
+  const [localCursor, setLocalCursor] = useState<string | null>(null);
+  const [localHasMore, setLocalHasMore] = useState<boolean>(false);
+  const [localLoadingMore, setLocalLoadingMore] = useState<boolean>(false);
 
   // Cambio de alcance (álbum/filtro): reutilizar el listado cacheado de ese
   // alcance mientras el refresco real llega; si no hay caché, limpiar para no
   // mostrar assets del alcance anterior (filtros como syncedAlbumIds los
   // reducirían a una cuadrícula vacía).
   useEffect(() => {
-    setLocalAssets(localAssetsCache.get(scopeKey) ?? []);
+    const cached = localAssetsCache.get(scopeKey);
+    if (cached) {
+      setLocalAssets(cached);
+      // En modo ventana no tenemos cursor cacheado: asumimos que puede haber más
+      // si la ventana vino llena.
+      setLocalCursor(null);
+      setLocalHasMore(cached.length >= FIRST_LOCAL_PAGE);
+    } else {
+      setLocalAssets([]);
+      setLocalCursor(null);
+      setLocalHasMore(false);
+    }
   }, [scopeKey]);
+
+  const isWindowedMode =
+    localAlbumId == null && (syncedAlbumIds == null || syncedAlbumIds === undefined);
 
   const refreshLocal = useCallback(
     async (signal?: AbortSignal) => {
       const key = scopeKey;
+      // Modo ventana (toda la biblioteca): solo la primera página en memoria;
+      // el resto se carga con loadMoreLocal al hacer scroll. Reduce el grafo
+      // materializado de ~8k a ~500 items.
+      if (isWindowedMode) {
+        try {
+          const page = await listLocalAssetsPage(FIRST_LOCAL_PAGE, undefined, null);
+          if (signal?.aborted || scopeRef.current !== key) return;
+          setLocalAssets(page.assets);
+          setLocalCursor(page.nextCursor);
+          setLocalHasMore(page.hasNextPage);
+          setLocalLoadingMore(false);
+          localScanInfo.set(key, { at: Date.now(), libTick: libTickRef.current });
+        } catch {
+          // Sin permisos o error de MediaLibrary: galería solo remota/cola.
+        }
+        return;
+      }
+      // Modo completo (álbum o álbumes con flag): carga acotada por LOCAL_ASSETS_CAP.
       const commit = (assets: LocalAsset[]) => {
         if (scopeRef.current !== key || signal?.aborted) return;
         cacheScope(key, assets);
         setLocalAssets(assets);
       };
       try {
-        // Primer lote rápido (300) y páginas de 1000 en segundo plano con cesión de hilo (16 ms)
-        const assets = await listLocalAssets(20_000, localAlbumId, syncedAlbumIds, commit, {
-          signal,
-          initialBatchSize: 300,
-          pageSize: 1000,
-        });
+        const assets = await listLocalAssets(
+          LOCAL_ASSETS_CAP,
+          localAlbumId,
+          syncedAlbumIds,
+          commit,
+          {
+            signal,
+            initialBatchSize: 300,
+            pageSize: 1000,
+          },
+        );
         if (!signal?.aborted && scopeRef.current === key) {
           localScanInfo.set(key, { at: Date.now(), libTick: libTickRef.current });
         }
@@ -125,8 +178,28 @@ export function useHybridGallery(
         // Sin permisos o error de MediaLibrary: galería solo remota/cola.
       }
     },
-    [localAlbumId, syncedAlbumIds, scopeKey],
+    [localAlbumId, syncedAlbumIds, scopeKey, isWindowedMode],
   );
+
+  const loadMoreLocal = useCallback(async () => {
+    if (localLoadingMore || !localHasMore || localCursor == null) return;
+    if (!isWindowedMode) return;
+    setLocalLoadingMore(true);
+    try {
+      const page = await listLocalAssetsPage(LOCAL_PAGE_SIZE, localCursor, null);
+      setLocalAssets((prev) => {
+        const seen = new Set(prev.map((a) => a.id));
+        const added = page.assets.filter((a) => !seen.has(a.id));
+        return added.length ? prev.concat(added) : prev;
+      });
+      setLocalCursor(page.nextCursor);
+      setLocalHasMore(page.hasNextPage);
+    } catch {
+      // Fallo de MediaLibrary: se reintenta en el siguiente scroll.
+    } finally {
+      setLocalLoadingMore(false);
+    }
+  }, [localLoadingMore, localHasMore, localCursor, isWindowedMode]);
 
   useEffect(() => {
     const cached = localAssetsCache.get(scopeKey);
@@ -136,7 +209,9 @@ export function useHybridGallery(
     // Caché caliente + sin cambios de biblioteca: reutilizarla. Es el caso del
     // visor, que monta este hook otra vez al abrir una foto y antes repetía el
     // escaneo completo de MediaLibrary.
-    if (cached && fresh) {
+    // En modo ventana no se usa el caché (el escaneo de la primera página es
+    // barato y evita inconsistencias de cursor).
+    if (cached && fresh && !isWindowedMode) {
       setLocalAssets(cached);
       return;
     }
@@ -265,5 +340,14 @@ export function useHybridGallery(
 
   const rows = useMemo<GalleryRow[]>(() => buildGalleryRows(photos), [photos]);
 
-  return { photos, rows, query, refreshLocal, remoteAlbumQuery };
+  return {
+    photos,
+    rows,
+    query,
+    refreshLocal,
+    remoteAlbumQuery,
+    loadMoreLocal,
+    localHasMore,
+    localLoadingMore,
+  };
 }

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueueEvents } from "../lib/events";
 import { useItemProgress, useSyncProgress } from "../lib/store";
 import { getActiveItem, getQueueItems } from "./db";
+import { updateUploadForeground } from "./foreground";
 import type { QueueItem, QueueState, SyncProgressState, SyncProgressStatus } from "./types";
 
 const TRANSIENT: ReadonlySet<QueueState> = new Set([
@@ -140,9 +141,11 @@ function flushSyncProgress(): void {
   const running = pendingRunning ?? lastRunning;
   pendingRunning = null;
   const items = getQueueItems();
-  useSyncProgress
-    .getState()
-    .update(computeSyncProgress(items, running, undefined, getActiveItem()));
+  const next = computeSyncProgress(items, running, undefined, getActiveItem());
+  useSyncProgress.getState().update(next);
+  // Android: la notificación del foreground service refleja el mismo estado
+  // que el anillo de la app (no-op en el resto de plataformas).
+  updateUploadForeground(next);
   sentByAsset.clear();
   for (const item of items) {
     sentByAsset.set(item.asset_id, Math.min(item.bytes_sent || 0, item.bytes_total || 0));
@@ -187,6 +190,9 @@ export function publishByteTick(assetId: string, bytesSent: number, bytesTotal: 
         ? Math.ceil(remainingBytes / bytesPerSecond)
         : null,
   });
+  // Los cambios estructurales no llegan mientras un archivo grande está en
+  // vuelo: sin este tick la notificación se quedaría en el porcentaje inicial.
+  updateUploadForeground(useSyncProgress.getState());
 }
 
 /**

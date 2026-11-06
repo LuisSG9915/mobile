@@ -523,6 +523,39 @@ export function getQueueStats(): QueueStats {
   return { total: queue.size, done, pending, failed };
 }
 
+/** Comprueba si existe copia local enlazada a un ID remoto en la proyección en memoria. */
+export function hasLocalCopySync(remoteId: string): boolean {
+  for (const r of queue.values()) {
+    if (r.remote_id === remoteId && (r.state === "done" || r.state === "duplicate")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Devuelve el asset_id local de un elemento remoto respaldado o null. */
+export function getLocalAssetIdByRemoteId(remoteId: string): string | null {
+  for (const r of queue.values()) {
+    if (r.remote_id === remoteId && (r.state === "done" || r.state === "duplicate")) {
+      return r.asset_id;
+    }
+  }
+  return null;
+}
+
+/** Mapea una lista de remote_ids a sus asset_ids locales correspondientes. */
+export function getLocalAssetIdsByRemoteIds(remoteIds: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!remoteIds.length) return map;
+  const set = new Set(remoteIds);
+  for (const r of queue.values()) {
+    if (r.remote_id && set.has(r.remote_id) && (r.state === "done" || r.state === "duplicate")) {
+      map.set(r.remote_id, r.asset_id);
+    }
+  }
+  return map;
+}
+
 export type RemoteMatch = { assetId: string; remoteId: string; sha256: string };
 
 /**

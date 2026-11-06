@@ -56,6 +56,23 @@ export class ApiError extends Error {
   }
 }
 
+type AuthErrorHandler = (error: ApiError) => void;
+const authErrorListeners = new Set<AuthErrorHandler>();
+
+/** Registra un listener ante errores de autenticación (ej. 401) para suspender la cola o alertar a la UI. */
+export function onAuthError(listener: AuthErrorHandler): () => void {
+  authErrorListeners.add(listener);
+  return () => authErrorListeners.delete(listener);
+}
+
+export function emitAuthError(error: ApiError): void {
+  for (const listener of authErrorListeners) {
+    try {
+      listener(error);
+    } catch {}
+  }
+}
+
 /**
  * Tope de espera para llamadas JSON al API. No usa AbortSignal.timeout (soporte
  * irregular fuera de navegadores modernos): una carrera que rechaza a los 30 s
@@ -90,7 +107,11 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
       code = body.code ?? body.error ?? code;
       message = body.message ?? message;
     } catch {}
-    throw new ApiError(res.status, code, message);
+    const err = new ApiError(res.status, code, message);
+    if (res.status === 401) {
+      emitAuthError(err);
+    }
+    throw err;
   }
   return res;
 }
@@ -302,6 +323,7 @@ export const api = {
     const q = new URLSearchParams();
     if (query.q) q.set("q", query.q);
     if (query.tag) q.set("tag", query.tag);
+    if (query.city) q.set("city", query.city);
     if (query.filter && query.filter !== "all") q.set("filter", query.filter);
     if (query.dateFrom) q.set("dateFrom", query.dateFrom);
     if (query.dateTo) q.set("dateTo", query.dateTo);

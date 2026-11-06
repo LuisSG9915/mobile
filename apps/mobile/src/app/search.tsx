@@ -283,6 +283,7 @@ export default function SearchScreen() {
       api.search({
         q: debouncedSearchText.trim() || undefined,
         tag: selectedTag || undefined,
+        city: selectedCity || undefined,
         filter: selectedFilter,
         dateFrom,
         minBytes,
@@ -562,7 +563,7 @@ export default function SearchScreen() {
             data={results}
             keyExtractor={(item) => item.id}
             numColumns={numColumns}
-            key={numColumns}
+            key={`${debouncedSearchText}|${selectedFilter}|${selectedTag ?? ""}|${selectedCity ?? ""}|${selectedSize}|${dateRange}|${numColumns}`}
             onEndReached={() => {
               if (searchQuery.hasNextPage && !searchQuery.isFetchingNextPage) {
                 void searchQuery.fetchNextPage();

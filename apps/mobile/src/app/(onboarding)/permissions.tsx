@@ -4,7 +4,7 @@ import { Linking, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { t } from "../../i18n/es";
 import { useSettings } from "../../lib/store";
-import { requestMediaPermissions } from "../../queue/permissions";
+import { requestMediaPermissions, requestNotificationPermission } from "../../queue/permissions";
 import { runBackupPass } from "../../queue/runner";
 import { Button, Card } from "../../ui";
 
@@ -30,11 +30,15 @@ export default function Permissions() {
   const ask = async () => {
     setLoading(true);
     const res = await requestMediaPermissions();
-    setLoading(false);
     if (!res.granted) {
+      setLoading(false);
       setDenied(true);
       return;
     }
+    // Se pide en contexto (el respaldo en segundo plano se anuncia aquí). Si
+    // se deniega, la cola funciona igual; solo se pierde la notificación.
+    await requestNotificationPermission();
+    setLoading(false);
     setOnboarded(true);
     // Primera activación: escanear ya, sin esperar al intervalo.
     void runBackupPass({ forceScan: true }).catch(() => {});
@@ -53,6 +57,7 @@ export default function Permissions() {
         <Card className="gap-4">
           <PermissionRow title={t.onboarding.photos} why={t.onboarding.photosWhy} />
           <PermissionRow title={t.onboarding.mediaLocation} why={t.onboarding.mediaLocationWhy} />
+          <PermissionRow title={t.onboarding.notifications} why={t.onboarding.notificationsWhy} />
         </Card>
         {denied ? (
           <Card className="gap-2 border-amber-300 dark:border-amber-700">

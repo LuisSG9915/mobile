@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   getQueueItems: vi.fn<() => QueueItem[]>(() => []),
   removeQueueItems: vi.fn<(ids: string[]) => Promise<void>>(() => Promise.resolve()),
   deleteAssetsAsync: vi.fn<(ids: string[]) => Promise<boolean>>(() => Promise.resolve(true)),
+  hasLocalCopySync: vi.fn<(remoteId: string) => boolean>(() => false),
+  getLocalAssetIdByRemoteId: vi.fn<(remoteId: string) => string | null>(() => null),
   checkHashes: vi.fn<(shas: string[]) => Promise<{ existing: { sha256: string; id: string }[] }>>(
     async (shas) => ({ existing: shas.map((s) => ({ sha256: s, id: "r1" })) }),
   ),
@@ -26,6 +28,8 @@ vi.mock("../api/client", () => ({
 vi.mock("../queue/db", () => ({
   getQueueItems: mocks.getQueueItems,
   removeQueueItems: mocks.removeQueueItems,
+  hasLocalCopySync: mocks.hasLocalCopySync,
+  getLocalAssetIdByRemoteId: mocks.getLocalAssetIdByRemoteId,
 }));
 vi.mock("expo-media-library/legacy", () => ({ deleteAssetsAsync: mocks.deleteAssetsAsync }));
 
@@ -57,6 +61,13 @@ beforeEach(async () => {
   mocks.getQueueItems.mockReset().mockReturnValue([]);
   mocks.removeQueueItems.mockReset().mockResolvedValue();
   mocks.deleteAssetsAsync.mockReset().mockResolvedValue(true);
+  mocks.hasLocalCopySync.mockReset().mockImplementation((rId: string) => {
+    return mocks.getQueueItems().some((i) => i.remote_id === rId && (i.state === "done" || i.state === "duplicate"));
+  });
+  mocks.getLocalAssetIdByRemoteId.mockReset().mockImplementation((rId: string) => {
+    const it = mocks.getQueueItems().find((i) => i.remote_id === rId && (i.state === "done" || i.state === "duplicate"));
+    return it?.asset_id ?? null;
+  });
   mocks.checkHashes.mockReset().mockImplementation(async (shas: string[]) => ({
     existing: shas.map((s) => ({ sha256: s, id: "r1" })),
   }));
@@ -105,6 +116,19 @@ describe("verifyRemoteIntegrity", () => {
       { asset_id: "A2", sha256: "b".repeat(64) },
     ]);
     expect(verified).toEqual(["A1"]);
+  });
+
+  it("particiona en lotes de 250 hashes cuando hay más de 500 elementos", async () => {
+    const items = Array.from({ length: 600 }, (_, i) => ({
+      asset_id: `A${i}`,
+      sha256: i.toString().padStart(64, "0"),
+    }));
+    mocks.checkHashes.mockImplementation(async (shas: string[]) => ({
+      existing: shas.map((s) => ({ sha256: s, id: `r_${s}` })),
+    }));
+    const verified = await fs.verifyRemoteIntegrity(items);
+    expect(verified.length).toBe(600);
+    expect(mocks.checkHashes).toHaveBeenCalledTimes(3);
   });
 });
 
