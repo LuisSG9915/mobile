@@ -32,6 +32,12 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
   `pnpm test:pipeline`, uno de ellos contra el tablero real.
 
 ### Corregido
+- **Tramo 1 (pulido de honestidad)**:
+  - P-01: se oculta el enlace público rápido del visor por no existir token real en el backend.
+  - P-02: paridad del editor de imagen (`aspectRatioValue` compartido, soporte de 9:16 en web y encolado automático de la edición en nativo).
+  - P-03: paginación por cursor en la papelera con `useInfiniteQuery`.
+  - P-04: inclusión de `basemaps.cartocdn.com` en el CSP de la web para renderizar teselas del mapa.
+  - P-09/P-10/P-11: externalización de textos a `es.ts`, estado accesible (`accessibilityState`) en `Button` y celdas de galería, y eliminación del permiso huérfano `FOREGROUND_SERVICE_DATA_SYNC` en `app.json` (versión 1.1.0).
 - El salto de mes solo acotaba los remotos: los assets locales y los pendientes de la cola se colaban en el mes
   elegido (chip «Desde octubre de 2023» con fotos de hoy arriba). `filterToBefore` acota toda la galería híbrida
   al alcance `before`, con 3 tests en `gallery.test.ts`.
