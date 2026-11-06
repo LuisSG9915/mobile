@@ -1,8 +1,8 @@
 import { TRASH_RETENTION_DAYS, type TrashItem } from "@photos/shared";
 import { FlashList } from "@shopify/flash-list";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
-import { Alert, Platform, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, RefreshControl, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../api/client";
@@ -12,7 +12,12 @@ import { Button, EmptyState } from "../ui";
 
 export default function TrashScreen() {
   const qc = useQueryClient();
-  const query = useQuery({ queryKey: ["trash"], queryFn: () => api.trash() });
+  const query = useInfiniteQuery({
+    queryKey: ["trash"],
+    queryFn: ({ pageParam }) => api.trash({ cursor: pageParam, limit: 100 }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
   const restore = useMutation({
     mutationFn: api.restoreMedia,
     onSuccess: () => {
@@ -53,7 +58,7 @@ export default function TrashScreen() {
     }
   };
 
-  const items = query.data?.items ?? [];
+  const items = query.data?.pages.flatMap((p) => p.items) ?? [];
 
   /** Días que le quedan al elemento antes de la purga definitiva (mín. 1). */
   const daysLeft = (item: TrashItem) =>
@@ -81,13 +86,32 @@ export default function TrashScreen() {
           />
         ) : null}
       </View>
-      {items.length === 0 ? (
+      {items.length === 0 && !query.isLoading ? (
         <EmptyState title={t.trash.empty} />
       ) : (
         <FlashList
           data={items}
           keyExtractor={(i) => i.id}
           numColumns={1}
+          onEndReached={() => {
+            if (query.hasNextPage && !query.isFetchingNextPage) {
+              void query.fetchNextPage();
+            }
+          }}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            query.isFetchingNextPage ? (
+              <View className="py-4 items-center justify-center">
+                <ActivityIndicator size="small" />
+              </View>
+            ) : null
+          }
+          refreshControl={
+            <RefreshControl
+              refreshing={query.isRefetching && !query.isFetchingNextPage}
+              onRefresh={() => void query.refetch()}
+            />
+          }
           renderItem={({ item }) => (
             <View className="flex-row items-center px-5 py-2 gap-3">
               <Image
