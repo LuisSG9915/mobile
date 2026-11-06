@@ -1,5 +1,6 @@
 import { enqueueAsset } from "../queue/db";
 import type { AspectRatioOption, EditPhotoOptions, EditPhotoResult } from "./image-editor";
+import { aspectRatioValue } from "./image-editor-calc";
 
 export type { AspectRatioOption, EditPhotoOptions, EditPhotoResult };
 
@@ -28,12 +29,8 @@ export async function processAndSaveEditedPhoto(
         let targetCropW = rotW;
         let targetCropH = rotH;
 
-        if (options.aspectRatio !== "original") {
-          let targetRatio = 1;
-          if (options.aspectRatio === "1:1") targetRatio = 1;
-          else if (options.aspectRatio === "4:3") targetRatio = 4 / 3;
-          else if (options.aspectRatio === "16:9") targetRatio = 16 / 9;
-
+        const targetRatio = aspectRatioValue(options.aspectRatio);
+        if (targetRatio !== null) {
           if (rotW / rotH > targetRatio) {
             targetCropW = Math.round(rotH * targetRatio);
             targetCropH = rotH;

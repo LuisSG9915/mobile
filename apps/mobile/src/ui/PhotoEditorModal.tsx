@@ -6,6 +6,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { t } from "../i18n/es";
 import { type AspectRatioOption, processAndSaveEditedPhoto } from "../lib/image-editor";
+import { aspectRatioValue } from "../lib/image-editor-calc";
+import { runBackupPass } from "../queue/runner";
 import { Button } from "./index";
 
 type PhotoEditorModalProps = {
@@ -58,6 +60,7 @@ export function PhotoEditorModal({
         imageWidth: originalW,
         imageHeight: originalH,
       });
+      runBackupPass().catch(() => {});
       toast.success(t.editor.saved);
       onSaved?.();
       onClose();
@@ -76,11 +79,7 @@ export function PhotoEditorModal({
   const isRotated90or270 = rotationDegrees % 180 !== 0;
   const currentRatio = isRotated90or270 ? originalH / originalW : originalW / originalH;
 
-  let targetRatio = currentRatio;
-  if (selectedRatio === "1:1") targetRatio = 1;
-  else if (selectedRatio === "4:3") targetRatio = 4 / 3;
-  else if (selectedRatio === "16:9") targetRatio = 16 / 9;
-  else if (selectedRatio === "9:16") targetRatio = 9 / 16;
+  const targetRatio = aspectRatioValue(selectedRatio) ?? currentRatio;
 
   let boxW = previewMaxW;
   let boxH = previewMaxW / targetRatio;

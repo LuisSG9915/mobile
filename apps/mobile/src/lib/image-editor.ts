@@ -1,7 +1,9 @@
 import { type Action, manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as MediaLibrary from "expo-media-library";
+import { enqueueAsset } from "../queue/db";
+import { aspectRatioValue, type AspectRatioOption } from "./image-editor-calc";
 
-export type AspectRatioOption = "original" | "1:1" | "4:3" | "16:9" | "9:16";
+export type { AspectRatioOption };
 
 export type EditPhotoOptions = {
   uri: string;
@@ -38,13 +40,8 @@ export async function processAndSaveEditedPhoto(
   const currentH = isRotated90or270 ? options.imageWidth : options.imageHeight;
 
   // 2. Recorte si la relación de aspecto no es la original
-  if (options.aspectRatio !== "original") {
-    let targetRatio = 1;
-    if (options.aspectRatio === "1:1") targetRatio = 1;
-    else if (options.aspectRatio === "4:3") targetRatio = 4 / 3;
-    else if (options.aspectRatio === "16:9") targetRatio = 16 / 9;
-    else if (options.aspectRatio === "9:16") targetRatio = 9 / 16;
-
+  const targetRatio = aspectRatioValue(options.aspectRatio);
+  if (targetRatio !== null) {
     let cropWidth = currentW;
     let cropHeight = currentH;
 
@@ -75,9 +72,23 @@ export async function processAndSaveEditedPhoto(
   });
 
   try {
-    await MediaLibrary.saveToLibraryAsync(result.uri);
+    const asset = await MediaLibrary.createAssetAsync(result.uri);
+    if (asset) {
+      await enqueueAsset({
+        id: asset.id,
+        uri: asset.uri,
+        filename: asset.filename ?? `edited_${Date.now()}.jpg`,
+        mediaType: "photo",
+        creationTime: asset.creationTime,
+      });
+    }
   } catch (err) {
-    console.warn("No se pudo guardar la imagen editada en MediaLibrary:", err);
+    console.warn("No se pudo crear o encolar el asset editado en MediaLibrary:", err);
+    try {
+      await MediaLibrary.saveToLibraryAsync(result.uri);
+    } catch (saveErr) {
+      console.warn("No se pudo guardar la imagen editada en MediaLibrary:", saveErr);
+    }
   }
 
   return {
