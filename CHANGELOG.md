@@ -6,6 +6,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
 ## [Unreleased]
 
 ### Añadido
+- Salto temporal con alcance visible: chip «Desde <mes> · N elementos» con **Ver todas**, modal con el mes activo
+  resaltado y entrada «Volver a todas las fotos». El visor conserva el alcance (`before`) al abrir una foto desde
+  un mes antiguo, así que el carrusel incluye la foto pulsada.
+- `POST /v1/media/presign-batch` con `presignBatchRequestSchema`/`presignBatchResponseSchema` y
+  `PRESIGN_BATCH_MAX_KEYS` en `@photos/shared`. Timeline, recuerdos, papelera y álbum paginado firman sus
+  miniaturas en un lote en vez de un `presignGet` por elemento. Test unitario en `apps/api/test/presign-batch.test.ts`.
+- E2E `jump-month`: siembra fotos con `File.lastModified` mediante el evento `drop`, crea meses fuera de la
+  primera página y verifica que saltar a ellos pinta celdas (nunca la cuadrícula en negro).
 - APK de release **sin EAS**: el plan gratuito se agotó (causa real de `v1.0.9`/`v1.1.0` sin binario), así que
   `release-apk.yml` compila con `expo prebuild` + `gradlew assembleRelease` en el runner. `scripts/android-prepare.mjs`
   inyecta la firma (`signingConfigs.release`, keystore desde `ANDROID_KEYSTORE_BASE64`) y `versionCode`/`versionName`
@@ -24,6 +32,24 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y
   `pnpm test:pipeline`, uno de ellos contra el tablero real.
 
 ### Corregido
+- El salto de mes solo acotaba los remotos: los assets locales y los pendientes de la cola se colaban en el mes
+  elegido (chip «Desde octubre de 2023» con fotos de hoy arriba). `filterToBefore` acota toda la galería híbrida
+  al alcance `before`, con 3 tests en `gallery.test.ts`.
+- **Galería en negro al saltar de mes**: FlashList 2.0.2 conservaba el offset de la lista anterior al sustituir
+  `data` y solo pintaba el header sticky. Ahora la lista se mantiene montada bajo el overlay mientras carga el
+  mes y se remonta **solo cuando sus filas ya están disponibles**; `keyExtractor`/`getItemType`/
+  `overrideItemLayout`/`renderItem` son estables. Se elimina el `scrollToTop` que llegaba antes de medir.
+- El visor abría una foto de un mes antiguo sin carrusel (`foundIndex = -1`) porque consultaba la primera página
+  del timeline: el alcance `before` viaja ahora como param y reutiliza la query cacheada.
+- El selector de meses no veía un mes nuevo hasta que expiraba su `staleTime`: las subidas completadas
+  invalidan `timeline-months` en nativo y web.
+- Las pantallas de Respaldo y Ajustes leían la cola en SQLite (`getQueueStats`, `getFailed`, `getSyncedLocal`)
+  en cada render, incluidos los ticks de bytes. Ahora se memorizan por tick throttleado; se eliminó la doble
+  suscripción de `useSyncProgressAuto` y el banner usa el tick throttleado.
+- El comparador de `PhotoCell` dependía de la URL prefirmada completa: al rodar la ventana de 6 h se
+  re-renderizaba toda la cuadrícula. Compara solo la presencia de miniatura remota.
+- Abrir el visor repetía el escaneo completo de MediaLibrary (hasta 20 000 assets): el listado se reutiliza
+  durante 60 s si `libTick` no cambió.
 - El build de Gradle fallaba **al final** si `SENTRY_ORG`/`SENTRY_PROJECT` faltaban (tarea
   `:app:createBundleReleaseJsAndAssets_SentryUpload_*`), con un error que parecía de red. El workflow los pasa
   como variables y desactiva la subida (`SENTRY_DISABLE_AUTO_UPLOAD`) cuando no hay `SENTRY_AUTH_TOKEN`.

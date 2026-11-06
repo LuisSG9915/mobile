@@ -11,12 +11,7 @@ export function ymToEndOfMonthIso(ym: string): string {
   return new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)).toISOString();
 }
 
-const monthLabel = (ym: string) =>
-  new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("es", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+import { monthLabelUtc } from "../lib/format";
 
 type Props = {
   geometry: GridGeometry;
@@ -105,7 +100,7 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
               lastIndex.current = foundRowIndex;
               onScrub(foundRowIndex);
             }
-            const label = monthLabel(targetMonth.ym);
+            const label = monthLabelUtc(targetMonth.ym);
             if (label !== lastLabel.current) {
               lastLabel.current = label;
               hapticSelection();
@@ -116,7 +111,7 @@ export function FastScrubber({ geometry, rows, onScrub, months, onJumpBefore }: 
 
           // El mes no está cargado en memoria -> mostrar etiqueta y preparar salto directo
           pendingJumpIso.current = ymToEndOfMonthIso(targetMonth.ym);
-          const label = monthLabel(targetMonth.ym);
+          const label = monthLabelUtc(targetMonth.ym);
           if (label !== lastLabel.current) {
             lastLabel.current = label;
             hapticSelection();

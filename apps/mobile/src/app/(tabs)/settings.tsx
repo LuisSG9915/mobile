@@ -14,14 +14,14 @@ import {
   Trash2,
   UserX,
 } from "lucide-react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
-import { useQueueEvents } from "../../lib/events";
+import { useThrottledQueueTick } from "../../lib/events";
 import { formatBytes, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { invalidateMediaLifecycleQueries } from "../../lib/query-client";
@@ -40,7 +40,7 @@ export default function SettingsScreen() {
   // ocupando R2 hasta la purga) — no el SUM de /v1/stats que excluye borrados.
   const storage = useQuery({ queryKey: ["storage"], queryFn: api.userStorage });
   const sessions = useQuery({ queryKey: ["user-sessions"], queryFn: api.userSessions });
-  useQueueEvents((s) => s.tick); // re-render al liberar/cambiar la cola
+  const tick = useThrottledQueueTick(400); // re-render al liberar/cambiar la cola
 
   const revokeSessionMut = useMutation({
     mutationFn: (id: string) => api.revokeSession(id),
@@ -140,7 +140,12 @@ export default function SettingsScreen() {
   };
 
   // En web no hay copia local que liberar (el blob se borra al terminar).
-  const syncedLocal = isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal();
+  // `getSyncedLocal` escanea hasta 2000 filas de la cola: memorizarlo por tick
+  // evita repetir la lectura en cada render de la pantalla.
+  const syncedLocal = useMemo(
+    () => (isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal()),
+    [tick],
+  );
 
   const executeFreeSpace = (olderThanDays?: number) => {
     const { assetIds, totalBytes } = getSyncedLocal(olderThanDays);

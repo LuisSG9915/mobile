@@ -78,6 +78,9 @@ export function allowUploadOnCellularOnce(): void {}
 function refreshRemoteData() {
   try {
     void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
+    // Sin esto el selector de meses no ve un mes nuevo hasta que expire su
+    // staleTime: el salto temporal ofrecería una lista desactualizada.
+    void queryClient.invalidateQueries({ queryKey: ["timeline-months"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["storage"] }).catch(() => {});
   } catch {}

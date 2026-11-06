@@ -21,6 +21,7 @@ import {
 } from "lucide-react-native";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   BackHandler,
   FlatList,
@@ -49,12 +50,13 @@ import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { downloadMany } from "../../lib/download-many";
-import { useQueueEvents } from "../../lib/events";
-import { formatDuration } from "../../lib/format";
+import { useQueueEvents, useThrottledQueueTick } from "../../lib/events";
+import { formatDuration, monthLabelUtc } from "../../lib/format";
 import { deleteLocalAssets } from "../../lib/free-space";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, GRID_GAP, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { hapticMedium, hapticSelection } from "../../lib/haptics";
+import { monthJumpView } from "../../lib/month-jump";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { isBackupPaused, retryFailed, setBackupPaused } from "../../queue/db";
@@ -79,14 +81,6 @@ const FILTER_KEYS = [
   ["screenshots", t.gallery.filterScreenshots],
   ["documents", t.gallery.filterDocuments],
 ] as const;
-
-/** "2026-10" → "octubre de 2026" (dateGroup es UTC; forzamos timeZone). */
-const monthLabel = (ym: string) =>
-  new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("es", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 
 function pinchLevel(columns: number, dir: -1 | 1): number {
   let i = 0;
@@ -193,7 +187,12 @@ const PhotoCell = memo(
             <Heart size={12} color="#f43f5e" fill="#f43f5e" />
           </View>
         ) : null}
-        <SyncBadge status={photo.syncStatus} progress={photo.progress} assetId={photo.assetId} />
+        {/* Ya respaldado / solo en la nube: sin badge. En una cuadrícula
+            grande es ruido visual y mantenía una suscripción al store de
+            progreso por celda. */}
+        {photo.syncStatus === "SYNCED" || photo.syncStatus === "REMOTE_ONLY" ? null : (
+          <SyncBadge status={photo.syncStatus} progress={photo.progress} assetId={photo.assetId} />
+        )}
       </Pressable>
     );
   },
@@ -205,7 +204,11 @@ const PhotoCell = memo(
     prev.photo.key === next.photo.key &&
     prev.photo.syncStatus === next.photo.syncStatus &&
     prev.photo.localUri === next.photo.localUri &&
-    prev.photo.thumbUrl === next.photo.thumbUrl &&
+    // Comparar la URL completa re-renderiza toda la cuadrícula cuando rueda la
+    // ventana de prefirma (cada 6 h) aunque la imagen ya esté cacheada. Basta
+    // con saber si hay miniatura remota o no: el `cacheKey` estable por
+    // remoteId mantiene el bitmap y `remoteId` cubre el cambio de foto.
+    !prev.photo.thumbUrl === !next.photo.thumbUrl &&
     prev.photo.remoteId === next.photo.remoteId &&
     prev.photo.remote?.isFavorite === next.photo.remote?.isFavorite,
 );
@@ -218,7 +221,7 @@ const SmartSyncBanner = memo(function SmartSyncBanner() {
   const status = useSyncProgress((s) => s.status);
   const filesRemaining = useSyncProgress((s) => s.filesRemaining);
   const wifiOnly = useSettings((s) => s.wifiOnly);
-  useQueueEvents((s) => s.tick);
+  useThrottledQueueTick(400);
   const paused = isBackupPaused();
   const [dismissed, setDismissed] = useState(false);
 
@@ -568,13 +571,20 @@ export default function GalleryScreen() {
     });
   }, []);
 
-  const toggleDay = (headerRowIndex: number) => {
+  // Espejo de `rows` para que `toggleDay`/`renderItem` sean estables: FlashList
+  // reutiliza celdas y recrea el árbol de items en cada render si `renderItem`
+  // cambia de identidad.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+
+  const toggleDay = useCallback((headerRowIndex: number) => {
+    const list = rowsRef.current;
     setSelected((prev) => {
       if (!prev) return prev;
       const next = new Set(prev);
       const keys: string[] = [];
-      for (let i = headerRowIndex + 1; i < rows.length && rows[i].type === "photo"; i++) {
-        keys.push(rows[i].key);
+      for (let i = headerRowIndex + 1; i < list.length && list[i].type === "photo"; i++) {
+        keys.push(list[i].key);
       }
       const allIn = keys.length > 0 && keys.every((k) => next.has(k));
       for (const k of keys) {
@@ -583,7 +593,7 @@ export default function GalleryScreen() {
       }
       return next.size ? next : null;
     });
-  };
+  }, []);
 
   const onCellPress = useCallback(
     (photo: HybridPhoto) => {
@@ -595,6 +605,8 @@ export default function GalleryScreen() {
           params: {
             id: photo.remoteId ?? photo.key,
             albumId: albumFilter?.type === "remote" ? albumFilter.albumId : undefined,
+            // Mantiene el carrusel dentro del mismo alcance de mes de la cuadrícula.
+            before: timelineBefore,
             localUri: photo.localUri ?? "",
             assetId:
               photo.assetId ??
@@ -612,7 +624,7 @@ export default function GalleryScreen() {
         });
       }
     },
-    [togglePhoto, albumFilter],
+    [togglePhoto, albumFilter, timelineBefore],
   );
 
   // ---- acciones de la barra contextual ----
@@ -772,6 +784,103 @@ export default function GalleryScreen() {
   };
 
   const isEmpty = !query.isPending && rows.length === 0;
+  // La lista se mantiene montada mientras carga el mes y el estado de la vista
+  // va encima como overlay opaco. Así no se enseña el swap a medias que dejaba
+  // la cuadrícula en negro.
+  const monthView = monthJumpView({
+    hasMonthScope: !!timelineBefore && !albumFilter,
+    isPending: query.isPending,
+    isError: query.isError,
+    rowCount: rows.length,
+  });
+
+  // P0 (pantalla en negro al saltar de mes): FlashList 2.0.2 conserva el
+  // offset interno de la lista anterior cuando `data` se sustituye a media
+  // carga y deja de pintar celdas (solo el header sticky). Remontar con la
+  // lista vieja tampoco sirve: monta con `data` vacía y el swap posterior
+  // vuelve a romper el layout.
+  //
+  // Solución: mantener la lista actual montada mientras el alcance nuevo
+  // carga (el overlay de `monthJumpView` la tapa) y remontar SOLO cuando sus
+  // filas ya están disponibles. Así el FlashList nuevo arranca con datos y
+  // sin offset heredado. Si el mes está cacheado el remontaje es inmediato.
+  const monthDataReady = !timelineBefore || (!query.isPending && !query.isError);
+  const committedScope = useRef(timelineBefore ?? "");
+  if (monthDataReady) committedScope.current = timelineBefore ?? "";
+  const scopeKey = `${timelineFilter}|${
+    albumFilter ? `${albumFilter.type}:${albumFilter.albumId}` : "all"
+  }|${syncedAlbumIds?.join(",") ?? "ALL"}`;
+
+  // Mes activo del salto temporal (`before` es el fin de mes en ISO).
+  const scopeYm = useMemo(() => {
+    if (!timelineBefore) return null;
+    const d = new Date(timelineBefore);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 7);
+  }, [timelineBefore]);
+  const scopeCount = scopeYm
+    ? months.data?.months.find((m) => m.month === scopeYm)?.count
+    : undefined;
+  const clearMonthScope = useCallback(() => {
+    setJumpYm(null);
+    setTimelineBefore(undefined);
+  }, []);
+
+  // El álbum usa otra query y no admite el alcance `before`: al entrar en un
+  // álbum se limpia el mes para no dejar un filtro invisible activo.
+  useEffect(() => {
+    if (albumFilter && timelineBefore) clearMonthScope();
+  }, [albumFilter, timelineBefore, clearMonthScope]);
+
+  // Props estables para FlashList: recrearlas en cada render fuerza a
+  // recalcular layouts y a reconstruir el árbol de items visibles.
+  const listKeyExtractor = useCallback((r: GalleryRow) => r.key, []);
+  const listItemType = useCallback((r: GalleryRow) => r.type, []);
+  const overrideItemLayout = useCallback(
+    (layout: { span?: number }, item: GalleryRow) => {
+      if (item.type === "header") layout.span = columns;
+    },
+    [columns],
+  );
+  const renderItem = useCallback(
+    ({ item, index }: { item: GalleryRow; index: number }) => {
+      if (item.type === "header") {
+        return (
+          <Pressable
+            onPress={selected ? () => toggleDay(index) : undefined}
+            disabled={!selected}
+            className="px-3 bg-neutral-50 dark:bg-black justify-center"
+            style={{ height: HEADER_HEIGHT }}
+          >
+            <View className="flex-1 flex-row items-center justify-between gap-2">
+              <Text className="text-base font-bold text-neutral-900 dark:text-white">
+                {item.label}
+              </Text>
+              {item.location ? (
+                <Text
+                  className="text-neutral-500 dark:text-neutral-400 text-xs font-medium text-right"
+                  numberOfLines={1}
+                >
+                  {item.location}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        );
+      }
+      return (
+        <PhotoCell
+          photo={item.photo}
+          size={cell}
+          selecting={!!selected}
+          selected={!!selected?.has(item.photo.key)}
+          highPriority={index < 18}
+          onPress={onCellPress}
+          onLongPress={beginSelect}
+        />
+      );
+    },
+    [selected, cell, onCellPress, beginSelect, toggleDay],
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-neutral-50 dark:bg-black" edges={["top"]}>
@@ -904,14 +1013,16 @@ export default function GalleryScreen() {
                 </Pressable>
               ) : null}
             </View>
-            <Pressable
-              onPress={() => setJumpOpen(true)}
-              accessibilityLabel={t.gallery.jumpToMonth}
-              hitSlop={8}
-              className="pl-2"
-            >
-              <Calendar size={20} color="#737373" />
-            </Pressable>
+            {albumFilter ? null : (
+              <Pressable
+                onPress={() => setJumpOpen(true)}
+                accessibilityLabel={t.gallery.jumpToMonth}
+                hitSlop={8}
+                className="pl-2"
+              >
+                <Calendar size={20} color="#737373" />
+              </Pressable>
+            )}
           </View>
         </Animated.View>
       )}
@@ -932,18 +1043,33 @@ export default function GalleryScreen() {
           </Pressable>
         </View>
       ) : null}
+      {scopeYm ? (
+        <View className="flex-row items-center justify-between mx-4 mb-2 px-3 py-1.5 rounded-xl bg-accent/10 border border-accent/20">
+          <View className="flex-row items-center gap-2 flex-1 mr-2">
+            <Calendar size={15} color="#4f46e5" />
+            <Text className="text-xs font-semibold text-accent" numberOfLines={1}>
+              {t.gallery.monthScope(monthLabelUtc(scopeYm))}
+              {scopeCount != null ? ` · ${t.gallery.monthScopeCount(scopeCount)}` : ""}
+            </Text>
+          </View>
+          <Pressable
+            onPress={clearMonthScope}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t.gallery.monthBackToAll}
+          >
+            <View className="flex-row items-center gap-1">
+              <Text className="text-xs font-semibold text-accent">
+                {t.gallery.monthBackToAllShort}
+              </Text>
+              <X size={13} color="#4f46e5" />
+            </View>
+          </Pressable>
+        </View>
+      ) : null}
       {!selected ? <SmartSyncBanner /> : null}
       {selected || timelineFilter !== "all" || albumFilter ? null : <MemoriesBar />}
-      {isEmpty ? (
-        <EmptyState
-          title={albumFilter ? "Álbum sin fotos" : t.gallery.emptyTitle}
-          body={
-            albumFilter ? "Este álbum no tiene fotos o videos disponibles." : t.gallery.emptyBody
-          }
-          actionLabel={albumFilter ? "Ver todas las fotos" : t.gallery.emptyAction}
-          action={albumFilter ? () => setAlbumFilter(null) : () => router.push("/(tabs)/backup")}
-        />
-      ) : (
+      <View className="flex-1">
         <GestureDetector gesture={pinch}>
           <View
             ref={gridRef}
@@ -958,20 +1084,17 @@ export default function GalleryScreen() {
             onTouchCancel={() => setDragSelecting(false)}
           >
             <FlashList<GalleryRow>
-              // FlashList 2.0.2 queda en blanco tras un swap grande de `data`
-              // (solo monta la primera fila hasta un scroll): remontar la lista
-              // cuando cambia el alcance de los datos fuerza un layout limpio.
-              key={`${timelineFilter}|${albumFilter ? `${albumFilter.type}:${albumFilter.albumId}` : "all"}|${syncedAlbumIds?.join(",") ?? "ALL"}|${timelineBefore ?? ""}|${columns}`}
+              // Remontaje solo cuando el alcance nuevo ya tiene filas (ver
+              // `committedScope`): el FlashList nuevo arranca con layout limpio.
+              key={`${scopeKey}|${committedScope.current}|${columns}`}
               ref={listRef}
               data={rows}
-              keyExtractor={(r) => r.key}
+              keyExtractor={listKeyExtractor}
               numColumns={columns}
               stickyHeaderIndices={sticky}
               scrollEnabled={!dragSelecting}
-              getItemType={(r) => r.type}
-              overrideItemLayout={(layout, item) => {
-                if (item.type === "header") layout.span = columns;
-              }}
+              getItemType={listItemType}
+              overrideItemLayout={overrideItemLayout}
               // drawDistance acotado: cada celda de video decodifica un frame
               // (~8 MB transitorio); 2×viewport de margen dejaba decenas de
               // decodes concurrentes y el SO mataba la app por presión.
@@ -993,45 +1116,9 @@ export default function GalleryScreen() {
                   }}
                 />
               }
-              renderItem={({ item, index }) => {
-                if (item.type === "header") {
-                  return (
-                    <Pressable
-                      onPress={selected ? () => toggleDay(index) : undefined}
-                      disabled={!selected}
-                      className="px-3 bg-neutral-50 dark:bg-black justify-center"
-                      style={{ height: HEADER_HEIGHT }}
-                    >
-                      <View className="flex-1 flex-row items-center justify-between gap-2">
-                        <Text className="text-base font-bold text-neutral-900 dark:text-white">
-                          {item.label}
-                        </Text>
-                        {item.location ? (
-                          <Text
-                            className="text-neutral-500 dark:text-neutral-400 text-xs font-medium text-right"
-                            numberOfLines={1}
-                          >
-                            {item.location}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  );
-                }
-                return (
-                  <PhotoCell
-                    photo={item.photo}
-                    size={cell}
-                    selecting={!!selected}
-                    selected={!!selected?.has(item.photo.key)}
-                    highPriority={index < 18}
-                    onPress={onCellPress}
-                    onLongPress={beginSelect}
-                  />
-                );
-              }}
+              renderItem={renderItem}
             />
-            {rows.length > 20 ? (
+            {rows.length > 20 && !albumFilter ? (
               <FastScrubber
                 geometry={geometry}
                 rows={rows}
@@ -1042,7 +1129,53 @@ export default function GalleryScreen() {
             ) : null}
           </View>
         </GestureDetector>
-      )}
+        {monthView === "loading-month" ? (
+          <View
+            className="absolute inset-0 items-center justify-center bg-neutral-50 dark:bg-black"
+            accessibilityLiveRegion="polite"
+          >
+            <ActivityIndicator size="large" color="#4f46e5" />
+            <Text className="text-sm text-neutral-500 mt-3">{t.gallery.monthLoading}</Text>
+          </View>
+        ) : monthView === "loading" ? (
+          <View className="absolute inset-0 items-center justify-center bg-neutral-50 dark:bg-black">
+            <ActivityIndicator size="large" color="#4f46e5" />
+          </View>
+        ) : monthView === "empty-month" ? (
+          <View className="absolute inset-0 bg-neutral-50 dark:bg-black">
+            <EmptyState
+              title={t.gallery.monthEmptyTitle}
+              body={t.gallery.monthEmptyBody}
+              actionLabel={t.gallery.monthBackToAll}
+              action={clearMonthScope}
+            />
+          </View>
+        ) : monthView === "error" ? (
+          <View className="absolute inset-0 bg-neutral-50 dark:bg-black">
+            <EmptyState
+              title={t.gallery.monthErrorTitle}
+              body={t.gallery.monthErrorBody}
+              actionLabel={t.gallery.monthRetry}
+              action={() => void query.refetch()}
+            />
+          </View>
+        ) : isEmpty ? (
+          <View className="absolute inset-0 bg-neutral-50 dark:bg-black">
+            <EmptyState
+              title={albumFilter ? "Álbum sin fotos" : t.gallery.emptyTitle}
+              body={
+                albumFilter
+                  ? "Este álbum no tiene fotos o videos disponibles."
+                  : t.gallery.emptyBody
+              }
+              actionLabel={albumFilter ? "Ver todas las fotos" : t.gallery.emptyAction}
+              action={
+                albumFilter ? () => setAlbumFilter(null) : () => router.push("/(tabs)/backup")
+              }
+            />
+          </View>
+        ) : null}
+      </View>
       <Modal
         visible={jumpOpen}
         transparent
@@ -1058,25 +1191,53 @@ export default function GalleryScreen() {
           <FlatList
             data={months.data?.months ?? []}
             keyExtractor={(m) => m.month}
+            ListHeaderComponent={
+              timelineBefore ? (
+                <Pressable
+                  className="flex-row justify-between items-center py-3 border-b border-neutral-100 dark:border-neutral-800"
+                  onPress={() => {
+                    setJumpOpen(false);
+                    clearMonthScope();
+                  }}
+                >
+                  <Text className="text-base font-semibold text-accent">
+                    {t.gallery.monthBackToAll}
+                  </Text>
+                </Pressable>
+              ) : null
+            }
             ListEmptyComponent={
               <Text className="text-sm text-neutral-500 py-6 text-center">
                 {months.isPending ? "…" : t.gallery.jumpEmpty}
               </Text>
             }
-            renderItem={({ item }) => (
-              <Pressable
-                className="flex-row justify-between items-center py-3 border-b border-neutral-100 dark:border-neutral-800"
-                onPress={() => {
-                  setJumpOpen(false);
-                  jumpToMonth(item.month);
-                }}
-              >
-                <Text className="text-base text-neutral-900 dark:text-white capitalize">
-                  {monthLabel(item.month)}
-                </Text>
-                <Text className="text-sm text-neutral-500">{item.count}</Text>
-              </Pressable>
-            )}
+            renderItem={({ item }) => {
+              const active = scopeYm === item.month;
+              return (
+                <Pressable
+                  className={`flex-row justify-between items-center py-3 border-b border-neutral-100 dark:border-neutral-800 ${
+                    active ? "bg-accent/5" : ""
+                  }`}
+                  accessibilityState={{ selected: active }}
+                  onPress={() => {
+                    setJumpOpen(false);
+                    jumpToMonth(item.month);
+                  }}
+                >
+                  <View className="flex-row items-center gap-2">
+                    {active ? <Check size={16} color="#4f46e5" /> : null}
+                    <Text
+                      className={`text-base ${
+                        active ? "text-accent font-semibold" : "text-neutral-900 dark:text-white"
+                      }`}
+                    >
+                      {monthLabelUtc(item.month)}
+                    </Text>
+                  </View>
+                  <Text className="text-sm text-neutral-500">{item.count}</Text>
+                </Pressable>
+              );
+            }}
           />
         </View>
       </Modal>

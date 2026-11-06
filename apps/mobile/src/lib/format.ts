@@ -22,8 +22,39 @@ export function formatRelative(ts: number): string {
   return t.time.daysAgo(Math.floor(h / 24));
 }
 
+/**
+ * Los formateadores Intl se comparten: construir `DateTimeFormat` es caro
+ * (~100 µs) y `sectionLabel` se llama por cada foto al armar las filas de la
+ * galería — con biblioteca grande eran varios segundos de hilo bloqueado.
+ */
+const monthFormatter = new Intl.DateTimeFormat("es", { month: "long", year: "numeric" });
+const dateTimeFormatter = new Intl.DateTimeFormat("es", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 export function monthLabel(ts: number): string {
-  const s = new Intl.DateTimeFormat("es", { month: "long", year: "numeric" }).format(new Date(ts));
+  const s = monthFormatter.format(new Date(ts));
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Etiqueta de un mes `YYYY-MM` en UTC (la `dateGroup` del API es UTC). El
+ * formateador se comparte: el selector de meses y el globo del scrubber lo
+ * llaman por cada fila y construir `Intl.DateTimeFormat` cada vez es caro.
+ */
+const monthUtcFormatter = new Intl.DateTimeFormat("es", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** "2026-10" → "Octubre de 2026". */
+export function monthLabelUtc(ym: string): string {
+  const s = monthUtcFormatter.format(new Date(`${ym}-01T00:00:00Z`));
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -47,13 +78,7 @@ export function sectionLabel(ts: number, now = Date.now()): string {
 }
 
 export function formatDateTime(ts: number): string {
-  return new Intl.DateTimeFormat("es", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(ts));
+  return dateTimeFormatter.format(new Date(ts));
 }
 
 export function formatDuration(ms: number | null): string | null {

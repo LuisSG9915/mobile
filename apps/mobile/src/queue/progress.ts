@@ -122,9 +122,23 @@ let lastRunning = false;
 /** Bytes ya contabilizados por asset en el último snapshot estructural. */
 const sentByAsset = new Map<string, number>();
 
-/** Recalcula la proyección y la publica en el store global. */
-export function publishSyncProgress(running: boolean): void {
-  lastRunning = running;
+/**
+ * La proyección lee la cola entera de SQLite y además se invocaba ~2 veces por
+ * emit (emitStructure + suscriptor de useSyncProgressAuto): con ~7 emits por
+ * archivo eran decenas de escaneos completos por segundo durante el respaldo.
+ * Throttle con borde inicial+final: el anillo/badge siguen vivos (~2.5 Hz)
+ * sin saturar el hilo JS.
+ */
+const PROGRESS_THROTTLE_MS = 400;
+let progressTimer: ReturnType<typeof setTimeout> | null = null;
+let lastProgressAt = 0;
+let pendingRunning: boolean | null = null;
+
+function flushSyncProgress(): void {
+  progressTimer = null;
+  lastProgressAt = Date.now();
+  const running = pendingRunning ?? lastRunning;
+  pendingRunning = null;
   const items = getQueueItems();
   useSyncProgress
     .getState()
@@ -133,6 +147,15 @@ export function publishSyncProgress(running: boolean): void {
   for (const item of items) {
     sentByAsset.set(item.asset_id, Math.min(item.bytes_sent || 0, item.bytes_total || 0));
   }
+}
+
+/** Recalcula la proyección y la publica en el store global (throttleado). */
+export function publishSyncProgress(running: boolean): void {
+  lastRunning = running;
+  pendingRunning = running;
+  const wait = PROGRESS_THROTTLE_MS - (Date.now() - lastProgressAt);
+  if (wait <= 0) flushSyncProgress();
+  else if (progressTimer === null) progressTimer = setTimeout(flushSyncProgress, wait);
 }
 
 /**

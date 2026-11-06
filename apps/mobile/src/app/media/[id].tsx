@@ -616,6 +616,8 @@ export default function MediaViewer() {
   const params = useLocalSearchParams<{
     id: string;
     albumId?: string;
+    /** Alcance de salto temporal de la galería (`before` del timeline). */
+    before?: string;
     localUri?: string;
     assetId?: string;
     mediaType?: "photo" | "video";
@@ -664,7 +666,14 @@ export default function MediaViewer() {
     return albumFilter;
   }, [params.albumId, albumFilter]);
 
-  const { photos, query: timeline } = useHybridGallery(filter, activeAlbumFilter);
+  // El alcance de mes viaja como param: sin él el carrusel se montaba sobre la
+  // primera página del timeline y una foto de un mes antiguo no aparecía en
+  // `items` (sin swipe). Con el mismo `before` reutiliza la query cacheada.
+  const { photos, query: timeline } = useHybridGallery(
+    filter,
+    activeAlbumFilter,
+    params.before || undefined,
+  );
 
   const albumDetailQuery = useQuery({
     queryKey: ["album", params.albumId],

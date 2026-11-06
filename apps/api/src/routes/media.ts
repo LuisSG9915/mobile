@@ -8,6 +8,8 @@ import {
   favoriteResponseSchema,
   mediaDetailSchema,
   okSchema,
+  presignBatchRequestSchema,
+  presignBatchResponseSchema,
   STORAGE_QUOTA_BYTES,
   statsSchema,
   trashResponseSchema,
@@ -19,7 +21,7 @@ import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { tagMediaItem } from "../lib/ai";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
-import { presignGet, presignGetDownload } from "../lib/s3";
+import { presignGet, presignGetBatch, presignGetDownload } from "../lib/s3";
 import { releaseStorageReservation, removeStorageUsage } from "../lib/storage-stats";
 
 export function parseTags(raw: string | null | undefined): string[] {
@@ -219,6 +221,38 @@ const statsRoute = createRoute({
   responses: {
     200: { content: { "application/json": { schema: statsSchema } }, description: "Estadísticas" },
     401: err("Sin sesión"),
+  },
+});
+
+const presignBatchRoute = createRoute({
+  method: "post",
+  path: "/media/presign-batch",
+  tags: ["media"],
+  summary: "URLs prefirmadas GET en lote",
+  description:
+    "Firma hasta 100 claves R2 del propio usuario en una sola llamada (elimina el N+1 de presignGet por item del timeline). Solo acepta claves bajo users/{userId}/ — el ownership lo valida el prefijo.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: presignBatchRequestSchema,
+        },
+      },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: presignBatchResponseSchema,
+        },
+      },
+      description: "Mapa key → URL prefirmada",
+    },
+    400: err("Petición inválida"),
+    401: err("Sin sesión"),
+    403: err("Clave de otro usuario"),
   },
 });
 
@@ -507,24 +541,26 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
         ? encodeCursor({ t: last.deletedAt, id: last.id })
         : null;
 
-    const items = await Promise.all(
-      page.map(async (m) => ({
-        id: m.id,
-        sha256: m.sha256,
-        mediaType: m.mediaType,
-        takenAt: m.takenAt,
-        dateGroup: m.dateGroup,
-        width: m.width,
-        height: m.height,
-        durationMs: m.durationMs,
-        isFavorite: m.isFavorite,
-        isScreenshot: Boolean(m.isScreenshot),
-        isDocument: Boolean(m.isDocument),
-        thumbhash: m.thumbhash,
-        thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-        deletedAt: m.deletedAt ?? 0,
-      })),
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      page.map((m) => m.r2KeyThumb),
     );
+    const items = page.map((m) => ({
+      id: m.id,
+      sha256: m.sha256,
+      mediaType: m.mediaType,
+      takenAt: m.takenAt,
+      dateGroup: m.dateGroup,
+      width: m.width,
+      height: m.height,
+      durationMs: m.durationMs,
+      isFavorite: m.isFavorite,
+      isScreenshot: Boolean(m.isScreenshot),
+      isDocument: Boolean(m.isDocument),
+      thumbhash: m.thumbhash,
+      thumbUrl: thumbUrls[m.r2KeyThumb] ?? "",
+      deletedAt: m.deletedAt ?? 0,
+    }));
     return c.json({ items, nextCursor }, 200);
   })
   .openapi(emptyTrashRoute, async (c) => {
@@ -615,4 +651,18 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       },
       200,
     );
+  })
+  .openapi(presignBatchRoute, async (c) => {
+    const user = c.get("user");
+    const { keys } = c.req.valid("json");
+
+    // Ownership: solo claves bajo el prefijo del usuario. Cualquier otra clave
+    // es una fuga de archivos ajenos (403 sin firmar nada).
+    const prefix = `users/${user.id}/`;
+    if (keys.some((k) => !k.startsWith(prefix))) {
+      return c.json({ error: "forbidden", message: "Clave fuera de tu espacio." }, 403);
+    }
+
+    const urls = await presignGetBatch(c.env, keys);
+    return c.json({ urls }, 200);
   });

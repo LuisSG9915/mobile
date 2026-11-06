@@ -12,7 +12,7 @@ import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
-import { presignGet } from "../lib/s3";
+import { presignGetBatch } from "../lib/s3";
 
 const memoriesRoute = createRoute({
   method: "get",
@@ -147,40 +147,41 @@ export const timelineApp = new OpenAPIHono<AppEnv>()
       }
     }
 
-    const memories = await Promise.all(
-      Array.from(groupsMap.entries())
-        .sort((a, b) => b[0] - a[0])
-        .map(async ([year, itemsInYear]) => {
-          const yearsAgo = currentYear - year;
-          const title = yearsAgo === 1 ? "Hace 1 año" : `Hace ${yearsAgo} años`;
-          const date = `${year}-${targetMMDD}`;
-          const items = await Promise.all(
-            itemsInYear.map(async (m) => ({
-              id: m.id,
-              sha256: m.sha256,
-              mediaType: m.mediaType,
-              takenAt: m.takenAt,
-              dateGroup: m.dateGroup,
-              city: m.city ?? null,
-              width: m.width,
-              height: m.height,
-              durationMs: m.durationMs,
-              isFavorite: m.isFavorite,
-              isScreenshot: Boolean(m.isScreenshot),
-              isDocument: Boolean(m.isDocument),
-              thumbhash: m.thumbhash,
-              thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-            })),
-          );
-          return {
-            id: `memory-${year}-${targetMMDD}`,
-            title,
-            yearsAgo,
-            date,
-            items,
-          };
-        }),
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      pageRows.map((m) => m.r2KeyThumb),
     );
+
+    const memories = Array.from(groupsMap.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([year, itemsInYear]) => {
+        const yearsAgo = currentYear - year;
+        const title = yearsAgo === 1 ? "Hace 1 año" : `Hace ${yearsAgo} años`;
+        const date = `${year}-${targetMMDD}`;
+        const items = itemsInYear.map((m) => ({
+          id: m.id,
+          sha256: m.sha256,
+          mediaType: m.mediaType,
+          takenAt: m.takenAt,
+          dateGroup: m.dateGroup,
+          city: m.city ?? null,
+          width: m.width,
+          height: m.height,
+          durationMs: m.durationMs,
+          isFavorite: m.isFavorite,
+          isScreenshot: Boolean(m.isScreenshot),
+          isDocument: Boolean(m.isDocument),
+          thumbhash: m.thumbhash,
+          thumbUrl: thumbUrls[m.r2KeyThumb] ?? "",
+        }));
+        return {
+          id: `memory-${year}-${targetMMDD}`,
+          title,
+          yearsAgo,
+          date,
+          items,
+        };
+      });
 
     return c.json({ memories, nextCursor }, 200);
   })
@@ -260,24 +261,26 @@ export const timelineApp = new OpenAPIHono<AppEnv>()
     const nextCursor =
       rows.length > limit && last ? encodeCursor({ t: last.takenAt, id: last.id }) : null;
 
-    const items = await Promise.all(
-      page.map(async (m) => ({
-        id: m.id,
-        sha256: m.sha256,
-        mediaType: m.mediaType,
-        takenAt: m.takenAt,
-        dateGroup: m.dateGroup,
-        city: m.city ?? null,
-        width: m.width,
-        height: m.height,
-        durationMs: m.durationMs,
-        isFavorite: m.isFavorite,
-        isScreenshot: Boolean(m.isScreenshot),
-        isDocument: Boolean(m.isDocument),
-        thumbhash: m.thumbhash,
-        thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-      })),
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      page.map((m) => m.r2KeyThumb),
     );
+    const items = page.map((m) => ({
+      id: m.id,
+      sha256: m.sha256,
+      mediaType: m.mediaType,
+      takenAt: m.takenAt,
+      dateGroup: m.dateGroup,
+      city: m.city ?? null,
+      width: m.width,
+      height: m.height,
+      durationMs: m.durationMs,
+      isFavorite: m.isFavorite,
+      isScreenshot: Boolean(m.isScreenshot),
+      isDocument: Boolean(m.isDocument),
+      thumbhash: m.thumbhash,
+      thumbUrl: thumbUrls[m.r2KeyThumb] ?? "",
+    }));
 
     return c.json({ items, nextCursor }, 200);
   });

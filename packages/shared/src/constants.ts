@@ -71,6 +71,11 @@ export const SYNC_STATUSES = [
 
 /** Máximo de items por página del timeline */
 export const TIMELINE_MAX_LIMIT = 200;
+/**
+ * Máximo de claves por lote en `POST /media/presign-batch`. Acota el trabajo
+ * de firma por request y el tamaño de la respuesta.
+ */
+export const PRESIGN_BATCH_MAX_KEYS = 100;
 /** Días que un elemento permanece en la papelera */
 export const TRASH_RETENTION_DAYS = 30;
 /** Cuota de almacenamiento por usuario (10 GB) */

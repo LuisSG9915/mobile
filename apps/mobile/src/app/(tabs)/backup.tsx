@@ -1,12 +1,12 @@
 import { router } from "expo-router";
 import { AlertCircle, CloudOff, Folder, HardDrive, RotateCcw } from "lucide-react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, Platform, ScrollView, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { resendVerificationEmail, useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
-import { useQueueEvents } from "../../lib/events";
+import { useQueueEvents, useThrottledQueueTick } from "../../lib/events";
 import { formatBytes, formatDuration, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { useSettings, useSyncProgress } from "../../lib/store";
@@ -28,17 +28,25 @@ import { pickAndEnqueue } from "../../web/files";
 const isWeb = Platform.OS === "web";
 
 export default function BackupScreen() {
-  useQueueEvents((s) => s.tick); // re-render ante cambios de la cola
+  // La cola emite ~7 veces por archivo. Throttle en la suscripción: la
+  // pantalla se re-renderiza ~2.5 Hz y no en cada transición.
+  const tick = useThrottledQueueTick(400);
   const { data: session } = useSession();
   const { wifiOnly, includeVideos, setWifiOnly, setIncludeVideos, syncedAlbumIds } = useSettings();
   const [scanning, setScanning] = useState(false);
   const [pickWarning, setPickWarning] = useState<string | null>(null);
 
-  const stats = getQueueStats();
-  const failed = getFailed();
+  // Lecturas SQLite (stats, fallidos y sobre todo getSyncedLocal, que escanea
+  // hasta 2000 filas) memorizadas por tick: antes se repetían en cada render,
+  // incluidos los ticks de bytes del store de progreso.
+  const stats = useMemo(() => getQueueStats(), [tick]);
+  const failed = useMemo(() => getFailed(), [tick]);
   const sync = useSyncProgress();
   // En web no hay copia local que liberar (el blob se borra al terminar).
-  const syncedLocal = isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal();
+  const syncedLocal = useMemo(
+    () => (isWeb ? { assetIds: [], totalBytes: 0 } : getSyncedLocal()),
+    [tick],
+  );
   const lastBackup = getLastScanTs();
   const progress = stats.total ? stats.done / stats.total : 0;
   const running = isRunning();

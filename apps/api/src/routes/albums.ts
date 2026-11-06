@@ -19,7 +19,7 @@ import { getDb } from "../db/client";
 import { album, albumMedia, media } from "../db/schema";
 import { type AppEnv, webOrigins } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
-import { presignGet, presignGetDownload, presignGetWithTtl } from "../lib/s3";
+import { presignGet, presignGetBatch, presignGetDownload, presignGetWithTtl } from "../lib/s3";
 import { mapInChunks } from "../lib/slices";
 
 const err = (description: string) => ({
@@ -451,24 +451,26 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
           })
         : null;
 
-    const items = await Promise.all(
-      pageRows.map(async ({ media: m }) => ({
-        id: m.id,
-        sha256: m.sha256,
-        mediaType: m.mediaType,
-        takenAt: m.takenAt,
-        dateGroup: m.dateGroup,
-        city: m.city ?? null,
-        width: m.width,
-        height: m.height,
-        durationMs: m.durationMs,
-        isFavorite: m.isFavorite,
-        isScreenshot: Boolean(m.isScreenshot),
-        isDocument: Boolean(m.isDocument),
-        thumbhash: m.thumbhash,
-        thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-      })),
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      pageRows.map(({ media: m }) => m.r2KeyThumb),
     );
+    const items = pageRows.map(({ media: m }) => ({
+      id: m.id,
+      sha256: m.sha256,
+      mediaType: m.mediaType,
+      takenAt: m.takenAt,
+      dateGroup: m.dateGroup,
+      city: m.city ?? null,
+      width: m.width,
+      height: m.height,
+      durationMs: m.durationMs,
+      isFavorite: m.isFavorite,
+      isScreenshot: Boolean(m.isScreenshot),
+      isDocument: Boolean(m.isDocument),
+      thumbhash: m.thumbhash,
+      thumbUrl: thumbUrls[m.r2KeyThumb] ?? "",
+    }));
 
     const totalCountRes = await db
       .select({ count: sql<number>`count(*)` })

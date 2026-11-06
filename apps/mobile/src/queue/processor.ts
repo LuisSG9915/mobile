@@ -76,6 +76,9 @@ let refreshPending = false;
 function invalidateRemoteData() {
   try {
     void queryClient.invalidateQueries({ queryKey: ["timeline"] }).catch(() => {});
+    // El selector de meses también depende del timeline: un mes nuevo debe
+    // aparecer en cuanto termina la subida, no cuando expire su staleTime.
+    void queryClient.invalidateQueries({ queryKey: ["timeline-months"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["stats"] }).catch(() => {});
     void queryClient.invalidateQueries({ queryKey: ["storage"] }).catch(() => {});
   } catch {}

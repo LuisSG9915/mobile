@@ -9,7 +9,11 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { PRESIGN_GET_TTL_SECONDS, PRESIGN_GET_WINDOW_SECONDS } from "@photos/shared";
+import {
+  PRESIGN_BATCH_MAX_KEYS,
+  PRESIGN_GET_TTL_SECONDS,
+  PRESIGN_GET_WINDOW_SECONDS,
+} from "@photos/shared";
 import type { Bindings } from "../env";
 
 let cached: { key: string; client: S3Client } | null = null;
@@ -358,4 +362,22 @@ export async function abortStaleMultipartUploads(
     console.error("Failed to list multipart uploads:", err);
     return 0;
   }
+}
+
+/**
+ * Batch de URLs prefirmadas GET: delega cada clave en `presignGet` para
+ * reutilizar su caché por ventana de 6 h (una misma thumb repetida no se
+ * refirma). En `Promise.all` moderado mantiene el orden por clave.
+ */
+export async function presignGetBatch(
+  env: Bindings,
+  keys: string[],
+): Promise<Record<string, string>> {
+  const ownKeys = [...new Set(keys)].slice(0, PRESIGN_BATCH_MAX_KEYS);
+  const urls = await Promise.all(ownKeys.map((key) => presignGet(env, key)));
+  const results: Record<string, string> = {};
+  for (let i = 0; i < ownKeys.length; i++) {
+    results[ownKeys[i]] = urls[i] as string;
+  }
+  return results;
 }

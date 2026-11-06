@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { QueueItem, QueueState } from "../queue/types";
 import {
   buildGalleryRows,
+  filterToBefore,
+  type HybridPhoto,
   type LocalAsset,
   matchLocalToRemote,
   mergeGallery,
@@ -427,5 +429,35 @@ describe("buildGalleryRows", () => {
       remoteItems: [],
     });
     expect(p1[0].takenAt).toBe(p2[0].takenAt);
+  });
+});
+
+describe("filterToBefore", () => {
+  const before = "2023-11-30T23:59:59.999Z";
+
+  it("sin alcance o con fecha inválida devuelve la misma lista", () => {
+    const photos = [{ takenAt: 1, key: "a" }] as HybridPhoto[];
+    expect(filterToBefore(photos)).toBe(photos);
+    expect(filterToBefore(photos, "no-es-fecha")).toBe(photos);
+  });
+
+  it("deja solo lo capturado hasta el fin del mes, incluido el límite", () => {
+    const end = Date.parse(before);
+    const photos = [
+      { takenAt: end + 1, key: "hoy" },
+      { takenAt: end, key: "limite" },
+      { takenAt: end - 1, key: "antigua" },
+    ] as HybridPhoto[];
+
+    expect(filterToBefore(photos, before).map((p) => p.key)).toEqual(["limite", "antigua"]);
+  });
+
+  it("excluye los pendientes de hoy al saltar a un mes antiguo", () => {
+    const photos = [
+      { takenAt: Date.parse("2026-11-06T10:00:00Z"), key: "q-hoy" },
+      { takenAt: Date.parse("2023-11-15T10:00:00Z"), key: "r-noviembre" },
+    ] as HybridPhoto[];
+
+    expect(filterToBefore(photos, before).map((p) => p.key)).toEqual(["r-noviembre"]);
   });
 });

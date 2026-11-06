@@ -107,6 +107,10 @@ export function matchLocalToRemote(
   remoteItems: TimelineItem[],
   claimedRemoteIds: ReadonlySet<string> = new Set(),
 ): Map<string, TimelineItem> {
+  // Sin ambos lados no hay nada que emparejar: evita construir índices en cada
+  // fusión de una galería solo remota (o sin página remota cargada).
+  if (localAssets.length === 0 || remoteItems.length === 0) return new Map();
+
   // Índice por tipo + dimensiones normalizadas (ancho/alto pueden venir
   // girados): evita comparar cada local contra toda la página del timeline.
   const buckets = new Map<string, TimelineItem[]>();
@@ -321,6 +325,20 @@ export function mergeGallery({ localAssets, queueItems, remoteItems }: MergeInpu
 
   photos.sort((a, b) => b.takenAt - a.takenAt || a.key.localeCompare(b.key));
   return photos;
+}
+
+/**
+ * Acota la galería híbrida al alcance `before` del timeline (inclusive).
+ *
+ * El API ya acota los remotos, pero los assets locales y los pendientes de la
+ * cola se colaban en el mes elegido: el chip decía «Desde noviembre de 2023» y
+ * arriba seguían las fotos de hoy.
+ */
+export function filterToBefore(photos: HybridPhoto[], before?: string): HybridPhoto[] {
+  if (!before) return photos;
+  const beforeMs = Date.parse(before);
+  if (!Number.isFinite(beforeMs)) return photos;
+  return photos.filter((p) => p.takenAt <= beforeMs);
 }
 
 /** Intercala encabezados de día (Hoy / Ayer / mes) sobre la lista ordenada desc. */

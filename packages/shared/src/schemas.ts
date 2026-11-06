@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ALLOWED_EXTENSIONS,
   MAX_THUMB_BYTES,
+  PRESIGN_BATCH_MAX_KEYS,
   SYNC_STATUSES,
   TIMELINE_MAX_LIMIT,
 } from "./constants";
@@ -583,6 +584,21 @@ export const placesResponseSchema = z.object({
 
 export type PlaceItem = z.infer<typeof placeItemSchema>;
 export type PlacesResponse = z.infer<typeof placesResponseSchema>;
+
+// ---------- presign en lote ----------
+
+export const presignBatchRequestSchema = z.object({
+  /** Claves R2 propias (`users/{userId}/...`); el API rechaza las ajenas. */
+  keys: z.array(z.string().min(1).max(1024)).min(1).max(PRESIGN_BATCH_MAX_KEYS),
+});
+
+export const presignBatchResponseSchema = z.object({
+  /** Mapa clave R2 → URL prefirmada GET. */
+  urls: z.record(z.string(), z.string()),
+});
+
+export type PresignBatchRequest = z.infer<typeof presignBatchRequestSchema>;
+export type PresignBatchResponse = z.infer<typeof presignBatchResponseSchema>;
 
 // ---------- tipos ----------
 

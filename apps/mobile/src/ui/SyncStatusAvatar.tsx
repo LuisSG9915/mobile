@@ -8,7 +8,6 @@ import { useQueueEvents } from "../lib/events";
 import { formatBytes } from "../lib/format";
 import { useSyncProgress } from "../lib/store";
 import { getQueueStats, isBackupPaused, setBackupPaused } from "../queue/db";
-import { useSyncProgressAuto } from "../queue/progress";
 import { runBackupPass } from "../queue/runner";
 import type { SyncProgressStatus } from "../queue/types";
 
@@ -37,7 +36,6 @@ const STATUS_TEXT: Record<SyncProgressStatus, string> = {
  * con errores. Al pulsar abre un modal con el desglose de la copia.
  */
 export function SyncStatusAvatar() {
-  useSyncProgressAuto();
   const status = useSyncProgress((s) => s.status);
   const bytesUploaded = useSyncProgress((s) => s.bytesUploaded);
   const totalBytes = useSyncProgress((s) => s.totalBytes);

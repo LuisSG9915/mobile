@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { getQueueItems, reconcileQueueWithRemote } from "../queue/db";
-import { useLibraryEvents, useQueueEvents } from "./events";
+import { useLibraryEvents, useQueueEvents, useThrottledQueueTick } from "./events";
 import {
   buildGalleryRows,
+  filterToBefore,
   type GalleryRow,
   type HybridPhoto,
   type LocalAsset,
@@ -13,7 +14,7 @@ import {
   mergeGallery,
 } from "./gallery";
 import { listLocalAssets } from "./local-assets";
-import { useSettings } from "./store";
+import { useSettings, useSyncProgress } from "./store";
 import { useTimeline } from "./timeline";
 
 export type AlbumFilter =
@@ -29,6 +30,16 @@ export type AlbumFilter =
  */
 const LOCAL_SCOPES_KEPT = 3;
 const localAssetsCache = new Map<string, LocalAsset[]>();
+
+/**
+ * Última enumeración completa por alcance. El visor vuelve a montar
+ * `useHybridGallery` al abrir una foto; sin esta marca cada apertura repetía
+ * el escaneo de MediaLibrary (hasta 20 000 assets) aunque la caché estuviera
+ * caliente. Se invalida sola por tiempo o cuando `libTick` cambia (escaneo,
+ * "Liberar espacio", nueva foto).
+ */
+const LOCAL_SCAN_TTL_MS = 60_000;
+const localScanInfo = new Map<string, { at: number; libTick: number }>();
 
 function cacheScope(key: string, assets: LocalAsset[]) {
   localAssetsCache.delete(key);
@@ -58,11 +69,22 @@ export function useHybridGallery(
   albumFilter: AlbumFilter | null = null,
   before?: string,
 ) {
-  const tick = useQueueEvents((s) => s.tick);
+  // La cola emite en cada transición de estado (~7 por archivo). La
+  // suscripción va throttleada: la pantalla se re-renderiza ~3 veces/seg y la
+  // fusión se recomputa en ese mismo ritmo (borde final incluido), en vez de
+  // una evaluación por emit. Con el respaldo activo se afloja a ~1.5 s: cada
+  // fusión+filas recorre toda la biblioteca y a 300 ms consumía casi todo el
+  // presupuesto del hilo JS (cuadrícula negra, navegación congelada).
+  const syncStatus = useSyncProgress((s) => s.status);
+  const tick = useThrottledQueueTick(syncStatus === "syncing" ? 1500 : 300);
   // Solo se re-lista MediaLibrary al montar, al refrescar a mano y cuando la
   // biblioteca cambia de verdad (escaneo o "Liberar espacio"), no ante cada
   // tick de la cola — el listado completo es demasiado caro para cada badge.
   const libTick = useLibraryEvents((s) => s.tick);
+  // Espejo para que `refreshLocal` (estable) pueda marcar el escaneo con el
+  // tick de biblioteca vigente sin volverse a crear en cada evento.
+  const libTickRef = useRef(libTick);
+  libTickRef.current = libTick;
   const syncedAlbumIds = useSettings((s) => s.syncedAlbumIds);
   const localAlbumId = albumFilter?.type === "local" ? albumFilter.albumId : undefined;
   const scopeKey = localScopeKey(localAlbumId, syncedAlbumIds);
@@ -95,6 +117,9 @@ export function useHybridGallery(
           initialBatchSize: 300,
           pageSize: 1000,
         });
+        if (!signal?.aborted && scopeRef.current === key) {
+          localScanInfo.set(key, { at: Date.now(), libTick: libTickRef.current });
+        }
         commit(assets);
       } catch {
         // Sin permisos o error de MediaLibrary: galería solo remota/cola.
@@ -104,12 +129,23 @@ export function useHybridGallery(
   );
 
   useEffect(() => {
+    const cached = localAssetsCache.get(scopeKey);
+    const scan = localScanInfo.get(scopeKey);
+    const fresh =
+      scan != null && scan.libTick === libTick && Date.now() - scan.at < LOCAL_SCAN_TTL_MS;
+    // Caché caliente + sin cambios de biblioteca: reutilizarla. Es el caso del
+    // visor, que monta este hook otra vez al abrir una foto y antes repetía el
+    // escaneo completo de MediaLibrary.
+    if (cached && fresh) {
+      setLocalAssets(cached);
+      return;
+    }
     const controller = new AbortController();
     void refreshLocal(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [refreshLocal, libTick]);
+  }, [refreshLocal, libTick, scopeKey]);
 
   const query = useTimeline(filter, before);
 
@@ -204,6 +240,9 @@ export function useHybridGallery(
       // no pertenecen a este álbum del dispositivo y deben excluirse.
       merged = merged.filter((p) => !p.key.startsWith("r-"));
     }
+    // El `before` del API solo acota los remotos: locales y pendientes de la
+    // cola (incluidas las fotos de hoy) se colaban en un mes antiguo.
+    merged = filterToBefore(merged, before);
     // Los locales/en-cola no conocen favoritos: bajo ese filtro solo quedan
     // los remotos marcados (y las filas de cola enlazadas a ellos).
     if (filter === "favorites") return merged.filter((p) => p.remote?.isFavorite === true);
@@ -221,6 +260,7 @@ export function useHybridGallery(
     filter,
     albumFilter,
     syncedAlbumIds,
+    before,
   ]);
 
   const rows = useMemo<GalleryRow[]>(() => buildGalleryRows(photos), [photos]);
