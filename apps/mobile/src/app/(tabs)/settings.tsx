@@ -46,7 +46,7 @@ export default function SettingsScreen() {
     mutationFn: (id: string) => api.revokeSession(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["user-sessions"] });
-      toast.success("Sesión revocada");
+      toast.success(t.settings.sessionRevoked);
     },
     onError: (err: Error) => toast.error(err.message || t.auth.genericError),
   });
@@ -65,7 +65,7 @@ export default function SettingsScreen() {
         a.download = `photos-export-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
-        toast.success("Datos exportados en JSON");
+        toast.success(t.settings.exportedJson);
       } else {
         const fileUri = `${FileSystem.cacheDirectory}photos-export-${Date.now()}.json`;
         await FileSystem.writeAsStringAsync(fileUri, jsonStr, {
@@ -78,7 +78,7 @@ export default function SettingsScreen() {
             UTI: "public.json",
           });
         }
-        toast.success("Datos exportados");
+        toast.success(t.settings.exported);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error al exportar datos";
@@ -150,7 +150,7 @@ export default function SettingsScreen() {
   const executeFreeSpace = (olderThanDays?: number) => {
     const { assetIds, totalBytes } = getSyncedLocal(olderThanDays);
     if (!assetIds.length) {
-      toast.info("No hay elementos respaldados que coincidan con ese criterio.");
+      toast.info(t.settings.nothingToFree);
       return;
     }
     const size = formatBytes(totalBytes);

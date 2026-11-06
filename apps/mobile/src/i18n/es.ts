@@ -99,6 +99,7 @@ export const t = {
     verifyResendFailed: "No se pudo reenviar. Inténtalo de nuevo en unos minutos.",
     paused: "Respaldo en pausa",
     queued: (n: number) => `En cola (${n} pendientes)`,
+    resendNeedsLogin: "Vuelve a iniciar sesión para reenviar la verificación.",
   },
   gallery: {
     emptyTitle: "Aún no hay fotos respaldadas",
@@ -443,6 +444,10 @@ export const t = {
     adminHint: "Uso por usuario",
     about: "Acerca de",
     version: "Versión",
+    sessionRevoked: "Sesión revocada",
+    exportedJson: "Datos exportados en JSON",
+    exported: "Datos exportados",
+    nothingToFree: "No hay elementos respaldados que coincidan con ese criterio.",
   },
   admin: {
     title: "Almacenamiento R2",

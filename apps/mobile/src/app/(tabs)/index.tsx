@@ -136,7 +136,9 @@ const PhotoCell = memo(
         : [{ uri: uri ?? undefined, cacheKey, width: px, height: px }];
     return (
       <Pressable
-        accessibilityLabel={photo.mediaType === "video" ? "video" : "foto"}
+        accessibilityRole="imagebutton"
+        accessibilityLabel={`${photo.mediaType === "video" ? "Video" : "Foto"}${selected ? ", seleccionada" : ""}`}
+        accessibilityState={{ selected }}
         onPress={() => onPress(photo)}
         onLongPress={() => onLongPress(photo)}
         delayLongPress={350}

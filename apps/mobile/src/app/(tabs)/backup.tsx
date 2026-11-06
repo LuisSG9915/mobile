@@ -57,7 +57,7 @@ export default function BackupScreen() {
   const resendVerification = async () => {
     const email = session?.user?.email;
     if (!email) {
-      toast.error("Vuelve a iniciar sesión para reenviar la verificación.");
+      toast.error(t.backup.resendNeedsLogin);
       return;
     }
     const res = await resendVerificationEmail(email);
