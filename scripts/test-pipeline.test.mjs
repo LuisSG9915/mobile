@@ -301,6 +301,8 @@ test("la web declara cabeceras de seguridad (_headers) para CSP/HSTS", () => {
   assert.match(src, /Content-Security-Policy:/);
   assert.match(src, /Strict-Transport-Security:/);
   assert.match(src, /frame-ancestors 'none'/);
+  assert.match(src, /img-src[^;]*basemaps\.cartocdn\.com/);
+  assert.ok(src.includes("basemaps.cartocdn.com"));
 });
 
 test("el servidor no expone la ruta ambigua multipart/complete", () => {
@@ -402,7 +404,7 @@ test("check-sentry: con --optional y sin DSN sale con 0", () => {
   const env = { ...process.env };
   delete env.EXPO_PUBLIC_SENTRY_DSN;
   delete env.SENTRY_DSN;
-  const res = spawnSync(process.execPath, [CHECK_SENTRY, "--optional"], { env, encoding: "utf8" });
+  const res = spawnSync(process.execPath, [CHECK_SENTRY, "--optional"], { cwd: tmp(), env, encoding: "utf8" });
   assert.equal(res.status, 0);
   assert.match(res.stdout, /opcional/);
 });
