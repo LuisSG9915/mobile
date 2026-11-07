@@ -13,7 +13,7 @@ import {
   matchLocalToRemote,
   mergeGallery,
 } from "./gallery";
-import { listLocalAssets, listLocalAssetsPage } from "./local-assets";
+import { getLocalAssetById, listLocalAssets, listLocalAssetsPage } from "./local-assets";
 import { useSettings, useSyncProgress } from "./store";
 import { useTimeline } from "./timeline";
 
@@ -29,6 +29,11 @@ export type AlbumFilter =
  * restaure al instante en vez de quedar con datos del alcance previo.
  */
 const LOCAL_SCOPES_KEPT = 3;
+
+// Caché del modo ventana: assets + cursor + hasMore por alcance, para que el
+// visor (que remonta el hook) restaure la ventana sin re-escanear MediaLibrary.
+const windowedCursorCache = new Map<string, string | null>();
+const windowedHasMoreCache = new Map<string, boolean>();
 
 /**
  * Tope de assets locales materializados en memoria para el grafo híbrido.
@@ -100,6 +105,8 @@ export function useHybridGallery(
   const scopeKey = localScopeKey(localAlbumId, syncedAlbumIds);
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
+  const isWindowedMode =
+    localAlbumId == null && (syncedAlbumIds == null || syncedAlbumIds === undefined);
   const [localAssets, setLocalAssets] = useState<LocalAsset[]>(
     () => localAssetsCache.get(scopeKey) ?? [],
   );
@@ -115,22 +122,23 @@ export function useHybridGallery(
   // mostrar assets del alcance anterior (filtros como syncedAlbumIds los
   // reducirían a una cuadrícula vacía).
   useEffect(() => {
+    setLocalLoadingMore(false);
     const cached = localAssetsCache.get(scopeKey);
     if (cached) {
       setLocalAssets(cached);
-      // En modo ventana no tenemos cursor cacheado: asumimos que puede haber más
-      // si la ventana vino llena.
-      setLocalCursor(null);
-      setLocalHasMore(cached.length >= FIRST_LOCAL_PAGE);
+      if (isWindowedMode) {
+        setLocalCursor(windowedCursorCache.get(scopeKey) ?? null);
+        setLocalHasMore(windowedHasMoreCache.get(scopeKey) ?? cached.length >= FIRST_LOCAL_PAGE);
+      } else {
+        setLocalCursor(null);
+        setLocalHasMore(false);
+      }
     } else {
       setLocalAssets([]);
       setLocalCursor(null);
       setLocalHasMore(false);
     }
-  }, [scopeKey]);
-
-  const isWindowedMode =
-    localAlbumId == null && (syncedAlbumIds == null || syncedAlbumIds === undefined);
+  }, [scopeKey, isWindowedMode]);
 
   const refreshLocal = useCallback(
     async (signal?: AbortSignal) => {
@@ -139,16 +147,21 @@ export function useHybridGallery(
       // el resto se carga con loadMoreLocal al hacer scroll. Reduce el grafo
       // materializado de ~8k a ~500 items.
       if (isWindowedMode) {
+        setLocalLoadingMore(true);
         try {
           const page = await listLocalAssetsPage(FIRST_LOCAL_PAGE, undefined, null);
           if (signal?.aborted || scopeRef.current !== key) return;
           setLocalAssets(page.assets);
           setLocalCursor(page.nextCursor);
           setLocalHasMore(page.hasNextPage);
-          setLocalLoadingMore(false);
+          cacheScope(key, page.assets);
+          windowedCursorCache.set(key, page.nextCursor);
+          windowedHasMoreCache.set(key, page.hasNextPage);
           localScanInfo.set(key, { at: Date.now(), libTick: libTickRef.current });
         } catch {
           // Sin permisos o error de MediaLibrary: galería solo remota/cola.
+        } finally {
+          setLocalLoadingMore(false);
         }
         return;
       }
@@ -184,16 +197,22 @@ export function useHybridGallery(
   const loadMoreLocal = useCallback(async () => {
     if (localLoadingMore || !localHasMore || localCursor == null) return;
     if (!isWindowedMode) return;
+    const startScope = scopeKey;
     setLocalLoadingMore(true);
     try {
       const page = await listLocalAssetsPage(LOCAL_PAGE_SIZE, localCursor, null);
+      if (scopeRef.current !== startScope) return;
       setLocalAssets((prev) => {
         const seen = new Set(prev.map((a) => a.id));
         const added = page.assets.filter((a) => !seen.has(a.id));
-        return added.length ? prev.concat(added) : prev;
+        const next = added.length ? prev.concat(added) : prev;
+        cacheScope(startScope, next);
+        return next;
       });
       setLocalCursor(page.nextCursor);
       setLocalHasMore(page.hasNextPage);
+      windowedCursorCache.set(startScope, page.nextCursor);
+      windowedHasMoreCache.set(startScope, page.hasNextPage);
     } catch {
       // Fallo de MediaLibrary: se reintenta en el siguiente scroll.
     } finally {
@@ -209,10 +228,12 @@ export function useHybridGallery(
     // Caché caliente + sin cambios de biblioteca: reutilizarla. Es el caso del
     // visor, que monta este hook otra vez al abrir una foto y antes repetía el
     // escaneo completo de MediaLibrary.
-    // En modo ventana no se usa el caché (el escaneo de la primera página es
-    // barato y evita inconsistencias de cursor).
-    if (cached && fresh && !isWindowedMode) {
+    if (cached && fresh) {
       setLocalAssets(cached);
+      if (isWindowedMode) {
+        setLocalCursor(windowedCursorCache.get(scopeKey) ?? null);
+        setLocalHasMore(windowedHasMoreCache.get(scopeKey) ?? cached.length >= FIRST_LOCAL_PAGE);
+      }
       return;
     }
     const controller = new AbortController();
@@ -243,39 +264,58 @@ export function useHybridGallery(
    * nada de lo que ya estaba en R2 antes de desinstalar.
    */
   useEffect(() => {
-    if (!remoteItems.length || !localAssets.length) return;
-    const localById = new Map(localAssets.map((a) => [a.id, a]));
+    if (!remoteItems.length) return;
     const queue = getQueueItems();
     if (!queue.length) return;
 
+    const localById = new Map(localAssets.map((a) => [a.id, a]));
     const claimed = new Set<string>();
     const remoteIdBySha = new Map<string, string>();
     for (const r of remoteItems) if (r.sha256) remoteIdBySha.set(r.sha256, r.id);
-    const queuedLocals: LocalAsset[] = [];
-    for (const q of queue) {
-      if (q.remote_id) claimed.add(q.remote_id);
-      else if (q.sha256) {
-        const id = remoteIdBySha.get(q.sha256);
-        if (id) claimed.add(id);
-      }
-      if (q.state !== "queued" || q.sha256 || q.remote_id) continue;
-      const local = localById.get(q.asset_id);
-      if (local) queuedLocals.push(local);
-    }
-    if (!queuedLocals.length) return;
 
-    const matches = matchLocalToRemote(queuedLocals, remoteItems, claimed);
-    const rows: { assetId: string; remoteId: string; sha256: string }[] = [];
-    for (const [assetId, remote] of matches) {
-      if (remote.sha256) rows.push({ assetId, remoteId: remote.id, sha256: remote.sha256 });
-    }
-    if (!rows.length) return;
-    void reconcileQueueWithRemote(rows)
-      .then((updated) => {
-        if (updated > 0) useQueueEvents.getState().emit();
-      })
-      .catch(() => {});
-  }, [remoteItems, localAssets]);
+    // Candidatos a reconciliar: filas `queued` sin sha ni remote_id.
+    const candidates = queue.filter((q) => q.state === "queued" && !q.sha256 && !q.remote_id);
+    if (!candidates.length) return;
+
+    let cancelled = false;
+    void (async () => {
+      // Resolver los locals que no están en la ventana actual (modo ventana)
+      // consultando MediaLibrary por id, para no depender de cargar toda la
+      // biblioteca. El conjunto de candidatos es pequeño (cola de respaldo).
+      const resolved: LocalAsset[] = [];
+      for (const q of candidates) {
+        if (cancelled) return;
+        if (q.remote_id) claimed.add(q.remote_id);
+        else if (q.sha256) {
+          const id = remoteIdBySha.get(q.sha256);
+          if (id) claimed.add(id);
+        }
+        let local = localById.get(q.asset_id);
+        if (!local) {
+          local = (await getLocalAssetById(q.asset_id)) ?? undefined;
+          if (local) localById.set(q.asset_id, local);
+        }
+        if (local) resolved.push(local);
+      }
+      if (cancelled || !resolved.length) return;
+
+      const matches = matchLocalToRemote(resolved, remoteItems, claimed);
+      const rows: { assetId: string; remoteId: string; sha256: string }[] = [];
+      for (const [assetId, remote] of matches) {
+        if (remote.sha256) rows.push({ assetId, remoteId: remote.id, sha256: remote.sha256 });
+      }
+      if (!rows.length) return;
+      void reconcileQueueWithRemote(rows)
+        .then((updated) => {
+          if (updated > 0) useQueueEvents.getState().emit();
+        })
+        .catch(() => {});
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [remoteItems]);
 
   const photos = useMemo<HybridPhoto[]>(() => {
     void tick; // la cola local se lee en vivo dentro del memo

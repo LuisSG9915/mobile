@@ -178,6 +178,41 @@ export async function listLocalAssets(
   return out;
 }
 
+/**
+ * Resuelve un único asset local por su id de MediaLibrary. Útil para la
+ * reconciliación tras reinstalar, donde solo importan los assets encolados
+ * (conjunto pequeño) y no toda la biblioteca.
+ */
+export async function getLocalAssetById(assetId: string): Promise<LocalAsset | null> {
+  try {
+    const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
+    if (!perm.granted) return null;
+    const info = await MediaLibrary.getAssetInfoAsync(assetId);
+    if (!info) return null;
+    const rawTime =
+      info.creationTime > 0
+        ? info.creationTime
+        : (info.modificationTime ?? 0) > 0
+          ? info.modificationTime
+          : 0;
+    const creationTime =
+      rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableTimestampFromId(info.id);
+    const isVideo = info.mediaType === MediaLibrary.MediaType.video;
+    return {
+      id: info.id,
+      uri: info.uri ?? info.localUri ?? "",
+      mediaType: isVideo ? "video" : "photo",
+      creationTime,
+      width: info.width,
+      height: info.height,
+      durationMs: isVideo ? Math.round((info.duration ?? 0) * 1000) : null,
+      albumId: info.albumId ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export type LocalAssetsPage = {
   assets: LocalAsset[];
   nextCursor: string | null;

@@ -270,7 +270,7 @@
     "severity": "alta",
     "status": "mejora",
     "evidence": "Huawei LMR-LX9: dumpsys meminfo TOTAL PSS ~800-908MB (Private Other 316MB, Graphics 207MB, Native 143MB), SWAP PSS >100MB, TRIM_MEMORY_RUNNING_MODERATE cada ~90s en logcat. El teléfono entero se siente inestable/lento con la app abierta. Post-fix (Huawei real): antes el SO mataba la app en fg durante scroll de videos (SWAP_KillDecision); después sobrevive al mismo estrés. PSS ~547MB estable (vs ~900MB), Private Other 62MB (vs 316MB), Native Heap 134MB (vs 170MB). Queda por atacar el grafo JS de ~20k items en memoria.",
-    "proposal": "Hecho: decodeFormat rgb_565, width/height acotados, drawDistance 1x, memory-disk cache, clearMemoryCache al minimizar. Fase 1: tope 20k->8k (LOCAL_ASSETS_CAP). Fase 2: ventana de 500 items con carga por cursor (listLocalAssetsPage) + loadMoreLocal en scroll para el caso 'toda la biblioteca'; álbumes/álbumes con flag siguen carga completa acotada. Pendiente: reconciliación/caché para modo ventana y paginación del lado remoto coordinada.",
+    "proposal": "Hecho: decodeFormat rgb_565, width/height acotados, drawDistance 1x, memory-disk cache, clearMemoryCache al minimizar. Fase 1: tope 20k->8k (LOCAL_ASSETS_CAP). Fase 2: ventana de 500 items con carga por cursor (listLocalAssetsPage) + loadMoreLocal en scroll (caso 'toda la biblioteca'); álbumes/álbumes con flag siguen carga completa acotada. Fase 3: reconciliación tras reinstalar resuelve locals por id (getLocalAssetById) sin depender de la ventana; caché de ventana (assets+cursor+hasMore) para restaurar sin re-escanear. Pendiente: paginación remota coordinada con la ventana y upgrade a flash-list ≥2.3.x."
     "effort": "L",
     "relatedTests": []
   },
@@ -281,7 +281,7 @@
     "severity": "media",
     "status": "mejora",
     "evidence": "logcat: 'Glide: Finished loading BitmapDrawable ... in 4200-4600 ms' por cada mp4 del álbum WhatsApp Video (~49 de 1111 cargas >1s). Entrar a un álbum de videos muestra celdas negras por minutos en primera vista. Post-fix: videos respaldados usan miniatura remota WebP (ms) con fallback a localUri; bitmaps acotados a tamaño de celda. En estrés de scroll la cuadrícula pinta la mayoría de celdas; los mp4 no sincronizados aún decodifican frame la 1ª vez (costo inherente a MediaMetadataRetriever) pero ya no tumba la app.",
-    "proposal": "Hecho: source array thumbUrl->localUri en videos + decode acotado + drawDistance menor. Pendiente opcional: miniaturas del sistema (ContentResolver.loadThumbnail) vía módulo nativo.",
+    "proposal": "Hecho: source array thumbUrl->localUri en videos + decode acotado + drawDistance menor. Fase H-025: módulo nativo `video-thumbnail` (Android, ContentResolver.loadThumbnail con fallback a MediaMetadataRetriever) + binding JS `getSystemVideoThumbnail`/`useSystemVideoThumbnail` + integración en PhotoCell (galería usa thumbnail del SO para vídeos locales sin miniatura remota). Requiere rebuild del dev-client para activar el módulo; sin él, cae a la ruta lenta existente. iOS: no-op (fuera de alcance).",
     "effort": "L",
     "relatedTests": []
   },
@@ -310,10 +310,10 @@
   {
     "id": "H-028",
     "title": "/（FlashList 2.0.2 ）",
-    "status": "mejora",
+    "status": "resuelto",
     "evidence": "：→X'Todo'，'Videos'，uiautomator  ScrollView 1（）， local=807/remote=719→1161  FlashList ；，。",
     "rootCause": "：① use-hybrid-gallery localAssetsCache ， 'all|synced'  syncedAlbumIds ；② FlashList 2.0.2  data （1161→2→1161），。",
     "fix": "① localAssetsCache  Map  scopeKey 3，，；② index.tsx  FlashList  key={filter|album|synced|before|columns}，。：→X、Todo→Videos→Todo 。",
-    "proposal": "：search.tsx/trash.tsx/albums/[id].tsx  FlashList ；， key 。 flash-list ≥2.3.x  bug  key hack。"
+    "proposal": "search.tsx y trash.tsx corregidos con key-hack (FlashList 2.0.2). albums/[id].tsx usa FlatList (no afectado por el bug de reciclado). Fix definitivo: upgrade a flash-list ≥2.3.x."
   }
 ]

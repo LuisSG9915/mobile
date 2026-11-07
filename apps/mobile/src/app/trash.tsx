@@ -92,6 +92,11 @@ export default function TrashScreen() {
         <FlashList
           data={items}
           keyExtractor={(i) => i.id}
+          // FlashList 2.0.2 recicla celdas cuando la lista se vacía y se vuelve
+          // a llenar (N → 0 → N): el layout anterior queda pegado y pinta en
+          // blanco. Remontar en la transición vacío↔no-vacío evita el artefacto
+          // sin resetear el scroll en restauraciones individuales.
+          key={items.length === 0 ? "empty" : "list"}
           numColumns={1}
           onEndReached={() => {
             if (query.hasNextPage && !query.isFetchingNextPage) {

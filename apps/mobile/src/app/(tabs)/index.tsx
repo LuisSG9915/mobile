@@ -59,6 +59,7 @@ import { hapticMedium, hapticSelection } from "../../lib/haptics";
 import { monthJumpView } from "../../lib/month-jump";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
+import { useSystemVideoThumbnail } from "../../lib/video-thumbnail";
 import { isBackupPaused, retryFailed, setBackupPaused } from "../../queue/db";
 import { allowUploadOnCellularOnce, isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
@@ -118,6 +119,12 @@ const PhotoCell = memo(
     onLongPress,
   }: CellProps) {
     const uri = photo.localUri ?? photo.thumbUrl;
+    // Para vídeos locales sin miniatura remota, el SO ofrece una thumbnail rápida
+    // (ContentResolver.loadThumbnail en Android) en vez de decodificar el mp4.
+    const systemThumb = useSystemVideoThumbnail(
+      photo.mediaType === "video" && !photo.thumbUrl ? photo.localUri : null,
+    );
+    const displayUri = systemThumb ?? uri;
     // Las URLs prefirmadas cambian en cada fetch; sin clave estable
     // expo-image no reutiliza el disco y la celda queda en negro.
     const cacheKey = photo.remoteId ? `thumb-${photo.remoteId}` : photo.key;
@@ -134,7 +141,7 @@ const PhotoCell = memo(
             { uri: photo.thumbUrl, cacheKey, width: px, height: px },
             { uri: photo.localUri, cacheKey: `${cacheKey}-local`, width: px, height: px },
           ]
-        : [{ uri: uri ?? undefined, cacheKey, width: px, height: px }];
+        : [{ uri: displayUri ?? undefined, cacheKey, width: px, height: px }];
     return (
       <Pressable
         accessibilityRole="imagebutton"
@@ -151,7 +158,7 @@ const PhotoCell = memo(
         }}
         className="bg-neutral-200 dark:bg-neutral-800"
       >
-        {uri ? (
+        {displayUri ? (
           <Image
             source={source}
             placeholder={photo.thumbhash ? { thumbhash: photo.thumbhash } : undefined}
