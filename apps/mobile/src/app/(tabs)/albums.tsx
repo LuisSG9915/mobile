@@ -12,7 +12,7 @@ import {
   Smartphone,
   X,
 } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Modal,
   Platform,
@@ -140,6 +140,24 @@ export default function AlbumsScreen() {
     await Promise.all([cloudQuery.refetch(), !isWeb ? localQuery.refetch() : Promise.resolve()]);
   };
 
+  const onScroll = useCallback(
+    (e: {
+      nativeEvent: {
+        contentOffset: { y: number };
+        layoutMeasurement: { height: number };
+        contentSize: { height: number };
+      };
+    }) => {
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      if (contentSize.height - (contentOffset.y + layoutMeasurement.height) < 200) {
+        if (cloudQuery.hasNextPage && !cloudQuery.isFetchingNextPage) {
+          void cloudQuery.fetchNextPage();
+        }
+      }
+    },
+    [cloudQuery],
+  );
+
   const showCloudSection = activeTab === "all" || activeTab === "cloud";
   const showDeviceSection = activeTab === "all" || activeTab === "device";
 
@@ -225,6 +243,8 @@ export default function AlbumsScreen() {
           paddingBottom: 60,
           gap: 28,
         }}
+        onScroll={onScroll}
+        scrollEventThrottle={200}
         refreshControl={
           <RefreshControl
             refreshing={cloudQuery.isRefetching || localQuery.isRefetching}

@@ -72,6 +72,15 @@ import { SyncStatusAvatar } from "../../ui/SyncStatusAvatar";
 
 const isWeb = Platform.OS === "web";
 
+/**
+ * FlashList 2.0.2 conservaba el offset interno al sustituir `data` a media
+ * carga, dejando la cuadrícula en negro. El remontaje por `committedScope`
+ * (key-hack) evita eso. En FlashList ≥2.3.x el bug está corregido: poner este
+ * flag en `false` retira el hack y permite verificar que el month-jump sigue
+ * funcionando sin pantalla negra antes de borrar el código definitivamente.
+ */
+const FLASH_LIST_KEY_HACK_ENABLED = true;
+
 // Densidades del pinch-to-zoom: detalle (1), normal (3), compacta (5).
 const DENSITY_LEVELS = [1, 3, 5];
 
@@ -323,8 +332,11 @@ export default function GalleryScreen() {
   // La cola (initializeQueue en web) y el runner viven en (tabs)/_layout.tsx
   // via useQueueSession + useBackupRunner.
   const [timelineBefore, setTimelineBefore] = useState<string | undefined>(undefined);
-  const { photos, rows, query, refreshLocal, loadMoreLocal, localHasMore, localLoadingMore } =
-    useHybridGallery(timelineFilter, albumFilter, timelineBefore);
+  const { photos, rows, query, refreshLocal, loadMore } = useHybridGallery(
+    timelineFilter,
+    albumFilter,
+    timelineBefore,
+  );
 
   const listRef = useRef<FlashListRef<GalleryRow>>(null);
   const gridRef = useRef<View>(null);
@@ -1097,7 +1109,11 @@ export default function GalleryScreen() {
             <FlashList<GalleryRow>
               // Remontaje solo cuando el alcance nuevo ya tiene filas (ver
               // `committedScope`): el FlashList nuevo arranca con layout limpio.
-              key={`${scopeKey}|${committedScope.current}|${columns}`}
+              key={
+                FLASH_LIST_KEY_HACK_ENABLED
+                  ? `${scopeKey}|${committedScope.current}|${columns}`
+                  : `${scopeKey}|${columns}`
+              }
               ref={listRef}
               data={rows}
               keyExtractor={listKeyExtractor}
@@ -1114,8 +1130,7 @@ export default function GalleryScreen() {
               onScroll={handleScroll}
               scrollEventThrottle={16}
               onEndReached={() => {
-                if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
-                if (localHasMore && !localLoadingMore) void loadMoreLocal();
+                void loadMore();
               }}
               onEndReachedThreshold={0.8}
               refreshControl={

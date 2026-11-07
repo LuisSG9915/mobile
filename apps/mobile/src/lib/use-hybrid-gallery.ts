@@ -43,7 +43,7 @@ const windowedHasMoreCache = new Map<string, boolean>();
  */
 const LOCAL_ASSETS_CAP = 8_000;
 const FIRST_LOCAL_PAGE = 500;
-const LOCAL_PAGE_SIZE = 1000;
+const LOCAL_PAGE_SIZE = 300;
 const localAssetsCache = new Map<string, LocalAsset[]>();
 
 /**
@@ -91,7 +91,7 @@ export function useHybridGallery(
   // fusión+filas recorre toda la biblioteca y a 300 ms consumía casi todo el
   // presupuesto del hilo JS (cuadrícula negra, navegación congelada).
   const syncStatus = useSyncProgress((s) => s.status);
-  const tick = useThrottledQueueTick(syncStatus === "syncing" ? 2500 : 500);
+  const tick = useThrottledQueueTick(syncStatus === "syncing" ? 3000 : 1000);
   // Solo se re-lista MediaLibrary al montar, al refrescar a mano y cuando la
   // biblioteca cambia de verdad (escaneo o "Liberar espacio"), no ante cada
   // tick de la cola — el listado completo es demasiado caro para cada badge.
@@ -245,6 +245,25 @@ export function useHybridGallery(
 
   const query = useTimeline(filter, before);
 
+  const loadingMoreRef = useRef(false);
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current) return;
+    const tasks: Promise<unknown>[] = [];
+    if (localHasMore && !localLoadingMore) {
+      tasks.push(loadMoreLocal());
+    }
+    if (query.hasNextPage && !query.isFetchingNextPage) {
+      tasks.push(query.fetchNextPage());
+    }
+    if (!tasks.length) return;
+    loadingMoreRef.current = true;
+    try {
+      await Promise.allSettled(tasks);
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }, [localHasMore, localLoadingMore, loadMoreLocal, query]);
+
   // Consulta de fotos si hay un álbum remoto activo
   const remoteAlbumQuery = useQuery({
     queryKey: ["album-detail-filter", albumFilter?.type === "remote" ? albumFilter.albumId : null],
@@ -317,8 +336,40 @@ export function useHybridGallery(
     };
   }, [remoteItems]);
 
+  const photoByKeyRef = useRef<Map<string, HybridPhoto>>(new Map());
+
+  const photosCacheRef = useRef<{
+    localAssets: LocalAsset[];
+    remoteItems: TimelineItem[];
+    filter: TimelineFilter;
+    albumFilter: AlbumFilter | null;
+    syncedAlbumIds: string[] | null | undefined;
+    before: string | undefined;
+    queueFp: string;
+    result: HybridPhoto[];
+  } | null>(null);
+
   const photos = useMemo<HybridPhoto[]>(() => {
     void tick; // la cola local se lee en vivo dentro del memo
+
+    const allQueue = getQueueItems();
+    const queueFp = allQueue
+      .map((q) => `${q.asset_id}:${q.state}:${q.bytes_sent}:${q.remote_id ?? ""}`)
+      .join("|");
+
+    const cached = photosCacheRef.current;
+    if (
+      cached &&
+      cached.localAssets === localAssets &&
+      cached.remoteItems === remoteItems &&
+      cached.filter === filter &&
+      cached.albumFilter === albumFilter &&
+      cached.syncedAlbumIds === syncedAlbumIds &&
+      cached.before === before &&
+      cached.queueFp === queueFp
+    ) {
+      return cached.result;
+    }
 
     const effectiveLocal =
       albumFilter?.type === "remote"
@@ -329,7 +380,6 @@ export function useHybridGallery(
             ? localAssets.filter((a) => a.albumId && syncedAlbumIds.includes(a.albumId))
             : localAssets;
 
-    const allQueue = getQueueItems();
     let effectiveQueue = allQueue;
 
     if (albumFilter?.type === "local" || (albumFilter === null && syncedAlbumIds !== null)) {
@@ -350,6 +400,36 @@ export function useHybridGallery(
       remoteItems,
     });
 
+    // Fase C: reutilizar instancias de HybridPhoto por key cuando los campos
+    // visibles no cambian, para que React.memo de las celdas no re-renderice
+    // y se reduzcan asignaciones en cada pasada del memo.
+    const nextByKey = new Map<string, HybridPhoto>();
+    merged = merged.map((p) => {
+      const prev = photoByKeyRef.current.get(p.key);
+      if (
+        prev &&
+        prev.syncStatus === p.syncStatus &&
+        prev.progress === p.progress &&
+        prev.localUri === p.localUri &&
+        prev.thumbUrl === p.thumbUrl &&
+        prev.remoteId === p.remoteId &&
+        prev.takenAt === p.takenAt &&
+        prev.mediaType === p.mediaType &&
+        prev.width === p.width &&
+        prev.height === p.height &&
+        prev.durationMs === p.durationMs &&
+        prev.thumbhash === p.thumbhash &&
+        prev.assetId === p.assetId &&
+        prev.albumId === p.albumId
+      ) {
+        nextByKey.set(p.key, prev);
+        return prev;
+      }
+      nextByKey.set(p.key, p);
+      return p;
+    });
+    photoByKeyRef.current = nextByKey;
+
     if (albumFilter?.type === "local") {
       // Al filtrar por álbum local, los remotos huérfanos del timeline general ('r-*')
       // no pertenecen a este álbum del dispositivo y deben excluirse.
@@ -360,11 +440,86 @@ export function useHybridGallery(
     merged = filterToBefore(merged, before);
     // Los locales/en-cola no conocen favoritos: bajo ese filtro solo quedan
     // los remotos marcados (y las filas de cola enlazadas a ellos).
-    if (filter === "favorites") return merged.filter((p) => p.remote?.isFavorite === true);
-    if (filter === "photos") return merged.filter((p) => p.mediaType === "photo");
-    if (filter === "videos") return merged.filter((p) => p.mediaType === "video");
-    if (filter === "screenshots") return merged.filter((p) => p.remote?.isScreenshot === true);
-    if (filter === "documents") return merged.filter((p) => p.remote?.isDocument === true);
+    if (filter === "favorites") {
+      const result = merged.filter((p) => p.remote?.isFavorite === true);
+      photosCacheRef.current = {
+        localAssets,
+        remoteItems,
+        filter,
+        albumFilter,
+        syncedAlbumIds,
+        before,
+        queueFp,
+        result,
+      };
+      return result;
+    }
+    if (filter === "photos") {
+      const result = merged.filter((p) => p.mediaType === "photo");
+      photosCacheRef.current = {
+        localAssets,
+        remoteItems,
+        filter,
+        albumFilter,
+        syncedAlbumIds,
+        before,
+        queueFp,
+        result,
+      };
+      return result;
+    }
+    if (filter === "videos") {
+      const result = merged.filter((p) => p.mediaType === "video");
+      photosCacheRef.current = {
+        localAssets,
+        remoteItems,
+        filter,
+        albumFilter,
+        syncedAlbumIds,
+        before,
+        queueFp,
+        result,
+      };
+      return result;
+    }
+    if (filter === "screenshots") {
+      const result = merged.filter((p) => p.remote?.isScreenshot === true);
+      photosCacheRef.current = {
+        localAssets,
+        remoteItems,
+        filter,
+        albumFilter,
+        syncedAlbumIds,
+        before,
+        queueFp,
+        result,
+      };
+      return result;
+    }
+    if (filter === "documents") {
+      const result = merged.filter((p) => p.remote?.isDocument === true);
+      photosCacheRef.current = {
+        localAssets,
+        remoteItems,
+        filter,
+        albumFilter,
+        syncedAlbumIds,
+        before,
+        queueFp,
+        result,
+      };
+      return result;
+    }
+    photosCacheRef.current = {
+      localAssets,
+      remoteItems,
+      filter,
+      albumFilter,
+      syncedAlbumIds,
+      before,
+      queueFp,
+      result: merged,
+    };
     return merged;
   }, [
     remoteItems,
@@ -387,6 +542,7 @@ export function useHybridGallery(
     refreshLocal,
     remoteAlbumQuery,
     loadMoreLocal,
+    loadMore,
     localHasMore,
     localLoadingMore,
   };

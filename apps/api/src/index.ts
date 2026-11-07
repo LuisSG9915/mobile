@@ -150,7 +150,7 @@ app.doc("/openapi.json", {
   openapi: "3.1.0",
   info: {
     title: "Photos API",
-    version: "1.0.0",
+    version: "1.1.0",
     description:
       "API de respaldo personal de fotos. Los binarios van directo a R2 con URLs prefirmadas; este servicio solo gestiona metadatos y sesiones.",
   },

@@ -25,7 +25,16 @@ function getNative(): VideoThumbnailNativeModule | null {
   return native;
 }
 
+const MAX_CACHE_SIZE = 200;
 const cache = new Map<string, string>();
+
+function cacheSet(key: string, value: string): void {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, value);
+}
 
 export async function getSystemVideoThumbnail(uri: string, maxSize = 400): Promise<string | null> {
   const mod = getNative();
@@ -36,7 +45,7 @@ export async function getSystemVideoThumbnail(uri: string, maxSize = 400): Promi
   try {
     const path = await mod.getThumbnail(uri, maxSize);
     const result = path ? `file://${path}` : null;
-    if (result) cache.set(key, result);
+    if (result) cacheSet(key, result);
     return result;
   } catch {
     return null;
