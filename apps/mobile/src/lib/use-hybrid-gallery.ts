@@ -242,8 +242,13 @@ export function useHybridGallery(
       return;
     }
     const controller = new AbortController();
-    void refreshLocal(controller.signal);
+    // Pequeño debounce para evitar reiniciar el escaneo del álbum en cada
+    // evento de biblioteca del respaldo (evita el spinner parpadeante).
+    const timer = setTimeout(() => {
+      void refreshLocal(controller.signal);
+    }, 200);
     return () => {
+      clearTimeout(timer);
       controller.abort();
     };
   }, [refreshLocal, libTick, scopeKey]);
