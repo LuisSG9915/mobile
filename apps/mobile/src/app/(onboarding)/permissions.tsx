@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { t } from "../../i18n/es";
 import { useSettings } from "../../lib/store";
 import { requestMediaPermissions, requestNotificationPermission } from "../../queue/permissions";
-import { runBackupPass } from "../../queue/runner";
+
 import { Button, Card } from "../../ui";
 
 function PermissionRow({ title, why }: { title: string; why: string }) {
@@ -40,9 +40,8 @@ export default function Permissions() {
     await requestNotificationPermission();
     setLoading(false);
     setOnboarded(true);
-    // Primera activación: escanear ya, sin esperar al intervalo.
-    void runBackupPass({ forceScan: true }).catch(() => {});
-    router.replace("/(tabs)");
+    // El respaldo arranca pausado y sin álbumes: el usuario configura primero.
+    router.replace("/(tabs)/albums");
   };
 
   return (

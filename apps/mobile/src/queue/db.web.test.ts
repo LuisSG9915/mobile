@@ -49,8 +49,8 @@ describe("kvSet/kvGet", () => {
 });
 
 describe("pausa persistente", () => {
-  it("por defecto no está pausada", () => {
-    expect(db.isBackupPaused()).toBe(false);
+  it("por defecto está pausada", () => {
+    expect(db.isBackupPaused()).toBe(true);
   });
 
   it("setBackupPaused persiste en photos.kv.backup.paused y se puede quitar", () => {

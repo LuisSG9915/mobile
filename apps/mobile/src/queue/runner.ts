@@ -31,6 +31,9 @@ const BACKGROUND_BURST_CONCURRENCY = 3;
  * una vez. processQueue es barato con cola vacía — el throttle es para el scan.
  */
 export async function runBackupPass(opts: BackupPassOptions = {}): Promise<void> {
+  // Si el respaldo está pausado (por defecto al arrancar, hasta que el usuario
+  // configure), no escanear ni procesar: queda en espera de "Reanudar".
+  if (isBackupPaused()) return;
   // El escaneo puede tardar minutos en una biblioteca grande y el usuario
   // puede bloquear el móvil mientras tanto. Arrancar el FGS antes (con trabajo
   // ya pendiente) evita que el SO congele la pasada antes de que exista el

@@ -14,9 +14,11 @@ import {
   getFailed,
   getLastScanTs,
   getQueueStats,
+  isBackupConfigured,
   isBackupPaused,
   needsEmailVerification,
   retryFailed,
+  setBackupConfigured,
   setBackupPaused,
   setNeedsEmailVerification,
 } from "../../queue/db";
@@ -79,6 +81,7 @@ export default function BackupScreen() {
       // próximo /init lo vuelve a marcar.
       setNeedsEmailVerification(false);
       setBackupPaused(false);
+      setBackupConfigured(true);
       useQueueEvents.getState().emit();
       void runBackupPass().catch(() => {});
     } else {
@@ -126,6 +129,32 @@ export default function BackupScreen() {
         <Text className="text-3xl font-bold text-neutral-900 dark:text-white">
           {t.backup.title}
         </Text>
+
+        {!isBackupConfigured() ? (
+          <Card className="gap-3 border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20">
+            <Text className="text-base font-semibold text-amber-800 dark:text-amber-300">
+              Respaldo sin configurar
+            </Text>
+            <Text className="text-sm text-amber-700 dark:text-amber-400">
+              {isWeb
+                ? "El respaldo arranca pausado. Reanúdalo cuando quieras subir archivos."
+                : "Elige qué álbumes sincronizar antes de empezar."}
+            </Text>
+            <Button
+              label={isWeb ? "Reanudar respaldo" : "Configurar álbumes"}
+              variant="ghost"
+              onPress={() => {
+                if (isWeb) {
+                  setBackupPaused(false);
+                  setBackupConfigured(true);
+                  void runBackupPass().catch(() => {});
+                } else {
+                  router.push("/(tabs)/albums");
+                }
+              }}
+            />
+          </Card>
+        ) : null}
 
         <Card className="items-center gap-4 py-6">
           <ProgressRing progress={progress} />

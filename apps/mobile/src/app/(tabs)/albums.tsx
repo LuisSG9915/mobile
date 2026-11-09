@@ -30,6 +30,12 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { type DeviceAlbum, listLocalAlbums } from "../../lib/local-assets";
 import { useSettings } from "../../lib/store";
+import {
+  isBackupConfigured,
+  isBackupPaused,
+  setBackupConfigured,
+  setBackupPaused,
+} from "../../queue/db";
 import { cancelQueue } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
 import { Button } from "../../ui";
@@ -101,9 +107,18 @@ export default function AlbumsScreen() {
 
   const handleToggleSync = (album: DeviceAlbum) => {
     const currentlySynced = isAlbumSynced(album.id);
+    const firstTime = !isBackupConfigured();
     toggleAlbumSync(album.id, allLocalIds);
     if (!currentlySynced) {
       toast.success(`"${album.title}" incluido en el carrusel y respaldo`);
+      if (firstTime && isBackupPaused()) {
+        // Primera configuración: reanudar el respaldo automáticamente.
+        setBackupPaused(false);
+        setBackupConfigured(true);
+        toast.success("Respaldo reanudado");
+        void runBackupPass({ forceScan: true });
+        return;
+      }
     } else {
       toast.info(`"${album.title}" excluido del carrusel y respaldo`);
     }
@@ -112,8 +127,14 @@ export default function AlbumsScreen() {
   };
 
   const handleSelectAll = () => {
+    const firstTime = !isBackupConfigured();
     syncAllAlbums();
     toast.success("Todos los álbumes incluidos en el carrusel y respaldo");
+    if (firstTime && isBackupPaused()) {
+      setBackupPaused(false);
+      setBackupConfigured(true);
+      toast.success("Respaldo reanudado");
+    }
     void runBackupPass({ forceScan: true });
   };
 
@@ -252,6 +273,17 @@ export default function AlbumsScreen() {
           />
         }
       >
+        {!isBackupConfigured() ? (
+          <View className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-4 gap-2">
+            <Text className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+              Configura tu respaldo
+            </Text>
+            <Text className="text-xs text-amber-700 dark:text-amber-400">
+              Por defecto no se sincroniza nada. Activa los álbumes que quieras respaldar con el
+              botón de bandera; al activar el primero se reanuda el respaldo.
+            </Text>
+          </View>
+        ) : null}
         {/* SECCIÓN 1: Álbumes en la nube */}
         {showCloudSection ? (
           <View className="gap-3">

@@ -14,12 +14,15 @@ export type AlbumFilter =
 
 const storedSyncedAlbumIds = (): string[] | null => {
   const v = kvGet("synced_album_ids");
-  if (!v || v === "ALL") return null;
+  // Sin preferencia guardada: por defecto ningún álbum sincronizado, para que el
+  // usuario configure primero qué respaldar (arranque pausado).
+  if (v === null) return [];
+  if (v === "ALL") return null;
   try {
     const parsed = JSON.parse(v);
-    return Array.isArray(parsed) ? parsed : null;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return null;
+    return [];
   }
 };
 

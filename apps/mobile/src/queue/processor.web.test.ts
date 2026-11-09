@@ -92,6 +92,8 @@ beforeEach(async () => {
   db = await import("./db");
   store = await import("../web/queue-store");
   await db.initializeQueue("u1");
+  // Los tests asumen respaldo activo por defecto.
+  db.setBackupPaused(false);
   processor = await import("./processor");
   filesMock = (await import("../web/files")) as unknown as FilesModuleMock;
   apiMock = (await import("../api/client")) as unknown as ApiClientMock;

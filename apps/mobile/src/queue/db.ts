@@ -160,18 +160,51 @@ export function kvSet(key: string, value: string): void {
 }
 
 const PAUSE_KEY = "backup.paused";
+const CONFIGURED_KEY = "backup.configured";
 
 /**
  * Pausa persistente del respaldo: vive en `kv`, así que sobrevive a reinicios
  * de la app. Nunca se limpia sola — solo "Reanudar" la quita (no auto-resume).
  * Es a nivel dispositivo, no por usuario.
+ *
+ * Por defecto (sin preferencia guardada) queda PAUSADO, para que el usuario
+ * configure primero qué sincronizar.
  */
 export function isBackupPaused(): boolean {
-  return kvGet(PAUSE_KEY) === "1";
+  const v = kvGet(PAUSE_KEY);
+  if (v === null) return true;
+  return v === "1";
 }
 
 export function setBackupPaused(paused: boolean): void {
   kvSet(PAUSE_KEY, paused ? "1" : "0");
+  // Reanudar por primera vez cuenta como configuración completada.
+  if (!paused) setBackupConfigured(true);
+}
+
+/**
+ * Indica si el usuario ya configuró el respaldo (eligio álbumes o reanudó).
+ * Migración suave: si no hay flag, se infiere de señales legacy (preferencia
+ * de álbumes/pausa guardada o cola con items) para no molestar a usuarios
+ * existentes.
+ */
+export function isBackupConfigured(): boolean {
+  const v = kvGet(CONFIGURED_KEY);
+  if (v !== null) return v === "1";
+  const legacy = kvGet("synced_album_ids") !== null || kvGet(PAUSE_KEY) !== null;
+  let hasItems = false;
+  try {
+    hasItems = getQueueStats().total > 0;
+  } catch {
+    hasItems = false;
+  }
+  const configured = legacy || hasItems;
+  kvSet(CONFIGURED_KEY, configured ? "1" : "0");
+  return configured;
+}
+
+export function setBackupConfigured(configured: boolean): void {
+  kvSet(CONFIGURED_KEY, configured ? "1" : "0");
 }
 
 const EMAIL_VERIFICATION_KEY = "backup.needs_email_verification";
