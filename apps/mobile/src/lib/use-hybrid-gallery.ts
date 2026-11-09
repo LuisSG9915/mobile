@@ -108,7 +108,7 @@ export function useHybridGallery(
   // Modo ventana: toda la biblioteca O un álbum concreto. Los álbumes con flag
   // (varios a la vez) siguen cargando el conjunto acotado por LOCAL_ASSETS_CAP.
   const isWindowedMode =
-    localAlbumId != null || syncedAlbumIds == null || syncedAlbumIds === undefined;
+    localAlbumId == null && (syncedAlbumIds == null || syncedAlbumIds === undefined);
   const [localAssets, setLocalAssets] = useState<LocalAsset[]>(
     () => localAssetsCache.get(scopeKey) ?? [],
   );
@@ -154,7 +154,7 @@ export function useHybridGallery(
       if (isWindowedMode) {
         setLocalLoadingMore(true);
         try {
-          const page = await listLocalAssetsPage(FIRST_LOCAL_PAGE, undefined, localAlbumId ?? null);
+          const page = await listLocalAssetsPage(FIRST_LOCAL_PAGE, undefined, null);
           if (signal?.aborted || scopeRef.current !== key) return;
           setLocalAssets(page.assets);
           setLocalCursor(page.nextCursor);
@@ -205,7 +205,7 @@ export function useHybridGallery(
     const startScope = scopeKey;
     setLocalLoadingMore(true);
     try {
-      const page = await listLocalAssetsPage(LOCAL_PAGE_SIZE, localCursor, localAlbumId ?? null);
+      const page = await listLocalAssetsPage(LOCAL_PAGE_SIZE, localCursor, null);
       if (scopeRef.current !== startScope) return;
       setLocalAssets((prev) => {
         const seen = new Set(prev.map((a) => a.id));
