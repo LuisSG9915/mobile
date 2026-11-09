@@ -444,7 +444,7 @@ export type ProcessOptions = {
 
 /** Pre-hashea hasta 8 items `queued` y deduplica el lote en una sola llamada. */
 async function prehashAndDedup(signal: AbortSignal): Promise<void> {
-  const items = getQueuedWithoutHash(8);
+  const items = getQueuedWithoutHash(12);
   if (items.length === 0) return;
   const hashed: { item: QueueItem; sha256: string; fileSize: number }[] = [];
   for (const item of items) {
@@ -487,7 +487,7 @@ async function prehashAndDedup(signal: AbortSignal): Promise<void> {
 
 /** Dedup por lote de items que ya tienen sha (reintentos/pre-hasheados). */
 async function preflightDedup(signal: AbortSignal): Promise<void> {
-  const items = getQueuedWithSha(10).filter((i) => !i.sha256 || !precheckedHashes.has(i.sha256));
+  const items = getQueuedWithSha(16).filter((i) => !i.sha256 || !precheckedHashes.has(i.sha256));
   if (items.length === 0) return;
   try {
     const { existing } = await api.checkHashes(

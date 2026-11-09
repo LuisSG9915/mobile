@@ -28,7 +28,7 @@ export type AlbumFilter =
  * varios alcances para que al salir de un álbum a "Todo" la lista anterior se
  * restaure al instante en vez de quedar con datos del alcance previo.
  */
-const LOCAL_SCOPES_KEPT = 3;
+const LOCAL_SCOPES_KEPT = 4;
 
 // Caché del modo ventana: assets + cursor + hasMore por alcance, para que el
 // visor (que remonta el hook) restaure la ventana sin re-escanear MediaLibrary.
@@ -41,7 +41,7 @@ const windowedHasMoreCache = new Map<string, boolean>();
  * Mientras tanto, acotamos el tope para no sostener 20k HybridPhoto en gama media.
  * Los más antiguos siguen accesibles por el timeline remoto (paginado por `before`).
  */
-const LOCAL_ASSETS_CAP = 8_000;
+const LOCAL_ASSETS_CAP = 2_000;
 const FIRST_LOCAL_PAGE = 500;
 const LOCAL_PAGE_SIZE = 300;
 const localAssetsCache = new Map<string, LocalAsset[]>();
@@ -105,8 +105,10 @@ export function useHybridGallery(
   const scopeKey = localScopeKey(localAlbumId, syncedAlbumIds);
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
+  // Modo ventana: toda la biblioteca O un álbum concreto. Los álbumes con flag
+  // (varios a la vez) siguen cargando el conjunto acotado por LOCAL_ASSETS_CAP.
   const isWindowedMode =
-    localAlbumId == null && (syncedAlbumIds == null || syncedAlbumIds === undefined);
+    localAlbumId != null || syncedAlbumIds == null || syncedAlbumIds === undefined;
   const [localAssets, setLocalAssets] = useState<LocalAsset[]>(
     () => localAssetsCache.get(scopeKey) ?? [],
   );
@@ -123,6 +125,9 @@ export function useHybridGallery(
   // reducirían a una cuadrícula vacía).
   useEffect(() => {
     setLocalLoadingMore(false);
+    // Liberar referencias de fotos del alcance anterior para no retener el
+    // grafo híbrido previo en memoria (H-024).
+    photoByKeyRef.current.clear();
     const cached = localAssetsCache.get(scopeKey);
     if (cached) {
       setLocalAssets(cached);
@@ -149,7 +154,7 @@ export function useHybridGallery(
       if (isWindowedMode) {
         setLocalLoadingMore(true);
         try {
-          const page = await listLocalAssetsPage(FIRST_LOCAL_PAGE, undefined, null);
+          const page = await listLocalAssetsPage(FIRST_LOCAL_PAGE, undefined, localAlbumId ?? null);
           if (signal?.aborted || scopeRef.current !== key) return;
           setLocalAssets(page.assets);
           setLocalCursor(page.nextCursor);
@@ -200,7 +205,7 @@ export function useHybridGallery(
     const startScope = scopeKey;
     setLocalLoadingMore(true);
     try {
-      const page = await listLocalAssetsPage(LOCAL_PAGE_SIZE, localCursor, null);
+      const page = await listLocalAssetsPage(LOCAL_PAGE_SIZE, localCursor, localAlbumId ?? null);
       if (scopeRef.current !== startScope) return;
       setLocalAssets((prev) => {
         const seen = new Set(prev.map((a) => a.id));
@@ -338,6 +343,10 @@ export function useHybridGallery(
 
   const photoByKeyRef = useRef<Map<string, HybridPhoto>>(new Map());
 
+  const queueCacheRef = useRef<{ tick: number; items: ReturnType<typeof getQueueItems> } | null>(
+    null,
+  );
+
   const photosCacheRef = useRef<{
     localAssets: LocalAsset[];
     remoteItems: TimelineItem[];
@@ -349,13 +358,40 @@ export function useHybridGallery(
     result: HybridPhoto[];
   } | null>(null);
 
+  // Filtrado de locales memoizado: no depende del tick de la cola, así evita
+  // re-filtrar toda la biblioteca en cada emisión de la cola.
+  const effectiveLocal = useMemo(() => {
+    if (albumFilter?.type === "remote") return [];
+    if (albumFilter?.type === "local") {
+      return localAssets.filter((a) => a.albumId === albumFilter.albumId);
+    }
+    if (syncedAlbumIds !== null) {
+      return localAssets.filter((a) => a.albumId && syncedAlbumIds.includes(a.albumId));
+    }
+    return localAssets;
+  }, [localAssets, albumFilter, syncedAlbumIds]);
+
   const photos = useMemo<HybridPhoto[]>(() => {
     void tick; // la cola local se lee en vivo dentro del memo
 
-    const allQueue = getQueueItems();
-    const queueFp = allQueue
-      .map((q) => `${q.asset_id}:${q.state}:${q.bytes_sent}:${q.remote_id ?? ""}`)
-      .join("|");
+    // Reutilizar la lectura de la cola si el tick no cambió (evita re-leer
+    // hasta 20k filas cuando solo cambian remotos/locales).
+    let allQueue: ReturnType<typeof getQueueItems>;
+    if (queueCacheRef.current && queueCacheRef.current.tick === tick) {
+      allQueue = queueCacheRef.current.items;
+    } else {
+      allQueue = getQueueItems();
+      queueCacheRef.current = { tick, items: allQueue };
+    }
+    // Fingerprint numérico (barato) en lugar de un string gigante.
+    let h = 0;
+    for (const q of allQueue) {
+      h = (Math.imul(h, 31) + (q.asset_id?.length ?? 0)) >>> 0;
+      h = (Math.imul(h, 31) + (q.state?.charCodeAt(0) ?? 0)) >>> 0;
+      h = (Math.imul(h, 31) + (q.bytes_sent | 0)) >>> 0;
+      h = (Math.imul(h, 31) + (q.remote_id?.length ?? 0)) >>> 0;
+    }
+    const queueFp = `${allQueue.length}:${h}`;
 
     const cached = photosCacheRef.current;
     if (
@@ -371,14 +407,7 @@ export function useHybridGallery(
       return cached.result;
     }
 
-    const effectiveLocal =
-      albumFilter?.type === "remote"
-        ? []
-        : albumFilter?.type === "local"
-          ? localAssets.filter((a) => a.albumId === albumFilter.albumId)
-          : syncedAlbumIds !== null
-            ? localAssets.filter((a) => a.albumId && syncedAlbumIds.includes(a.albumId))
-            : localAssets;
+    // effectiveLocal ya está memoizado fuera (no re-filtrar en cada tick).
 
     let effectiveQueue = allQueue;
 

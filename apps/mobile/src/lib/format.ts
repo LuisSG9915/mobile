@@ -27,13 +27,14 @@ export function formatRelative(ts: number): string {
  * (~100 µs) y `sectionLabel` se llama por cada foto al armar las filas de la
  * galería — con biblioteca grande eran varios segundos de hilo bloqueado.
  */
-const monthFormatter = new Intl.DateTimeFormat("es", { month: "long", year: "numeric" });
+const monthFormatter = new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" });
 const dateTimeFormatter = new Intl.DateTimeFormat("es", {
   day: "numeric",
   month: "long",
   year: "numeric",
   hour: "2-digit",
   minute: "2-digit",
+  timeZone: "UTC",
 });
 
 export function monthLabel(ts: number): string {
@@ -60,9 +61,9 @@ export function monthLabelUtc(ym: string): string {
 
 function sameDay(a: Date, b: Date): boolean {
   return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
   );
 }
 
@@ -72,7 +73,7 @@ export function sectionLabel(ts: number, now = Date.now()): string {
   const n = new Date(now);
   if (sameDay(d, n)) return t.time.today;
   const y = new Date(n);
-  y.setDate(y.getDate() - 1);
+  y.setUTCDate(y.getUTCDate() - 1);
   if (sameDay(d, y)) return t.time.yesterday;
   return monthLabel(ts);
 }

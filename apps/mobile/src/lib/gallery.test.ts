@@ -349,11 +349,11 @@ describe("resolvePredominantLocation", () => {
 
 describe("buildGalleryRows", () => {
   it("agrupa en Hoy / Ayer / mes con encabezados adhesivos", () => {
-    // now fijo: miércoles 15 de octubre de 2025, mediodía.
-    const now = new Date(2025, 9, 15, 12).getTime();
-    const hoy = new Date(2025, 9, 15, 9).getTime();
-    const ayer = new Date(2025, 9, 14, 22).getTime();
-    const septiembre = new Date(2025, 8, 1).getTime();
+    // now fijo: miércoles 15 de octubre de 2025, mediodía (UTC).
+    const now = Date.UTC(2025, 9, 15, 12);
+    const hoy = Date.UTC(2025, 9, 15, 9);
+    const ayer = Date.UTC(2025, 9, 14, 22);
+    const septiembre = Date.UTC(2025, 8, 1);
     const rows = buildGalleryRows(
       mergeGallery({
         localAssets: [

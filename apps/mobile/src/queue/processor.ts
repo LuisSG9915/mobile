@@ -151,7 +151,9 @@ function parseExifDate(exif: Record<string, unknown> | null | undefined): number
   const m = raw.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
   if (!m) return null;
   const [, y, mo, d, h, mi, s] = m;
-  return new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime();
+  // EXIF no lleva zona horaria: se interpreta como UTC para que el dateGroup
+  // (YYYY-MM-DD en UTC) y la fecha mostrada coincidan con la captura.
+  return Date.UTC(+y, +mo - 1, +d, +h, +mi, +s);
 }
 
 /** Sin progreso en este tiempo = subida estancada → abortar y reintentar. */
@@ -644,7 +646,7 @@ const MAX_CONCURRENCY = 4;
 
 /** Pre-hashea hasta 8 items `queued` y deduplica el lote en una sola llamada. */
 async function prehashAndDedup(): Promise<void> {
-  const items = getQueuedWithoutHash(8);
+  const items = getQueuedWithoutHash(12);
   if (items.length === 0) return;
   const hashed: { item: QueueItem; sha256: string; fileSize: number }[] = [];
   for (const item of items) {
@@ -702,7 +704,7 @@ async function prehashAndDedup(): Promise<void> {
 
 /** Dedup por lote de items que ya tienen sha (reintentos/pre-hasheados). */
 async function preflightDedup(): Promise<void> {
-  const items = getQueuedWithSha(10).filter((i) => !i.sha256 || !precheckedHashes.has(i.sha256));
+  const items = getQueuedWithSha(16).filter((i) => !i.sha256 || !precheckedHashes.has(i.sha256));
   if (items.length === 0) return;
   try {
     const { existing } = await api.checkHashes(

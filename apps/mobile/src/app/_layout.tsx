@@ -69,9 +69,13 @@ function RootNavigator() {
 
 export default function RootLayout() {
   useEffect(() => {
-    void registerBackupTask();
+    // Diferir el registro del background task para no competir con el primer
+    // pintado de la app (mejora TTI en gama media).
+    const timer = setTimeout(() => {
+      void registerBackupTask();
+    }, 1000);
     let lastToastTs = 0;
-    return onAuthError(() => {
+    const unsubscribe = onAuthError(() => {
       setBackupPaused(true);
       const now = Date.now();
       if (now - lastToastTs > 10_000) {
@@ -79,6 +83,10 @@ export default function RootLayout() {
         toast.error("Tu sesión ha expirado. Por favor, inicia sesión de nuevo.");
       }
     });
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   return (

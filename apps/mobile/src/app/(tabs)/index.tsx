@@ -57,6 +57,7 @@ import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, GRID_GAP, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { hapticMedium, hapticSelection } from "../../lib/haptics";
 import { monthJumpView } from "../../lib/month-jump";
+import { queryClient } from "../../lib/query-client";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { useSystemVideoThumbnail } from "../../lib/video-thumbnail";
@@ -79,7 +80,7 @@ const isWeb = Platform.OS === "web";
  * flag en `false` retira el hack y permite verificar que el month-jump sigue
  * funcionando sin pantalla negra antes de borrar el código definitivamente.
  */
-const FLASH_LIST_KEY_HACK_ENABLED = true;
+const FLASH_LIST_KEY_HACK_ENABLED = false;
 
 // Densidades del pinch-to-zoom: detalle (1), normal (3), compacta (5).
 const DENSITY_LEVELS = [1, 3, 5];
@@ -177,9 +178,9 @@ const PhotoCell = memo(
             priority={highPriority ? "high" : "normal"}
             // RGB_565: la mitad de memoria por bitmap en la cuadrícula.
             decodeFormat="rgb"
-            // memory-disk evita re-decodificar al reciclar celdas (y el bitmap
-            // reciclado que Glide intenta reusar en disco-only).
-            cachePolicy="memory-disk"
+            // Fotos: memory-disk (reciclado instantáneo, evita celdas revueltas).
+            // Vídeos: disk (los frames decodificados pesan MB y se reciclan menos).
+            cachePolicy={photo.mediaType === "video" ? "disk" : "memory-disk"}
             style={{ width: "100%", height: "100%" }}
           />
         ) : null}
@@ -496,6 +497,24 @@ export default function GalleryScreen() {
     },
     [rows],
   );
+
+  // Prefetch del mes adyacente (más antiguo) al saltar de mes, para que el
+  // scroll posterior no espere a la red.
+  useEffect(() => {
+    if (!jumpYm) return;
+    const parts = jumpYm.split("-").map(Number);
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return;
+    const prevDate = new Date(parts[0], parts[1] - 2, 1);
+    const prevYm = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+    const beforePrev = ymToEndOfMonthIso(prevYm);
+    void queryClient
+      .prefetchInfiniteQuery({
+        queryKey: ["timeline", timelineFilter, beforePrev],
+        queryFn: ({ pageParam }) => api.timeline(pageParam, 60, timelineFilter, beforePrev),
+        initialPageParam: undefined,
+      })
+      .catch(() => {});
+  }, [jumpYm, timelineFilter]);
 
   useEffect(() => {
     if (!jumpYm) return;
