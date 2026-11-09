@@ -42,8 +42,8 @@ const windowedHasMoreCache = new Map<string, boolean>();
  * Los más antiguos siguen accesibles por el timeline remoto (paginado por `before`).
  */
 const LOCAL_ASSETS_CAP = 2_000;
-const FIRST_LOCAL_PAGE = 500;
-const LOCAL_PAGE_SIZE = 300;
+const FIRST_LOCAL_PAGE = 300;
+const LOCAL_PAGE_SIZE = 200;
 const localAssetsCache = new Map<string, LocalAsset[]>();
 
 /**
