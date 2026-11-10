@@ -19,7 +19,7 @@ import { getDb } from "../db/client";
 import { album, albumMedia, media } from "../db/schema";
 import { type AppEnv, webOrigins } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
-import { presignGet, presignGetBatch, presignGetDownload, presignGetWithTtl } from "../lib/s3";
+import { presignGetBatch, presignGetDownload, presignGetWithTtl } from "../lib/s3";
 import { mapInChunks } from "../lib/slices";
 
 const err = (description: string) => ({
@@ -265,51 +265,73 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
           })
         : null;
 
-    const result = await Promise.all(
-      pageAlbums.map(async (a) => {
-        let coverThumbUrl: string | null = null;
-        let coverThumbhash: string | null = null;
+    // Resolver portadas en lote: un solo SELECT para los coverMediaId y uno
+    // agrupado para los álbumes sin portada, evitando N+1 de consultas y
+    // firmando todas las miniaturas con una sola llamada a presignGetBatch.
+    const coverMediaIds = pageAlbums
+      .map((a) => a.coverMediaId)
+      .filter((id): id is string => Boolean(id));
+    const coverMediaRows = coverMediaIds.length
+      ? await mapInChunks(coverMediaIds, (slice) =>
+          db.select().from(media).where(inArray(media.id, slice)),
+        )
+      : [];
+    const coverMediaMap = new Map(coverMediaRows.map((m) => [m.id, m]));
 
-        // Si tiene coverMediaId, buscarlo; si no, buscar la primera foto del álbum
-        let coverItem = null;
-        if (a.coverMediaId) {
-          coverItem = await db
-            .select()
-            .from(media)
-            .where(and(eq(media.id, a.coverMediaId), isNull(media.deletedAt)))
-            .get();
-        }
-        if (!coverItem) {
-          const firstMedia = await db
-            .select({ media })
+    const albumsWithoutCover = pageAlbums.filter((a) => {
+      if (!a.coverMediaId) return true;
+      const m = coverMediaMap.get(a.coverMediaId);
+      return !m || m.deletedAt != null;
+    });
+    const firstMediaByAlbum = new Map<string, any>();
+    if (albumsWithoutCover.length > 0) {
+      const rows = await mapInChunks(
+        albumsWithoutCover.map((a) => a.id),
+        (slice) =>
+          db
+            .select({ albumId: albumMedia.albumId, media })
             .from(albumMedia)
             .innerJoin(media, eq(albumMedia.mediaId, media.id))
-            .where(and(eq(albumMedia.albumId, a.id), isNull(media.deletedAt)))
-            .orderBy(desc(albumMedia.addedAt))
-            .limit(1)
-            .get();
-          coverItem = firstMedia?.media ?? null;
+            .where(and(inArray(albumMedia.albumId, slice), isNull(media.deletedAt)))
+            .orderBy(desc(albumMedia.addedAt)),
+      );
+      for (const r of rows) {
+        if (!firstMediaByAlbum.has(r.albumId)) {
+          firstMediaByAlbum.set(r.albumId, r.media);
         }
+      }
+    }
 
-        if (coverItem) {
-          coverThumbUrl = await presignGet(c.env, coverItem.r2KeyThumb);
-          coverThumbhash = coverItem.thumbhash;
-        }
+    const coverItems = pageAlbums.map((a) => {
+      if (a.coverMediaId) {
+        const m = coverMediaMap.get(a.coverMediaId);
+        if (m && m.deletedAt == null) return m;
+      }
+      return firstMediaByAlbum.get(a.id) ?? null;
+    });
 
-        return {
-          id: a.id,
-          title: a.title,
-          coverMediaId: a.coverMediaId,
-          coverThumbUrl,
-          coverThumbhash,
-          mediaCount: Number(a.mediaCount ?? 0),
-          isShared: Boolean(a.shareToken),
-          shareToken: a.shareToken,
-          createdAt: a.createdAt,
-          updatedAt: a.updatedAt,
-        };
-      }),
+    const coverThumbUrls = await presignGetBatch(
+      c.env,
+      coverItems.filter((m): m is NonNullable<typeof m> => Boolean(m)).map((m) => m.r2KeyThumb),
     );
+
+    const result = pageAlbums.map((a, idx) => {
+      const coverItem = coverItems[idx];
+      const coverThumbUrl = coverItem ? (coverThumbUrls[coverItem.r2KeyThumb] ?? null) : null;
+      const coverThumbhash = coverItem?.thumbhash ?? null;
+      return {
+        id: a.id,
+        title: a.title,
+        coverMediaId: a.coverMediaId,
+        coverThumbUrl,
+        coverThumbhash,
+        mediaCount: Number(a.mediaCount ?? 0),
+        isShared: Boolean(a.shareToken),
+        shareToken: a.shareToken,
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
+      };
+    });
 
     return c.json({ albums: result, nextCursor }, 200);
   })
@@ -362,33 +384,36 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       .where(and(eq(albumMedia.albumId, id), isNull(media.deletedAt)))
       .orderBy(desc(albumMedia.addedAt));
 
-    const items = await Promise.all(
-      rows.map(async ({ media: m }) => ({
-        id: m.id,
-        sha256: m.sha256,
-        mediaType: m.mediaType,
-        takenAt: m.takenAt,
-        dateGroup: m.dateGroup,
-        city: m.city ?? null,
-        width: m.width,
-        height: m.height,
-        durationMs: m.durationMs,
-        isFavorite: m.isFavorite,
-        isScreenshot: Boolean(m.isScreenshot),
-        isDocument: Boolean(m.isDocument),
-        thumbhash: m.thumbhash,
-        thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-      })),
+    const itemThumbUrls = await presignGetBatch(
+      c.env,
+      rows.map(({ media: m }) => m.r2KeyThumb),
     );
+    const items = rows.map(({ media: m }) => ({
+      id: m.id,
+      sha256: m.sha256,
+      mediaType: m.mediaType,
+      takenAt: m.takenAt,
+      dateGroup: m.dateGroup,
+      city: m.city ?? null,
+      width: m.width,
+      height: m.height,
+      durationMs: m.durationMs,
+      isFavorite: m.isFavorite,
+      isScreenshot: Boolean(m.isScreenshot),
+      isDocument: Boolean(m.isDocument),
+      thumbhash: m.thumbhash,
+      thumbUrl: itemThumbUrls[m.r2KeyThumb] ?? "",
+    }));
 
     const coverItem = rows[0]?.media ?? null;
+    const coverThumbUrl = coverItem ? (itemThumbUrls[coverItem.r2KeyThumb] ?? null) : null;
 
     return c.json(
       {
         id,
         title,
         coverMediaId: coverId,
-        coverThumbUrl: coverItem ? await presignGet(c.env, coverItem.r2KeyThumb) : null,
+        coverThumbUrl,
         coverThumbhash: coverItem?.thumbhash ?? null,
         mediaCount: items.length,
         isShared: false,
@@ -451,10 +476,31 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
           })
         : null;
 
-    const thumbUrls = await presignGetBatch(
-      c.env,
-      pageRows.map(({ media: m }) => m.r2KeyThumb),
-    );
+    let coverItem = null;
+    if (a.coverMediaId) {
+      coverItem = await db
+        .select()
+        .from(media)
+        .where(and(eq(media.id, a.coverMediaId), isNull(media.deletedAt)))
+        .get();
+    }
+    if (!coverItem) {
+      const firstMedia = await db
+        .select({ media })
+        .from(albumMedia)
+        .innerJoin(media, eq(albumMedia.mediaId, media.id))
+        .where(and(eq(albumMedia.albumId, a.id), isNull(media.deletedAt)))
+        .orderBy(desc(albumMedia.addedAt))
+        .limit(1)
+        .get();
+      coverItem = firstMedia?.media ?? null;
+    }
+
+    const thumbKeys = [
+      ...pageRows.map(({ media: m }) => m.r2KeyThumb),
+      ...(coverItem ? [coverItem.r2KeyThumb] : []),
+    ];
+    const thumbUrls = await presignGetBatch(c.env, thumbKeys);
     const items = pageRows.map(({ media: m }) => ({
       id: m.id,
       sha256: m.sha256,
@@ -482,27 +528,8 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
 
     let coverThumbUrl: string | null = null;
     let coverThumbhash: string | null = null;
-    let coverItem = null;
-    if (a.coverMediaId) {
-      coverItem = await db
-        .select()
-        .from(media)
-        .where(and(eq(media.id, a.coverMediaId), isNull(media.deletedAt)))
-        .get();
-    }
-    if (!coverItem) {
-      const firstMedia = await db
-        .select({ media })
-        .from(albumMedia)
-        .innerJoin(media, eq(albumMedia.mediaId, media.id))
-        .where(and(eq(albumMedia.albumId, a.id), isNull(media.deletedAt)))
-        .orderBy(desc(albumMedia.addedAt))
-        .limit(1)
-        .get();
-      coverItem = firstMedia?.media ?? null;
-    }
     if (coverItem) {
-      coverThumbUrl = await presignGet(c.env, coverItem.r2KeyThumb);
+      coverThumbUrl = thumbUrls[coverItem.r2KeyThumb] ?? null;
       coverThumbhash = coverItem.thumbhash;
     }
 
@@ -577,32 +604,39 @@ export const albumsApp = new OpenAPIHono<AppEnv>()
       .where(and(eq(albumMedia.albumId, id), isNull(media.deletedAt)))
       .orderBy(desc(albumMedia.addedAt));
 
-    const items = await Promise.all(
-      rows.map(async ({ media: m }) => ({
-        id: m.id,
-        sha256: m.sha256,
-        mediaType: m.mediaType,
-        takenAt: m.takenAt,
-        dateGroup: m.dateGroup,
-        city: m.city ?? null,
-        width: m.width,
-        height: m.height,
-        durationMs: m.durationMs,
-        isFavorite: m.isFavorite,
-        isScreenshot: Boolean(m.isScreenshot),
-        isDocument: Boolean(m.isDocument),
-        thumbhash: m.thumbhash,
-        thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-      })),
+    const itemThumbUrls = await presignGetBatch(
+      c.env,
+      rows.map(({ media: m }) => m.r2KeyThumb),
     );
+    const items = rows.map(({ media: m }) => ({
+      id: m.id,
+      sha256: m.sha256,
+      mediaType: m.mediaType,
+      takenAt: m.takenAt,
+      dateGroup: m.dateGroup,
+      city: m.city ?? null,
+      width: m.width,
+      height: m.height,
+      durationMs: m.durationMs,
+      isFavorite: m.isFavorite,
+      isScreenshot: Boolean(m.isScreenshot),
+      isDocument: Boolean(m.isDocument),
+      thumbhash: m.thumbhash,
+      thumbUrl: itemThumbUrls[m.r2KeyThumb] ?? "",
+    }));
 
     let coverThumbUrl: string | null = null;
     let coverThumbhash: string | null = null;
     const cover =
       rows.find((r) => r.media.id === updated.coverMediaId)?.media ?? rows[0]?.media ?? null;
     if (cover) {
-      coverThumbUrl = await presignGet(c.env, cover.r2KeyThumb);
+      coverThumbUrl = itemThumbUrls[cover.r2KeyThumb] ?? null;
       coverThumbhash = cover.thumbhash;
+    }
+    // Si la portada no está entre los items (p. ej. borrada), firmarla aparte.
+    if (cover && coverThumbUrl == null) {
+      const extra = await presignGetBatch(c.env, [cover.r2KeyThumb]);
+      coverThumbUrl = extra[cover.r2KeyThumb] ?? null;
     }
 
     return c.json(

@@ -12,7 +12,7 @@ import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { geocodeMediaItem } from "../lib/geo";
-import { presignGet } from "../lib/s3";
+import { presignGetBatch } from "../lib/s3";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -130,25 +130,27 @@ export const locationsApp = new OpenAPIHono<AppEnv>()
           })
         : null;
 
-    const items = await Promise.all(
-      pageRows.map(async (row) => ({
-        id: row.id,
-        // biome-ignore lint/style/noNonNullAssertion: validado por isNotNull en la consulta
-        latitude: row.latitude!,
-        // biome-ignore lint/style/noNonNullAssertion: validado por isNotNull en la consulta
-        longitude: row.longitude!,
-        city: row.city ?? null,
-        country: row.country ?? null,
-        locationName: row.locationName ?? null,
-        thumbUrl: await presignGet(c.env, row.r2KeyThumb),
-        thumbhash: row.thumbhash,
-        mediaType: row.mediaType,
-        takenAt: row.takenAt,
-        dateGroup: row.dateGroup,
-        isFavorite: row.isFavorite ?? false,
-        caption: row.caption ?? null,
-      })),
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      pageRows.map((row) => row.r2KeyThumb),
     );
+    const items = pageRows.map((row) => ({
+      id: row.id,
+      // biome-ignore lint/style/noNonNullAssertion: validado por isNotNull en la consulta
+      latitude: row.latitude!,
+      // biome-ignore lint/style/noNonNullAssertion: validado por isNotNull en la consulta
+      longitude: row.longitude!,
+      city: row.city ?? null,
+      country: row.country ?? null,
+      locationName: row.locationName ?? null,
+      thumbUrl: thumbUrls[row.r2KeyThumb] ?? "",
+      thumbhash: row.thumbhash,
+      mediaType: row.mediaType,
+      takenAt: row.takenAt,
+      dateGroup: row.dateGroup,
+      isFavorite: row.isFavorite ?? false,
+      caption: row.caption ?? null,
+    }));
 
     return c.json({ items, totalWithGps: items.length, nextCursor }, 200);
   })
@@ -231,16 +233,18 @@ export const locationsApp = new OpenAPIHono<AppEnv>()
           )
         : null;
 
-    const places = await Promise.all(
-      page.map(async (p) => ({
-        city: p.city,
-        country: p.country,
-        locationName: p.location_name,
-        count: Number(p.count),
-        thumbUrl: await presignGet(c.env, p.r2_key_thumb),
-        thumbhash: p.thumbhash,
-      })),
+    const placeThumbUrls = await presignGetBatch(
+      c.env,
+      page.map((p) => p.r2_key_thumb),
     );
+    const places = page.map((p) => ({
+      city: p.city,
+      country: p.country,
+      locationName: p.location_name,
+      count: Number(p.count),
+      thumbUrl: placeThumbUrls[p.r2_key_thumb] ?? "",
+      thumbhash: p.thumbhash,
+    }));
 
     return c.json({ places, nextCursor }, 200);
   })
@@ -267,12 +271,18 @@ export const locationsApp = new OpenAPIHono<AppEnv>()
       )
       .limit(15);
 
+    const CONCURRENCY = 5;
     let geocoded = 0;
-    for (const row of rows) {
-      if (row.latitude != null && row.longitude != null) {
-        const res = await geocodeMediaItem(c.env, row.id, user.id, row.latitude, row.longitude);
-        if (res.locationName) geocoded++;
-      }
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+      const chunk = rows.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        chunk.map(async (row) => {
+          if (row.latitude == null || row.longitude == null) return false;
+          const res = await geocodeMediaItem(c.env, row.id, user.id, row.latitude, row.longitude);
+          return Boolean(res.locationName);
+        }),
+      );
+      geocoded += results.filter(Boolean).length;
     }
 
     return c.json({ geocoded }, 200);

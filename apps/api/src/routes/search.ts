@@ -11,7 +11,7 @@ import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
-import { presignGet } from "../lib/s3";
+import { presignGetBatch } from "../lib/s3";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -186,24 +186,26 @@ export const searchApp = new OpenAPIHono<AppEnv>()
     const nextCursor =
       hasMore && lastItem ? encodeCursor({ t: lastItem.takenAt, id: lastItem.id }) : null;
 
-    const items = await Promise.all(
-      pageRows.map(async (row) => ({
-        id: row.id,
-        sha256: row.sha256,
-        mediaType: row.mediaType,
-        takenAt: row.takenAt,
-        dateGroup: row.dateGroup,
-        city: row.city ?? null,
-        width: row.width,
-        height: row.height,
-        durationMs: row.durationMs,
-        isFavorite: row.isFavorite,
-        isScreenshot: Boolean(row.isScreenshot),
-        isDocument: Boolean(row.isDocument),
-        thumbhash: row.thumbhash,
-        thumbUrl: await presignGet(c.env, row.r2KeyThumb),
-      })),
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      pageRows.map((row) => row.r2KeyThumb),
     );
+    const items = pageRows.map((row) => ({
+      id: row.id,
+      sha256: row.sha256,
+      mediaType: row.mediaType,
+      takenAt: row.takenAt,
+      dateGroup: row.dateGroup,
+      city: row.city ?? null,
+      width: row.width,
+      height: row.height,
+      durationMs: row.durationMs,
+      isFavorite: row.isFavorite,
+      isScreenshot: Boolean(row.isScreenshot),
+      isDocument: Boolean(row.isDocument),
+      thumbhash: row.thumbhash,
+      thumbUrl: thumbUrls[row.r2KeyThumb] ?? "",
+    }));
 
     return c.json({ items, nextCursor, totalMatches }, 200);
   });

@@ -9,7 +9,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
-import { presignGet } from "../lib/s3";
+import { presignGetBatch } from "../lib/s3";
 
 const err = (description: string) => ({
   content: { "application/json": { schema: errorSchema } },
@@ -95,34 +95,35 @@ export const cleanerApp = new OpenAPIHono<AppEnv>()
       clusters.push(currentCluster);
     }
 
-    const formattedClusters = await Promise.all(
-      clusters.map(async (cList) => {
-        const first = cList[0];
-        const items = await Promise.all(
-          cList.map(async (m) => ({
-            id: m.id,
-            sha256: m.sha256,
-            mediaType: m.mediaType,
-            takenAt: m.takenAt,
-            dateGroup: m.dateGroup,
-            width: m.width,
-            height: m.height,
-            durationMs: m.durationMs,
-            isFavorite: m.isFavorite,
-            isScreenshot: Boolean(m.isScreenshot),
-            isDocument: Boolean(m.isDocument),
-            thumbhash: m.thumbhash,
-            thumbUrl: await presignGet(c.env, m.r2KeyThumb),
-          })),
-        );
-        return {
-          id: `cluster-${first.id}`,
-          takenAt: first.takenAt,
-          dateGroup: first.dateGroup,
-          items,
-        };
-      }),
+    const allClusterMedia = clusters.flat();
+    const thumbUrls = await presignGetBatch(
+      c.env,
+      allClusterMedia.map((m) => m.r2KeyThumb),
     );
+    const formattedClusters = clusters.map((cList) => {
+      const first = cList[0];
+      const items = cList.map((m) => ({
+        id: m.id,
+        sha256: m.sha256,
+        mediaType: m.mediaType,
+        takenAt: m.takenAt,
+        dateGroup: m.dateGroup,
+        width: m.width,
+        height: m.height,
+        durationMs: m.durationMs,
+        isFavorite: m.isFavorite,
+        isScreenshot: Boolean(m.isScreenshot),
+        isDocument: Boolean(m.isDocument),
+        thumbhash: m.thumbhash,
+        thumbUrl: thumbUrls[m.r2KeyThumb] ?? "",
+      }));
+      return {
+        id: `cluster-${first.id}`,
+        takenAt: first.takenAt,
+        dateGroup: first.dateGroup,
+        items,
+      };
+    });
 
     const totalPhotos = formattedClusters.reduce((sum, cl) => sum + cl.items.length, 0);
 

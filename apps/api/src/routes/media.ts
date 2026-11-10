@@ -424,9 +424,17 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       )
       .limit(15);
     const items: Array<{ id: string; tags: string[] }> = [];
-    for (const r of rows) {
-      const tags = await tagMediaItem(c.env, r.id, user.id);
-      items.push({ id: r.id, tags });
+    // Concurrencia limitada para no saturar el proveedor de IA.
+    const CONCURRENCY = 5;
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+      const chunk = rows.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        chunk.map(async (r) => ({
+          id: r.id,
+          tags: await tagMediaItem(c.env, r.id, user.id),
+        })),
+      );
+      items.push(...results);
     }
     return c.json({ processed: items.length, items }, 200);
   })

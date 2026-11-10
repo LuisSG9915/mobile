@@ -313,17 +313,23 @@ export async function reconcileStorageStats(db: Db): Promise<number> {
   const pendingByUser = new Map(aggPending.map((r) => [r.userId, r.bytes]));
   const allUserIds = new Set<string>();
 
-  for (const row of aggReady) {
+  const CONCURRENCY = 10;
+  const readyTasks = aggReady.map((row) => async () => {
     allUserIds.add(row.userId);
     const reserved = pendingByUser.get(row.userId) ?? 0;
     await setStorageUsage(db, row.userId, row.bytes, row.cnt, reserved);
+  });
+  for (let i = 0; i < readyTasks.length; i += CONCURRENCY) {
+    await Promise.all(readyTasks.slice(i, i + CONCURRENCY).map((t) => t()));
   }
 
-  for (const row of aggPending) {
-    if (!allUserIds.has(row.userId)) {
-      allUserIds.add(row.userId);
-      await setStorageUsage(db, row.userId, 0, 0, row.bytes);
-    }
+  const pendingOnly = aggPending.filter((row) => !allUserIds.has(row.userId));
+  for (const row of pendingOnly) allUserIds.add(row.userId);
+  const pendingTasks = pendingOnly.map((row) => async () => {
+    await setStorageUsage(db, row.userId, 0, 0, row.bytes);
+  });
+  for (let i = 0; i < pendingTasks.length; i += CONCURRENCY) {
+    await Promise.all(pendingTasks.slice(i, i + CONCURRENCY).map((t) => t()));
   }
 
   // Poner a 0 las filas de usuarios sin media. `notInArray` con todos los
