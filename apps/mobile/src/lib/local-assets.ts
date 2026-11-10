@@ -20,6 +20,9 @@ function stableTimestampFromId(id: string): number {
 /**
  * Obtiene la lista de álbumes locales del dispositivo con su miniatura de portada.
  */
+// Caché de portadas por álbum (clave incluye assetCount para invalidar si cambia).
+const coverCache = new Map<string, string | null>();
+
 export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
   try {
     const perm = await MediaLibrary.getPermissionsAsync(false, ["photo", "video"]);
@@ -37,18 +40,21 @@ export async function listLocalAlbums(): Promise<DeviceAlbum[]> {
     );
     const withCovers = await Promise.all(
       valid.map(async (alb) => {
-        let coverUri: string | null = null;
-        try {
-          const sample = await MediaLibrary.getAssetsAsync({
-            album: alb.id,
-            first: 1,
-            sortBy: [[MediaLibrary.SortBy.creationTime, false]],
-          });
-          if (sample.assets.length > 0) {
-            coverUri = sample.assets[0].uri;
+        const cacheKey = `${alb.id}:${alb.assetCount}`;
+        let coverUri = coverCache.get(cacheKey);
+        if (coverUri === undefined) {
+          try {
+            const sample = await MediaLibrary.getAssetsAsync({
+              album: alb.id,
+              first: 1,
+              sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+            });
+            coverUri = sample.assets.length > 0 ? sample.assets[0].uri : null;
+          } catch {
+            // Si falla obtener muestra, el álbum se muestra con icono de carpeta
+            coverUri = null;
           }
-        } catch {
-          // Si falla obtener muestra, el álbum se muestra con icono de carpeta
+          coverCache.set(cacheKey, coverUri);
         }
         return {
           id: alb.id,

@@ -388,15 +388,13 @@ export function useHybridGallery(
       allQueue = getQueueItems();
       queueCacheRef.current = { tick, items: allQueue };
     }
-    // Fingerprint numérico (barato) en lugar de un string gigante.
-    let h = 0;
+    // Huella barata: el tamaño y el updated_at más reciente capturan cambios de
+    // estado y progreso sin recorrer varios campos por item.
+    let maxUpdated = 0;
     for (const q of allQueue) {
-      h = (Math.imul(h, 31) + (q.asset_id?.length ?? 0)) >>> 0;
-      h = (Math.imul(h, 31) + (q.state?.charCodeAt(0) ?? 0)) >>> 0;
-      h = (Math.imul(h, 31) + (q.bytes_sent | 0)) >>> 0;
-      h = (Math.imul(h, 31) + (q.remote_id?.length ?? 0)) >>> 0;
+      if (q.updated_at > maxUpdated) maxUpdated = q.updated_at;
     }
-    const queueFp = `${allQueue.length}:${h}`;
+    const queueFp = `${allQueue.length}:${maxUpdated}`;
 
     const cached = photosCacheRef.current;
     if (

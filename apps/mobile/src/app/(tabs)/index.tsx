@@ -73,15 +73,6 @@ import { SyncStatusAvatar } from "../../ui/SyncStatusAvatar";
 
 const isWeb = Platform.OS === "web";
 
-/**
- * FlashList 2.0.2 conservaba el offset interno al sustituir `data` a media
- * carga, dejando la cuadrícula en negro. El remontaje por `committedScope`
- * (key-hack) evita eso. En FlashList ≥2.3.x el bug está corregido: poner este
- * flag en `false` retira el hack y permite verificar que el month-jump sigue
- * funcionando sin pantalla negra antes de borrar el código definitivamente.
- */
-const FLASH_LIST_KEY_HACK_ENABLED = false;
-
 // Densidades del pinch-to-zoom: detalle (1), normal (3), compacta (5).
 const DENSITY_LEVELS = [1, 3, 5];
 
@@ -145,13 +136,29 @@ const PhotoCell = memo(
     // Acotar el bitmap decodificado al tamaño real de la celda: sin esto el
     // frame de un video llega full-res (1080p ≈ 8 MB) aunque la celda mida 120 dp.
     const px = Math.round((size - GRID_GAP) * PixelRatio.get());
-    const source: ImageSource[] =
-      photo.mediaType === "video" && photo.thumbUrl && photo.localUri
-        ? [
-            { uri: photo.thumbUrl, cacheKey, width: px, height: px },
-            { uri: photo.localUri, cacheKey: `${cacheKey}-local`, width: px, height: px },
-          ]
-        : [{ uri: displayUri ?? undefined, cacheKey, width: px, height: px }];
+    // Vídeos respaldados: preferimos la miniatura remota (WebP ~20 KB) y, solo
+    // si falla, caemos a la URI local. Así evitamos decodificar el mp4 en paralelo.
+    const [remoteThumbFailed, setRemoteThumbFailed] = useState(false);
+    useEffect(() => {
+      setRemoteThumbFailed(false);
+    }, [photo.key]);
+    const source: ImageSource[] = useMemo(() => {
+      if (photo.mediaType === "video" && photo.thumbUrl && photo.localUri && !remoteThumbFailed) {
+        return [{ uri: photo.thumbUrl, cacheKey, width: px, height: px }];
+      }
+      if (photo.mediaType === "video" && photo.thumbUrl && photo.localUri && remoteThumbFailed) {
+        return [{ uri: photo.localUri, cacheKey: `${cacheKey}-local`, width: px, height: px }];
+      }
+      return [{ uri: displayUri ?? undefined, cacheKey, width: px, height: px }];
+    }, [
+      photo.mediaType,
+      photo.thumbUrl,
+      photo.localUri,
+      displayUri,
+      cacheKey,
+      px,
+      remoteThumbFailed,
+    ]);
     return (
       <Pressable
         accessibilityRole="imagebutton"
@@ -171,6 +178,11 @@ const PhotoCell = memo(
         {displayUri ? (
           <Image
             source={source}
+            onError={() => {
+              if (photo.mediaType === "video" && photo.thumbUrl && photo.localUri) {
+                setRemoteThumbFailed(true);
+              }
+            }}
             placeholder={photo.thumbhash ? { thumbhash: photo.thumbhash } : undefined}
             contentFit="cover"
             transition={200}
@@ -470,24 +482,31 @@ export default function GalleryScreen() {
     staleTime: 60_000,
   });
 
-  const jumpToMonth = useCallback(
-    (ym: string) => {
-      let idx = -1;
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        if (r.type === "photo" && new Date(r.photo.takenAt).toISOString().slice(0, 7) === ym) {
-          idx = i;
-          break;
+  // Índice por mes del primer elemento (y su header) para saltar en O(1)
+  // en vez de recorrer `rows` linealmente en cada salto.
+  const monthIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let lastHeader = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.type === "header") {
+        lastHeader = i;
+        continue;
+      }
+      if (r.type === "photo") {
+        const ym = new Date(r.photo.takenAt).toISOString().slice(0, 7);
+        if (!map.has(ym)) {
+          map.set(ym, lastHeader >= 0 ? lastHeader : i);
         }
       }
-      if (idx >= 0) {
-        let target = idx;
-        for (let i = idx; i >= 0; i--) {
-          if (rows[i].type === "header") {
-            target = i;
-            break;
-          }
-        }
+    }
+    return map;
+  }, [rows]);
+
+  const jumpToMonth = useCallback(
+    (ym: string) => {
+      const target = monthIndexMap.get(ym);
+      if (target !== undefined) {
         listRef.current?.scrollToIndex({ index: target, animated: true });
         setJumpYm(null);
       } else {
@@ -495,7 +514,7 @@ export default function GalleryScreen() {
         setTimelineBefore(ymToEndOfMonthIso(ym));
       }
     },
-    [rows],
+    [monthIndexMap],
   );
 
   // Prefetch del mes adyacente (más antiguo) al saltar de mes, para que el
@@ -518,26 +537,12 @@ export default function GalleryScreen() {
 
   useEffect(() => {
     if (!jumpYm) return;
-    let idx = -1;
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      if (r.type === "photo" && new Date(r.photo.takenAt).toISOString().slice(0, 7) === jumpYm) {
-        idx = i;
-        break;
-      }
-    }
-    if (idx >= 0) {
-      let target = idx;
-      for (let i = idx; i >= 0; i--) {
-        if (rows[i].type === "header") {
-          target = i;
-          break;
-        }
-      }
+    const target = monthIndexMap.get(jumpYm);
+    if (target !== undefined) {
       listRef.current?.scrollToIndex({ index: target, animated: true });
       setJumpYm(null);
     }
-  }, [jumpYm, rows]);
+  }, [jumpYm, monthIndexMap]);
 
   const sticky = useMemo(
     () => rows.map((r, i) => (r.type === "header" ? i : -1)).filter((i) => i >= 0),
@@ -836,19 +841,6 @@ export default function GalleryScreen() {
     rowCount: rows.length,
   });
 
-  // P0 (pantalla en negro al saltar de mes): FlashList 2.0.2 conserva el
-  // offset interno de la lista anterior cuando `data` se sustituye a media
-  // carga y deja de pintar celdas (solo el header sticky). Remontar con la
-  // lista vieja tampoco sirve: monta con `data` vacía y el swap posterior
-  // vuelve a romper el layout.
-  //
-  // Solución: mantener la lista actual montada mientras el alcance nuevo
-  // carga (el overlay de `monthJumpView` la tapa) y remontar SOLO cuando sus
-  // filas ya están disponibles. Así el FlashList nuevo arranca con datos y
-  // sin offset heredado. Si el mes está cacheado el remontaje es inmediato.
-  const monthDataReady = !timelineBefore || (!query.isPending && !query.isError);
-  const committedScope = useRef(timelineBefore ?? "");
-  if (monthDataReady) committedScope.current = timelineBefore ?? "";
   const scopeKey = `${timelineFilter}|${
     albumFilter ? `${albumFilter.type}:${albumFilter.albumId}` : "all"
   }|${syncedAlbumIds?.join(",") ?? "ALL"}`;
@@ -1126,13 +1118,7 @@ export default function GalleryScreen() {
             onTouchCancel={() => setDragSelecting(false)}
           >
             <FlashList<GalleryRow>
-              // Remontaje solo cuando el alcance nuevo ya tiene filas (ver
-              // `committedScope`): el FlashList nuevo arranca con layout limpio.
-              key={
-                FLASH_LIST_KEY_HACK_ENABLED
-                  ? `${scopeKey}|${committedScope.current}|${columns}`
-                  : `${scopeKey}|${columns}`
-              }
+              key={`${scopeKey}|${columns}`}
               ref={listRef}
               data={rows}
               keyExtractor={listKeyExtractor}

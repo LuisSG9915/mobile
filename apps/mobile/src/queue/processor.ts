@@ -580,11 +580,10 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
     const now = Date.now();
     if (now - lastProgress > 500) {
       lastProgress = now;
-      db.runSync("UPDATE queue SET bytes_sent = ? WHERE asset_id = ? AND user_id IS ?", [
-        sent,
-        item.asset_id,
-        item.user_id ?? null,
-      ]);
+      db.runSync(
+        "UPDATE queue SET bytes_sent = ?, updated_at = ? WHERE asset_id = ? AND user_id IS ?",
+        [sent, Date.now(), item.asset_id, item.user_id ?? null],
+      );
       publishByteTick(item.asset_id, sent, fileSize);
     }
   });
