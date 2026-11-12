@@ -169,9 +169,35 @@ describe("auth", () => {
       updatedAt: now,
     });
 
-    const delRes = await SELF.fetch(
+    // Sin contraseña no se borra nada (validación del cuerpo).
+    const noBodyRes = await SELF.fetch(
       "http://localhost/v1/user/account",
       authed(cookie, { method: "DELETE" }),
+    );
+    expect(noBodyRes.status).toBe(400);
+
+    // Contraseña incorrecta: 401 y la cuenta sigue intacta.
+    const wrongRes = await SELF.fetch(
+      "http://localhost/v1/user/account",
+      authed(cookie, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "not-the-password" }),
+      }),
+    );
+    // 403 y no 401: un 401 haría que el cliente marcara la sesión como expirada.
+    expect(wrongRes.status).toBe(403);
+    expect((await j(wrongRes)).code).toBe("invalid_password");
+    const stillThere = await db.select().from(userTable).where(eq(userTable.id, userId)).get();
+    expect(stillThere).toBeDefined();
+
+    const delRes = await SELF.fetch(
+      "http://localhost/v1/user/account",
+      authed(cookie, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "password1234" }),
+      }),
     );
     expect(delRes.status).toBe(200);
     const delJson = await j(delRes);

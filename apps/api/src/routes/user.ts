@@ -5,9 +5,11 @@ import {
   STORAGE_QUOTA_BYTES,
   storageResponseSchema,
   userAccountDeleteResponseSchema,
+  userAccountDeleteSchema,
   userExportResponseSchema,
   userSessionsResponseSchema,
 } from "@photos/shared";
+import { verifyPassword } from "better-auth/crypto";
 import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../db/client";
 import {
@@ -101,13 +103,22 @@ const deleteAccountRoute = createRoute({
   tags: ["user"],
   summary: "Eliminar cuenta y todos los datos asociados",
   description:
-    "Revoca todas las sesiones, elimina registros de la base de datos y purga todos los objetos de R2.",
+    "Exige la contraseña actual (re-autenticación) antes de revocar todas las sesiones, eliminar registros de la base de datos y purgar todos los objetos de R2. Una sesión robada por sí sola no puede borrar la cuenta.",
+  request: {
+    body: {
+      content: { "application/json": { schema: userAccountDeleteSchema } },
+      required: true,
+    },
+  },
   responses: {
     200: {
       content: { "application/json": { schema: userAccountDeleteResponseSchema } },
       description: "Cuenta eliminada",
     },
+    400: err("La cuenta no admite re-autenticación con contraseña"),
     401: err("Sin sesión"),
+    403: err("Contraseña incorrecta"),
+    429: err("Demasiados intentos"),
   },
 });
 
@@ -239,7 +250,55 @@ export const userApp = new OpenAPIHono<AppEnv>()
   })
   .openapi(deleteAccountRoute, async (c) => {
     const user = c.get("user");
+    const { password } = c.req.valid("json");
     const db = getDb(c.env.DB);
+
+    // Freno de fuerza bruta: sin esto, un token robado podría probar
+    // contraseñas a base de DELETE.
+    if (c.env.AUTH_LIMITER) {
+      const { success } = await c.env.AUTH_LIMITER.limit({
+        key: `delete-account:${user.id}`,
+      });
+      if (!success) {
+        return c.json(
+          { error: "rate_limited", message: "Demasiados intentos. Espera un minuto." },
+          429,
+        );
+      }
+    }
+
+    const credential = await db
+      .select({ password: account.password })
+      .from(account)
+      .where(and(eq(account.userId, user.id), eq(account.providerId, "credential")))
+      .get();
+
+    if (!credential?.password) {
+      return c.json(
+        {
+          code: "reauth_unavailable",
+          error: "reauth_unavailable",
+          message:
+            "Esta cuenta no tiene contraseña con la que confirmar el borrado. Cierra sesión y vuelve a entrar para continuar.",
+        },
+        400,
+      );
+    }
+
+    const passwordOk = await verifyPassword({ hash: credential.password, password });
+    if (!passwordOk) {
+      // 403, no 401: el cliente interpreta cualquier 401 como sesión expirada
+      // (pausa el respaldo y muestra el aviso). Aquí la sesión sigue siendo
+      // válida; lo que falla es la re-autenticación.
+      return c.json(
+        {
+          code: "invalid_password",
+          error: "invalid_password",
+          message: "La contraseña no es correcta. No se borró nada.",
+        },
+        403,
+      );
+    }
 
     // 1. Obtener claves de R2 de todos los medios del usuario (activos y papelera)
     const mediaRows = await db

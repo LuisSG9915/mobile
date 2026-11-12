@@ -704,6 +704,14 @@ export const userExportResponseSchema = z.object({
   albums: z.array(userExportAlbumItemSchema),
 });
 
+export const userAccountDeleteSchema = z.object({
+  /**
+   * Re-autenticación obligatoria: el borrado destruye R2 y D1 sin vuelta
+   * atrás, así que una sesión (posiblemente robada) no debe bastar.
+   */
+  password: z.string().min(1, "La contraseña es obligatoria").max(200),
+});
+
 export const userAccountDeleteResponseSchema = z.object({
   ok: z.literal(true),
   message: z.string(),
@@ -714,4 +722,5 @@ export type UserSessionsResponse = z.infer<typeof userSessionsResponseSchema>;
 export type UserExportMediaItem = z.infer<typeof userExportMediaItemSchema>;
 export type UserExportAlbumItem = z.infer<typeof userExportAlbumItemSchema>;
 export type UserExportResponse = z.infer<typeof userExportResponseSchema>;
+export type UserAccountDeleteInput = z.infer<typeof userAccountDeleteSchema>;
 export type UserAccountDeleteResponse = z.infer<typeof userAccountDeleteResponseSchema>;
