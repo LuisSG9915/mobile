@@ -257,7 +257,6 @@ export function ShareMediaModal({ visible, onClose, media }: ShareMediaModalProp
     }
   };
 
-
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable className="flex-1 bg-black/60" onPress={onClose} />

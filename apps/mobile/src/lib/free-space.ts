@@ -74,8 +74,6 @@ export async function verifyRemoteIntegrity(
   return valid.filter((i) => existingSet.has(i.sha256 as string)).map((i) => i.asset_id);
 }
 
-
-
 /**
  * ¿Queda una copia local del elemento remoto? Cierto si la cola conserva la
  * fila done/duplicate que enlaza el asset del dispositivo con su remote_id.

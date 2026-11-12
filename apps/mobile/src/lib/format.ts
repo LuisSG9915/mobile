@@ -27,7 +27,11 @@ export function formatRelative(ts: number): string {
  * (~100 µs) y `sectionLabel` se llama por cada foto al armar las filas de la
  * galería — con biblioteca grande eran varios segundos de hilo bloqueado.
  */
-const monthFormatter = new Intl.DateTimeFormat("es", { month: "long", year: "numeric", timeZone: "UTC" });
+const monthFormatter = new Intl.DateTimeFormat("es", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
 const dateTimeFormatter = new Intl.DateTimeFormat("es", {
   day: "numeric",
   month: "long",

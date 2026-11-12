@@ -62,10 +62,14 @@ beforeEach(async () => {
   mocks.removeQueueItems.mockReset().mockResolvedValue();
   mocks.deleteAssetsAsync.mockReset().mockResolvedValue(true);
   mocks.hasLocalCopySync.mockReset().mockImplementation((rId: string) => {
-    return mocks.getQueueItems().some((i) => i.remote_id === rId && (i.state === "done" || i.state === "duplicate"));
+    return mocks
+      .getQueueItems()
+      .some((i) => i.remote_id === rId && (i.state === "done" || i.state === "duplicate"));
   });
   mocks.getLocalAssetIdByRemoteId.mockReset().mockImplementation((rId: string) => {
-    const it = mocks.getQueueItems().find((i) => i.remote_id === rId && (i.state === "done" || i.state === "duplicate"));
+    const it = mocks
+      .getQueueItems()
+      .find((i) => i.remote_id === rId && (i.state === "done" || i.state === "duplicate"));
     return it?.asset_id ?? null;
   });
   mocks.checkHashes.mockReset().mockImplementation(async (shas: string[]) => ({
