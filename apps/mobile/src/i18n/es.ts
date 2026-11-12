@@ -459,6 +459,15 @@ export const t = {
     exportedJson: "Datos exportados en JSON",
     exported: "Datos exportados",
     nothingToFree: "No hay elementos respaldados que coincidan con ese criterio.",
+    deleteAccount: "Eliminar cuenta",
+    deleteAccountBody:
+      "Elimina tu usuario, credenciales, álbumes y borra permanentemente todos tus archivos y fotos del almacenamiento en la nube.",
+    deleteAccountAction: "Eliminar mi cuenta definitivamente",
+    deletePasswordTitle: "Confirma tu contraseña",
+    deletePasswordBody:
+      "Por seguridad, escribe la contraseña de tu cuenta. El borrado es irreversible.",
+    deletePasswordLabel: "Contraseña",
+    cancel: "Cancelar",
   },
   admin: {
     title: "Almacenamiento R2",

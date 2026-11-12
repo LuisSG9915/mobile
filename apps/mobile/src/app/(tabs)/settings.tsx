@@ -15,7 +15,7 @@ import {
   UserX,
 } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { api } from "../../api/client";
@@ -27,7 +27,7 @@ import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { invalidateMediaLifecycleQueries } from "../../lib/query-client";
 import { appBuild, appVersion } from "../../lib/telemetry";
 import { performLogout } from "../../queue/logout";
-import { Button, Card } from "../../ui";
+import { Button, Card, Field } from "../../ui";
 
 const isWeb = Platform.OS === "web";
 const buildLabel = appBuild();
@@ -89,11 +89,23 @@ export default function SettingsScreen() {
   };
 
   const [deletingAccount, setDeletingAccount] = useState(false);
-  const executeDeleteAccount = async () => {
+  // Re-autenticación: borrar la cuenta exige la contraseña actual, no basta
+  // con una sesión abierta (posiblemente robada).
+  const [passwordPrompt, setPasswordPrompt] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+
+  const openPasswordPrompt = () => {
+    setDeletePassword("");
+    setPasswordPrompt(true);
+  };
+
+  const executeDeleteAccount = async (password: string) => {
     setDeletingAccount(true);
     try {
-      const res = await api.deleteAccount();
+      const res = await api.deleteAccount({ password });
       toast.success(res.message || "Cuenta eliminada");
+      setPasswordPrompt(false);
+      setDeletePassword("");
       const userId = session?.user?.id ?? "";
       await performLogout(userId);
       router.replace("/welcome");
@@ -112,7 +124,7 @@ export default function SettingsScreen() {
         window.confirm(msg) &&
         window.confirm("Confirmación final: ¿proceder con el borrado definitivo?")
       ) {
-        void executeDeleteAccount();
+        openPasswordPrompt();
       }
       return;
     }
@@ -130,7 +142,7 @@ export default function SettingsScreen() {
               {
                 text: "Sí, borrar todo",
                 style: "destructive",
-                onPress: () => void executeDeleteAccount(),
+                onPress: openPasswordPrompt,
               },
             ],
           );
@@ -397,15 +409,14 @@ export default function SettingsScreen() {
           <View className="flex-row items-center gap-2.5">
             <UserX size={18} color="#ef4444" />
             <Text className="text-base font-semibold text-red-600 dark:text-red-400">
-              Eliminar cuenta
+              {t.settings.deleteAccount}
             </Text>
           </View>
           <Text className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
-            Elimina tu usuario, credenciales, álbumes y borra permanentemente todos tus archivos y
-            fotos en el almacenamiento en la nube.
+            {t.settings.deleteAccountBody}
           </Text>
           <Button
-            label="Eliminar mi cuenta definitivamente"
+            label={t.settings.deleteAccountAction}
             variant="danger"
             loading={deletingAccount}
             disabled={deletingAccount}
@@ -420,6 +431,55 @@ export default function SettingsScreen() {
           {buildLabel ? ` (${buildLabel})` : ""} · Photos
         </Text>
       </ScrollView>
+
+      <Modal
+        visible={passwordPrompt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deletingAccount) setPasswordPrompt(false);
+        }}
+      >
+        <View className="flex-1 items-center justify-center bg-black/60 px-6">
+          <Card className="w-full max-w-md gap-3">
+            <Text className="text-lg font-semibold text-neutral-900 dark:text-white">
+              {t.settings.deletePasswordTitle}
+            </Text>
+            <Text className="text-sm text-neutral-500 leading-relaxed">
+              {t.settings.deletePasswordBody}
+            </Text>
+            <Field
+              label={t.settings.deletePasswordLabel}
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              secureTextEntry
+              autoComplete="current-password"
+              autoFocus
+              placeholder="••••••••"
+              returnKeyType="done"
+              onSubmitEditing={() => {
+                if (deletePassword.length > 0) void executeDeleteAccount(deletePassword);
+              }}
+            />
+            <Button
+              label={t.settings.deleteAccountAction}
+              variant="danger"
+              loading={deletingAccount}
+              disabled={deletingAccount || deletePassword.length === 0}
+              onPress={() => void executeDeleteAccount(deletePassword)}
+            />
+            <Button
+              label={t.settings.cancel}
+              variant="ghost"
+              disabled={deletingAccount}
+              onPress={() => {
+                setPasswordPrompt(false);
+                setDeletePassword("");
+              }}
+            />
+          </Card>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

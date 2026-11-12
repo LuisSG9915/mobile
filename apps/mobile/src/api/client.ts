@@ -40,6 +40,7 @@ import type {
   UploadCancelResponse,
   UploadInitInput,
   UploadInitResponse,
+  UserAccountDeleteInput,
   UserAccountDeleteResponse,
   UserExportResponse,
   UserSessionsResponse,
@@ -385,6 +386,8 @@ export const api = {
   exportUserData: (): Promise<UserExportResponse> =>
     apiFetch("/v1/user/export").then((r) => r.json()),
 
-  deleteAccount: (): Promise<UserAccountDeleteResponse> =>
-    apiFetch("/v1/user/account", { method: "DELETE" }).then((r) => r.json()),
+  deleteAccount: (body: UserAccountDeleteInput): Promise<UserAccountDeleteResponse> =>
+    apiFetch("/v1/user/account", { method: "DELETE", body: JSON.stringify(body) }).then((r) =>
+      r.json(),
+    ),
 };
