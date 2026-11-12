@@ -34,7 +34,10 @@
     "MAX_ORIGINAL_BYTES": "5368709120",
     "BETTER_AUTH_URL": "https://photos-api.luis-sg9915.workers.dev",
     "WEB_ORIGINS": "https://photos-web.luis-sg9915.workers.dev",
-    "ADMIN_EMAIL": "luis.sg9915@gmail.com"
+    "ADMIN_EMAIL": "luis.sg9915@gmail.com",
+    // Tope diario de elementos etiquetados con IA por usuario (acota el coste
+    // de Workers AI; el contador vive en system_state y se reinicia cada día).
+    "AI_DAILY_LIMIT": "200"
     // Recuperación de contraseña (Resend):
     // - RESEND_API_KEY va como SECRET: `npx wrangler secret put RESEND_API_KEY`.
     // - EMAIL_FROM cuando haya dominio verificado en Resend, ej.:
@@ -73,6 +76,17 @@
       "namespace_id": "1003",
       "simple": {
         "limit": 60,
+        "period": 60
+      }
+    },
+    {
+      // Etiquetado con IA por usuario: cada elemento consume una inferencia de
+      // Workers AI (LLaVA + fallback ResNet). Frena las ráfagas; el gasto total
+      // lo acota AI_DAILY_LIMIT.
+      "name": "AI_LIMITER",
+      "namespace_id": "1004",
+      "simple": {
+        "limit": 12,
         "period": 60
       }
     }

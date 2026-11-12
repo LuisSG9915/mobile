@@ -22,6 +22,7 @@ import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { tagMediaItem } from "../lib/ai";
+import { aiDailyLimit, consumeAiQuota } from "../lib/ai-quota";
 import { geocodeMediaItem } from "../lib/geo";
 import { originalKey, previewKey, thumbKey } from "../lib/keys";
 import {
@@ -615,11 +616,21 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
     await confirmStorageUsage(db, user.id, totalUsage);
 
     // Análisis visual y etiquetado con IA en segundo plano (no retrasa la respuesta al usuario)
+    // El etiquetado automático también consume la cuota diaria de IA: sin
+    // freno, importar miles de fotos dispararía miles de inferencias.
     if (c.env.AI) {
-      const backgroundTag = tagMediaItem(c.env, row.id, user.id).catch((err) => {
-        console.warn("auto_tag_upload_error", row.id, err);
+      // Un fallo del contador no debe tirar una subida ya confirmada: sin
+      // cuota disponible se omite el etiquetado, nunca falla la respuesta.
+      const quota = await consumeAiQuota(db, user.id, 1, aiDailyLimit(c.env)).catch((err) => {
+        console.warn("ai_quota_check_failed", row.id, err);
+        return { granted: 0, used: 0, limit: 0 };
       });
-      c.executionCtx?.waitUntil?.(backgroundTag);
+      if (quota.granted > 0) {
+        const backgroundTag = tagMediaItem(c.env, row.id, user.id).catch((err) => {
+          console.warn("auto_tag_upload_error", row.id, err);
+        });
+        c.executionCtx?.waitUntil?.(backgroundTag);
+      }
     }
 
     // Geocodificación inversa si el elemento tiene coordenadas GPS
@@ -1092,11 +1103,21 @@ export const uploadsApp = new OpenAPIHono<AppEnv>()
     const totalUsage = row.fileSize + row.thumbSize + (row.previewSize ?? 0);
     await confirmStorageUsage(db, user.id, totalUsage);
 
+    // El etiquetado automático también consume la cuota diaria de IA: sin
+    // freno, importar miles de fotos dispararía miles de inferencias.
     if (c.env.AI) {
-      const backgroundTag = tagMediaItem(c.env, row.id, user.id).catch((err) => {
-        console.warn("auto_tag_upload_error", row.id, err);
+      // Un fallo del contador no debe tirar una subida ya confirmada: sin
+      // cuota disponible se omite el etiquetado, nunca falla la respuesta.
+      const quota = await consumeAiQuota(db, user.id, 1, aiDailyLimit(c.env)).catch((err) => {
+        console.warn("ai_quota_check_failed", row.id, err);
+        return { granted: 0, used: 0, limit: 0 };
       });
-      c.executionCtx?.waitUntil?.(backgroundTag);
+      if (quota.granted > 0) {
+        const backgroundTag = tagMediaItem(c.env, row.id, user.id).catch((err) => {
+          console.warn("auto_tag_upload_error", row.id, err);
+        });
+        c.executionCtx?.waitUntil?.(backgroundTag);
+      }
     }
 
     if (row.latitude != null && row.longitude != null) {

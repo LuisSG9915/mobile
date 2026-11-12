@@ -20,6 +20,7 @@ import { getDb } from "../db/client";
 import { media } from "../db/schema";
 import type { AppEnv } from "../env";
 import { tagMediaItem } from "../lib/ai";
+import { aiDailyLimit, consumeAiQuota } from "../lib/ai-quota";
 import { decodeCursor, encodeCursor } from "../lib/cursor";
 import { presignGet, presignGetBatch, presignGetDownload } from "../lib/s3";
 import { releaseStorageReservation, removeStorageUsage } from "../lib/storage-stats";
@@ -91,6 +92,7 @@ const autoTagRoute = createRoute({
     },
     401: err("Sin sesión"),
     404: err("No encontrado"),
+    429: err("Demasiadas solicitudes o cuota diaria de IA agotada"),
   },
 });
 
@@ -107,6 +109,7 @@ const autoTagBatchRoute = createRoute({
       description: "Lote procesado",
     },
     401: err("Sin sesión"),
+    429: err("Demasiadas solicitudes o cuota diaria de IA agotada"),
   },
 });
 
@@ -405,6 +408,29 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
     if (row?.status !== "ready" || row.deletedAt != null) {
       return c.json({ error: "not_found", message: "Elemento no encontrado." }, 404);
     }
+    if (c.env.AI_LIMITER) {
+      const { success } = await c.env.AI_LIMITER.limit({ key: `ai:${user.id}` });
+      if (!success) {
+        return c.json(
+          {
+            error: "rate_limited",
+            message: "Demasiadas solicitudes de etiquetado. Espera un minuto.",
+          },
+          429,
+        );
+      }
+    }
+    const quota = await consumeAiQuota(db, user.id, 1, aiDailyLimit(c.env));
+    if (quota.granted === 0) {
+      return c.json(
+        {
+          code: "ai_quota_exceeded",
+          error: "ai_quota_exceeded",
+          message: `Alcanzaste el límite diario de etiquetado con IA (${quota.limit}). Se reinicia a medianoche UTC.`,
+        },
+        429,
+      );
+    }
     const tags = await tagMediaItem(c.env, id, user.id);
     return c.json({ id, tags }, 200);
   })
@@ -424,10 +450,39 @@ export const mediaApp = new OpenAPIHono<AppEnv>()
       )
       .limit(15);
     const items: Array<{ id: string; tags: string[] }> = [];
+    if (rows.length === 0) {
+      return c.json({ processed: 0, items }, 200);
+    }
+    if (c.env.AI_LIMITER) {
+      const { success } = await c.env.AI_LIMITER.limit({ key: `ai:${user.id}` });
+      if (!success) {
+        return c.json(
+          {
+            error: "rate_limited",
+            message: "Demasiadas solicitudes de etiquetado. Espera un minuto.",
+          },
+          429,
+        );
+      }
+    }
+    // El lote se recorta a lo que autoriza la cuota diaria: si solo quedan 3
+    // elementos, se procesan 3 en vez de rechazar el batch entero.
+    const quota = await consumeAiQuota(db, user.id, rows.length, aiDailyLimit(c.env));
+    if (quota.granted === 0) {
+      return c.json(
+        {
+          code: "ai_quota_exceeded",
+          error: "ai_quota_exceeded",
+          message: `Alcanzaste el límite diario de etiquetado con IA (${quota.limit}). Se reinicia a medianoche UTC.`,
+        },
+        429,
+      );
+    }
+    const targets = rows.slice(0, quota.granted);
     // Concurrencia limitada para no saturar el proveedor de IA.
     const CONCURRENCY = 5;
-    for (let i = 0; i < rows.length; i += CONCURRENCY) {
-      const chunk = rows.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < targets.length; i += CONCURRENCY) {
+      const chunk = targets.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
         chunk.map(async (r) => ({
           id: r.id,

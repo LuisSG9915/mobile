@@ -16,6 +16,8 @@ export type Bindings = {
   AUTH_LIMITER?: RateLimit;
   /** Rate limit por IP para los enlaces públicos (/albums/public/*); ausente en dev/tests. */
   SHARE_LIMITER?: RateLimit;
+  /** Rate limit por usuario para las rutas de etiquetado con IA; ausente en dev/tests. */
+  AI_LIMITER?: RateLimit;
   /** Cloudflare Analytics Engine para telemetría operativa de subidas y rendimiento. */
   ANALYTICS?: AnalyticsEngineDataset;
 
@@ -51,6 +53,9 @@ export type Bindings = {
   APP_VERSION?: string;
   /** Commit desplegado (wrangler --var GIT_SHA=<sha>); expuesta en /version. */
   GIT_SHA?: string;
+
+  /** Tope diario de elementos etiquetados con IA por usuario (por defecto 200). */
+  AI_DAILY_LIMIT?: string;
 
   /** DSN de Sentry (secret). Sin él la telemetría queda desactivada. */
   SENTRY_DSN?: string;

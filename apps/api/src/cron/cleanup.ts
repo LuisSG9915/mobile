@@ -140,6 +140,16 @@ export async function runCleanup(env: Bindings): Promise<void> {
   await db.delete(session).where(lt(session.expiresAt, new Date(now)));
   await db.delete(verification).where(lt(verification.expiresAt, new Date(now)));
 
+  // Contadores de cuota de IA: una fila por usuario y día; se purgan a la semana.
+  await db
+    .delete(systemState)
+    .where(
+      and(
+        like(systemState.key, "ai_usage:%"),
+        lt(systemState.updatedAt, now - 7 * 24 * 3600 * 1000),
+      ),
+    );
+
   // Purgar prefijos de usuarios con cuenta eliminada pendientes
   const userPurges = await db
     .select()
