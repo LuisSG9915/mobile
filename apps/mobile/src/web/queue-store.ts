@@ -39,7 +39,7 @@ type AccountRow = { userId: string; epoch: number };
 export type QueueContext = { userId: string; epoch: number };
 
 const DB_NAME = "photos.queue";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const CONTEXT_ERROR = "El contexto de la cola ya no es válido.";
 

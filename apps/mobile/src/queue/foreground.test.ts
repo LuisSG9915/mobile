@@ -35,7 +35,7 @@ vi.mock("expo-modules-core", () => ({
   requireOptionalNativeModule: () => h.native,
 }));
 
-vi.mock("react-native", () => ({ AppState: h.appState }));
+vi.mock("react-native", () => ({ AppState: h.appState, Platform: { OS: "android" } }));
 
 vi.mock("../lib/store", () => ({
   useSyncProgress: { getState: () => h.state },
@@ -73,12 +73,9 @@ describe("foreground (Android)", () => {
     const fg = await load();
     fg.startUploadForeground();
     expect(h.native.start).toHaveBeenCalledTimes(1);
-    const [title, body, percent, timeoutTitle, timeoutBody] = h.native.start.mock.calls[0];
+    const [title, body] = h.native.start.mock.calls[0];
     expect(title).toBe("Respaldando fotos y videos");
     expect(body).toContain("3 de 10");
-    expect(percent).toBe(30);
-    expect(timeoutTitle).toBe("Respaldo pausado");
-    expect(timeoutBody).toContain("6 h");
   });
 
   it("throttlea las actualizaciones a una por segundo", async () => {

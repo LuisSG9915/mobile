@@ -77,9 +77,11 @@ export function installFakeXhr(planArg: PlanArg): {
       queueMicrotask(() => {
         if (this.request.aborted) return;
         const size =
-          body && typeof body === "object" && "byteLength" in body
-            ? Number((body as ArrayBuffer).byteLength)
-            : 0;
+          body && typeof body === "object" && "size" in body
+            ? Number((body as { size: number }).size)
+            : body && typeof body === "object" && "byteLength" in body
+              ? Number((body as ArrayBuffer).byteLength)
+              : 0;
         this.upload.onprogress?.({ loaded: size, total: size });
         if (plan.hold) return;
         if (plan.fail === "error") {

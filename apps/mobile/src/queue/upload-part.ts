@@ -12,7 +12,7 @@
  * de red.
  */
 
-import { withDeadline } from "./shared";
+// withDeadline no se usa: enviamos el Blob directamente a XHR.
 
 const CANCELLED_MSG = "Subida cancelada.";
 const STALLED_MSG = "La subida de la parte se estancó por falta de red.";
@@ -48,11 +48,9 @@ export async function uploadPartBlob({
 }: UploadPartInput): Promise<{ etag: string }> {
   if (signal?.aborted) throw new Error(CANCELLED_MSG);
 
-  // Una sola copia en memoria por parte (5 MiB hoy, 16 MiB con U2).
-  // Deadline: una lectura colgada (archivo corrupto, proveedor roto) sin techo
-  // congelaba la cola entera — la señal de aborto no alcanza a arrayBuffer().
-  const body = await withDeadline(blob.arrayBuffer(), 120_000, "leer-parte");
-  // El signal puede abortarse mientras se materializa el rango.
+  // En React Native, `Blob.arrayBuffer()` no está soportado y lanza
+  // "Creating blobs from 'ArrayBuffer'...". Enviamos el Blob directamente a XHR,
+  // que reporta progreso por byte igual que con ArrayBuffer.
   if (signal?.aborted) throw new Error(CANCELLED_MSG);
 
   return new Promise<{ etag: string }>((resolve, reject) => {
@@ -95,7 +93,7 @@ export async function uploadPartBlob({
 
     xhr.upload.onprogress = (event: ProgressEvent) => {
       lastProgressAt = Date.now();
-      onProgress?.(event.loaded, event.total || body.byteLength);
+      onProgress?.(event.loaded, event.total || blob.size);
     };
 
     xhr.onload = () => {
@@ -123,6 +121,6 @@ export async function uploadPartBlob({
     xhr.onabort = () =>
       finish(() => reject(new Error(signal?.aborted ? CANCELLED_MSG : STALLED_MSG)));
 
-    xhr.send(body);
+    xhr.send(blob);
   });
 }

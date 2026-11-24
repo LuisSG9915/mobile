@@ -3,14 +3,18 @@ import * as Network from "expo-network";
 import { useEffect } from "react";
 import { AppState } from "react-native";
 import { useQueueEvents } from "../lib/events";
-import { useSettings } from "../lib/store";
+import { useSettings, useSyncProgress } from "../lib/store";
 import { registerBackupTask } from "./background";
 import { getLastScanTs, getQueueStats, isBackupPaused, retryFailed, setBackupPaused } from "./db";
 import {
   onUploadForegroundTimeout,
+  startForegroundUploadService,
   startUploadForeground,
+  stopForegroundUploadService,
   stopUploadForeground,
+  subscribeForegroundActions,
 } from "./foreground";
+import { describeUploadNotification } from "./notification-text";
 import { cancelQueue, isRunning, processQueue } from "./processor";
 import { scanLibrary } from "./scanner";
 
@@ -158,6 +162,14 @@ export function useBackupRunner(enabled: boolean) {
       cancelQueue();
       useQueueEvents.getState().emit();
     });
+
+    const unsubscribePause = subscribeForegroundActions((action) => {
+      if (action !== "pause_requested") return;
+      stopUploadForeground();
+      setBackupPaused(true);
+      cancelQueue();
+      useQueueEvents.getState().emit();
+    });
     // Las pasadas son de mejor esfuerzo: un fallo (scan, red, permisos) no
     // debe propagarse como rechazo no manejado.
     const pass = () => {
@@ -227,7 +239,62 @@ export function useBackupRunner(enabled: boolean) {
       if (libraryTimer) clearTimeout(libraryTimer);
       librarySub?.remove();
       unsubscribeTimeout();
+      unsubscribePause();
       cleanupAutoResume();
     };
   }, [enabled]);
+}
+
+// ---------- API ampliada (compatibilidad con el ciclo de subida documentado) ----------
+
+let currentAbortController: AbortController | null = null;
+let isPausedByUser = false;
+let unsubscribeForeground: (() => void) | null = null;
+
+export function pauseQueueRunner(): void {
+  isPausedByUser = true;
+  currentAbortController?.abort();
+  currentAbortController = null;
+  void stopForegroundUploadService();
+  try {
+    // emitir progreso si está disponible
+  } catch {
+    // noop
+  }
+}
+
+export function resumeQueueRunner(): void {
+  if (!isPausedByUser) return;
+  isPausedByUser = false;
+  void runUploadQueue();
+}
+
+export async function runUploadQueue(): Promise<void> {
+  if (isPausedByUser) return;
+
+  unsubscribeForeground?.();
+  unsubscribeForeground = subscribeForegroundActions((action) => {
+    if (action === "pause_requested") {
+      pauseQueueRunner();
+    } else if (action === "timeout_reached") {
+      currentAbortController?.abort();
+      currentAbortController = null;
+      void stopForegroundUploadService();
+    }
+  });
+
+  try {
+    const pending = getQueueStats().pending;
+    if (pending <= 0) return;
+
+    const text = describeUploadNotification(useSyncProgress.getState());
+    await startForegroundUploadService(text.title, text.body);
+
+    await processQueue();
+  } finally {
+    currentAbortController = null;
+    unsubscribeForeground?.();
+    unsubscribeForeground = null;
+    await stopForegroundUploadService();
+  }
 }

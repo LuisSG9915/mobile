@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/animator/fragment_close_enter.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33:/animator/fragment_close_enter.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/animator/fragment_fade_exit.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33:/animator/fragment_fade_exit.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/animator/fragment_open_enter.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33:/animator/fragment_open_enter.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/animator/fragment_open_exit.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33:/animator/fragment_open_exit.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/animator/fragment_fade_enter.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33:/animator/fragment_fade_enter.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/animator/fragment_close_exit.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33:/animator/fragment_close_exit.xml"
+    }
+]

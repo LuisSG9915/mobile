@@ -202,7 +202,13 @@ async function uploadFile(
   activeUploadTasks.add(task);
   // Watchdog: una conexión colgada sin eventos no puede congelar la cola.
   const watchdog = setInterval(() => {
-    if (Date.now() - lastEventAt > STALL_MS) void task.cancelAsync().catch(() => {});
+    const idleMs = Date.now() - lastEventAt;
+    if (idleMs > STALL_MS) {
+      console.warn(
+        "[queue] stall:watchdog " + JSON.stringify({ fileUri, idleMs, thresholdMs: STALL_MS }),
+      );
+      void task.cancelAsync().catch(() => {});
+    }
   }, WATCHDOG_TICK_MS);
   try {
     const res = await task.uploadAsync();
@@ -216,6 +222,15 @@ async function uploadFile(
 }
 
 async function processItem(item: QueueItem, allowLookahead = true): Promise<void> {
+  console.info(
+    "[queue] processItem:start " +
+      JSON.stringify({
+        asset_id: item.asset_id,
+        media_type: item.media_type,
+        attempts: item.attempts,
+        bytes_total: item.bytes_total,
+      }),
+  );
   const db = getQueueDb();
 
   const info = await withDeadline(
@@ -733,6 +748,15 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
   running = true;
   cancelled = false;
   let processed = 0;
+  console.info(
+    "[queue] processQueue:start " +
+      JSON.stringify({
+        concurrency: Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(opts.concurrency ?? 1))),
+        pending: getQueueStats().pending,
+        deadlineMs: opts.deadlineMs ?? null,
+        maxItems: opts.maxItems ?? null,
+      }),
+  );
   const concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, Math.floor(opts.concurrency ?? 1)));
   const inFlight = new Set<string>();
   let videosInFlight = 0;
@@ -759,6 +783,16 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
 
     /** Devuelve true cuando la pasada debe cortarse (cancelación/sesión caída). */
     const handleFailure = async (item: QueueItem, e: unknown): Promise<boolean> => {
+      const message =
+        e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
+      console.warn("[queue] item:fail", {
+        asset_id: item.asset_id,
+        attempts: item.attempts,
+        status: e instanceof ApiError ? e.status : null,
+        code: e instanceof ApiError ? e.code : null,
+        message,
+      });
+      if (e instanceof Error) console.warn("[queue] item:fail:stack", e.stack);
       if (cancelled) {
         // Cancelada por el usuario (logout): vuelve a queued sin gastar intento.
         await setState(item.asset_id, "queued").catch(() => {});
@@ -766,8 +800,6 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
         emitStructure();
         return true;
       }
-      const message =
-        e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
       // Correo sin verificar: no es una sesión caída. Pausar con el motivo
       // visible para que el usuario pueda reenviar la verificación en vez de
       // ver la cola detenida sin explicación.
@@ -871,6 +903,7 @@ export async function processQueue(opts: ProcessOptions = {}): Promise<void> {
 
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
   } finally {
+    console.info("[queue] processQueue:done " + JSON.stringify({ processed, running: false }));
     running = false;
     forceCellular = false;
     precheckedHashes.clear();

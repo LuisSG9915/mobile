@@ -5,7 +5,7 @@ import { PartUploadError, uploadPartBlob } from "./upload-part";
 /** Blob mínimo: `uploadPartBlob` solo usa `arrayBuffer()`. */
 function makeBlob(bytes: number): Blob {
   const buffer = new Uint8Array(bytes);
-  return { arrayBuffer: async () => buffer.buffer } as unknown as Blob;
+  return { size: bytes, arrayBuffer: async () => buffer.buffer } as unknown as Blob;
 }
 
 let restore: (() => void) | null = null;
@@ -31,7 +31,7 @@ describe("uploadPartBlob (nativo)", () => {
     expect(progress.at(-1)).toBe(8);
     expect(fake.requests).toHaveLength(1);
     expect(fake.requests[0].method).toBe("PUT");
-    expect(fake.requests[0].body).toBeInstanceOf(ArrayBuffer);
+    expect(fake.requests[0].body).toMatchObject({ size: 8 });
   });
 
   it("un 404 se propaga con status para distinguir sesión muerta de fallo de red", async () => {
@@ -68,22 +68,6 @@ describe("uploadPartBlob (nativo)", () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow(/cancelada/);
-    expect(fake.requests).toHaveLength(0);
-  });
-
-  it("abortar mientras se materializa la parte rechaza sin llegar a la red", async () => {
-    const fake = installFakeXhr({ status: 200, etag: '"x"' });
-    restore = fake.restore;
-    const controller = new AbortController();
-
-    const pending = uploadPartBlob({
-      url: "https://r2/part/1",
-      blob: makeBlob(4),
-      signal: controller.signal,
-    });
-    controller.abort();
-
-    await expect(pending).rejects.toThrow(/cancelada/);
     expect(fake.requests).toHaveLength(0);
   });
 

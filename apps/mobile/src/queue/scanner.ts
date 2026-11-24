@@ -6,8 +6,10 @@ import {
   clearQueue,
   type EnqueueInput,
   enqueueAssetsBatch,
+  getLastScannedCreationTime,
   getLastScanTs,
   pruneQueueExcept,
+  setLastScannedCreationTime,
   setLastScanTs,
 } from "./db";
 import { cancelQueue } from "./processor";
@@ -136,4 +138,107 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
   // La biblioteca se re-listó: la galería híbrida refresca sus assets locales.
   useLibraryEvents.getState().emit();
   return { added, skipped };
+}
+
+// ---------- Escaneo incremental + watcher en vivo (API documentada) ----------
+
+export interface ScanGalleryOptions {
+  pageSize?: number;
+  forceFullScan?: boolean;
+  onBatchEnqueued?: (enqueuedSoFar: number) => void;
+}
+
+export interface ScanGalleryResult {
+  scannedAssets: number;
+  newlyEnqueued: number;
+  latestCreationTime: number;
+}
+
+let isScanningIncremental = false;
+
+export async function scanDeviceGalleryIncremental(
+  options: ScanGalleryOptions = {},
+): Promise<ScanGalleryResult> {
+  if (isScanningIncremental) {
+    return { scannedAssets: 0, newlyEnqueued: 0, latestCreationTime: 0 };
+  }
+  isScanningIncremental = true;
+  try {
+    const pageSize = options.pageSize ?? 200;
+    const savedWatermark = options.forceFullScan ? 0 : await getLastScannedCreationTime();
+    const createdAfter = savedWatermark > 1000 ? savedWatermark - 1000 : undefined;
+
+    let afterCursor: string | undefined;
+    let hasNextPage = true;
+    let scannedAssets = 0;
+    let newlyEnqueued = 0;
+    let maxCreationTimeSeen = savedWatermark;
+
+    while (hasNextPage) {
+      const page = await MediaLibrary.getAssetsAsync({
+        first: pageSize,
+        after: afterCursor,
+        createdAfter,
+        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        sortBy: [[MediaLibrary.SortBy.creationTime, true]],
+      });
+
+      if (page.assets.length === 0) break;
+
+      const batch: any[] = [];
+      for (const asset of page.assets) {
+        scannedAssets += 1;
+        const creationTimeMs = asset.creationTime || Date.now();
+        if (creationTimeMs > maxCreationTimeSeen) maxCreationTimeSeen = creationTimeMs;
+        batch.push({
+          id: asset.id,
+          uri: asset.uri,
+          filename: asset.filename || `asset_${asset.id}`,
+          mediaType: asset.mediaType === "video" ? "video" : "photo",
+          creationTime: creationTimeMs,
+        });
+      }
+
+      await enqueueAssetsBatch(batch as any);
+      newlyEnqueued += batch.length;
+      options.onBatchEnqueued?.(newlyEnqueued);
+
+      hasNextPage = page.hasNextPage;
+      afterCursor = page.endCursor;
+    }
+
+    try {
+      if (maxCreationTimeSeen > savedWatermark) {
+        await setLastScannedCreationTime(maxCreationTimeSeen);
+      }
+    } catch {
+      // noop
+    }
+    return { scannedAssets, newlyEnqueued, latestCreationTime: maxCreationTimeSeen };
+  } finally {
+    isScanningIncremental = false;
+  }
+}
+
+export function startMediaLibraryLiveWatcher(
+  onNewAssetsEnqueued: (count: number) => void,
+  debounceMs = 1500,
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const subscription = MediaLibrary.addListener(() => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const res = await scanDeviceGalleryIncremental();
+        if (res.newlyEnqueued > 0) onNewAssetsEnqueued(res.newlyEnqueued);
+      } catch (err) {
+        console.warn("[queue/scanner] Error en live watcher:", err);
+      }
+    }, debounceMs);
+  });
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    subscription.remove();
+  };
 }

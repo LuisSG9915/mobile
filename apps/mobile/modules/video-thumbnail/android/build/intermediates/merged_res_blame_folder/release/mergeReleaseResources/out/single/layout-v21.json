@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/layout-v21/notification_template_custom_big.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-core-1.17.0-38:/layout-v21/notification_template_custom_big.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/layout-v21/notification_action_tombstone.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-core-1.17.0-38:/layout-v21/notification_action_tombstone.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/layout-v21/notification_template_icon_group.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-core-1.17.0-38:/layout-v21/notification_template_icon_group.xml"
+    },
+    {
+        "merged": "expo.modules.videothumbnail.video-thumbnail-release-51:/layout-v21/notification_action.xml",
+        "source": "expo.modules.videothumbnail.video-thumbnail-core-1.17.0-38:/layout-v21/notification_action.xml"
+    }
+]

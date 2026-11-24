@@ -86,7 +86,15 @@ function applyRow(row: store.QueueRow): void {
 type StateExtra = Partial<
   Pick<
     QueueItem,
-    "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent" | "upload_id" | "parts"
+    | "sha256"
+    | "remote_id"
+    | "last_error"
+    | "bytes_total"
+    | "bytes_sent"
+    | "upload_id"
+    | "parts"
+    | "upload_lease"
+    | "last_request_id"
   >
 >;
 
@@ -100,6 +108,8 @@ function applyState(row: store.QueueRow, state: QueueState, extra: StateExtra): 
   if (extra.bytes_sent != null) row.bytes_sent = extra.bytes_sent;
   if (extra.upload_id != null) row.upload_id = extra.upload_id;
   if (extra.parts != null) row.parts = extra.parts;
+  if (extra.upload_lease != null) row.upload_lease = extra.upload_lease;
+  if (extra.last_request_id != null) row.last_request_id = extra.last_request_id;
   row.updated_at = Date.now();
   return row;
 }
@@ -325,6 +335,8 @@ export function enqueueAsset(asset: EnqueueInput, file?: File): Promise<void> {
       bytes_sent: 0,
       next_retry_at: 0,
       updated_at: Date.now(),
+      upload_lease: null,
+      last_request_id: null,
     };
     const payload = file
       ? {

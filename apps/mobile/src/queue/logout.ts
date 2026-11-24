@@ -15,3 +15,17 @@ export async function performLogout(_userId: string): Promise<void> {
   queryClient.clear();
   await signOut();
 }
+
+import { clearPersistedQueryCache } from "../lib/query-client";
+import { clearQueueDatabase } from "./db";
+import { stopForegroundUploadService } from "./foreground";
+import { pauseQueueRunner } from "./runner";
+
+export async function performCleanLogout(): Promise<void> {
+  pauseQueueRunner();
+  await Promise.allSettled([
+    stopForegroundUploadService(),
+    clearQueueDatabase(),
+    clearPersistedQueryCache(),
+  ]);
+}

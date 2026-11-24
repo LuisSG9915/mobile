@@ -1,0 +1,57 @@
+expo.modules.videothumbnail.video-thumbnail-profileinstaller-1.3.1-0 /Users/luis/.gradle/caches/9.3.1/transforms/0a2cd0d2c10ae8d6e61e45e311b4eabf/transformed/profileinstaller-1.3.1/res
+expo.modules.videothumbnail.video-thumbnail-appcompat-1.7.0-1 /Users/luis/.gradle/caches/9.3.1/transforms/0ef6c5d4bc8145d6a381ce3a59c576a4/transformed/appcompat-1.7.0/res
+expo.modules.videothumbnail.video-thumbnail-graphics-path-1.0.1-2 /Users/luis/.gradle/caches/9.3.1/transforms/10aed8779ca017c2aac2ed25e289e222/transformed/graphics-path-1.0.1/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-livedata-core-2.8.3-3 /Users/luis/.gradle/caches/9.3.1/transforms/16eac68fd1445eca81e732b61a95d3fa/transformed/lifecycle-livedata-core-2.8.3/res
+expo.modules.videothumbnail.video-thumbnail-ui-unit-release-4 /Users/luis/.gradle/caches/9.3.1/transforms/1d191feb859963e5dc0436ddc6aabd98/transformed/ui-unit-release/res
+expo.modules.videothumbnail.video-thumbnail-runtime-saveable-release-5 /Users/luis/.gradle/caches/9.3.1/transforms/1d857b334276abf75e7c49f860f28e09/transformed/runtime-saveable-release/res
+expo.modules.videothumbnail.video-thumbnail-activity-1.7.0-6 /Users/luis/.gradle/caches/9.3.1/transforms/25b2d90132a71f957a88fbcf51b7c183/transformed/activity-1.7.0/res
+expo.modules.videothumbnail.video-thumbnail-react-android-0.86.3-release-7 /Users/luis/.gradle/caches/9.3.1/transforms/2632d6d2d8d86a67264f1929d6ca7219/transformed/react-android-0.86.3-release/res
+expo.modules.videothumbnail.video-thumbnail-runtime-release-8 /Users/luis/.gradle/caches/9.3.1/transforms/26a176531745810dc7134fb5cab7d55b/transformed/runtime-release/res
+expo.modules.videothumbnail.video-thumbnail-startup-runtime-1.1.1-9 /Users/luis/.gradle/caches/9.3.1/transforms/2765446cc641e15ae278c5aae08919a1/transformed/startup-runtime-1.1.1/res
+expo.modules.videothumbnail.video-thumbnail-core-runtime-2.2.0-10 /Users/luis/.gradle/caches/9.3.1/transforms/2c98b3ab0575eb4836ce0ae512e09609/transformed/core-runtime-2.2.0/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-runtime-release-11 /Users/luis/.gradle/caches/9.3.1/transforms/30326ba4dbe9982f30f731179bb9efd3/transformed/lifecycle-runtime-release/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-viewmodel-release-12 /Users/luis/.gradle/caches/9.3.1/transforms/3628de18a6a9d45375cf6cba2a8da742/transformed/lifecycle-viewmodel-release/res
+expo.modules.videothumbnail.video-thumbnail-swiperefreshlayout-1.1.0-13 /Users/luis/.gradle/caches/9.3.1/transforms/367342b55791e500e89a0d318de40ff9/transformed/swiperefreshlayout-1.1.0/res
+expo.modules.videothumbnail.video-thumbnail-autofill-1.3.0-14 /Users/luis/.gradle/caches/9.3.1/transforms/427297696f8516984c60acc70ff0f9da/transformed/autofill-1.3.0/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-process-2.8.3-15 /Users/luis/.gradle/caches/9.3.1/transforms/43c443374dd71148071504d94a267828/transformed/lifecycle-process-2.8.3/res
+expo.modules.videothumbnail.video-thumbnail-animation-release-16 /Users/luis/.gradle/caches/9.3.1/transforms/632a26479a583c68496a02a930d0ed40/transformed/animation-release/res
+expo.modules.videothumbnail.video-thumbnail-animation-core-release-17 /Users/luis/.gradle/caches/9.3.1/transforms/6aaa8fc352d9057fe98e6d867c3e9095/transformed/animation-core-release/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-livedata-core-ktx-2.8.3-18 /Users/luis/.gradle/caches/9.3.1/transforms/6b6cd42e3721392be030277a22600673/transformed/lifecycle-livedata-core-ktx-2.8.3/res
+expo.modules.videothumbnail.video-thumbnail-ui-util-release-19 /Users/luis/.gradle/caches/9.3.1/transforms/6d675f61f09227174b61d154895f4bc4/transformed/ui-util-release/res
+expo.modules.videothumbnail.video-thumbnail-appcompat-resources-1.7.0-20 /Users/luis/.gradle/caches/9.3.1/transforms/6df43cf7899e7870861b45eac8569663/transformed/appcompat-resources-1.7.0/res
+expo.modules.videothumbnail.video-thumbnail-savedstate-ktx-1.2.1-21 /Users/luis/.gradle/caches/9.3.1/transforms/6e1fd96e6e47d3b7462ec40602827964/transformed/savedstate-ktx-1.2.1/res
+expo.modules.videothumbnail.video-thumbnail-ui-text-release-22 /Users/luis/.gradle/caches/9.3.1/transforms/6ff705a279964badefc1a4ecdaf443e1/transformed/ui-text-release/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-runtime-ktx-release-23 /Users/luis/.gradle/caches/9.3.1/transforms/782249f0d63fb645d66fddc49412ffe1/transformed/lifecycle-runtime-ktx-release/res
+expo.modules.videothumbnail.video-thumbnail-ui-geometry-release-24 /Users/luis/.gradle/caches/9.3.1/transforms/8533135632972ce06bd806b0a6768bf2/transformed/ui-geometry-release/res
+expo.modules.videothumbnail.video-thumbnail-emoji2-1.3.0-25 /Users/luis/.gradle/caches/9.3.1/transforms/8ed555bf2cf48a5d35e0ee7f39f62086/transformed/emoji2-1.3.0/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-viewmodel-ktx-2.8.3-26 /Users/luis/.gradle/caches/9.3.1/transforms/9490f7e29000f01d029c270900ec7df3/transformed/lifecycle-viewmodel-ktx-2.8.3/res
+expo.modules.videothumbnail.video-thumbnail-emoji2-views-helper-1.3.0-27 /Users/luis/.gradle/caches/9.3.1/transforms/9555746bc2970fb92ca27469fae5b9af/transformed/emoji2-views-helper-1.3.0/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-livedata-2.8.3-28 /Users/luis/.gradle/caches/9.3.1/transforms/959a3aeaf0ce069a782ff1d7757c1e7d/transformed/lifecycle-livedata-2.8.3/res
+expo.modules.videothumbnail.video-thumbnail-ui-release-29 /Users/luis/.gradle/caches/9.3.1/transforms/971c4d04248f7d95f3f9b094e1dc3863/transformed/ui-release/res
+expo.modules.videothumbnail.video-thumbnail-customview-poolingcontainer-1.0.0-30 /Users/luis/.gradle/caches/9.3.1/transforms/9938d491d9e6696b322a3478114cd351/transformed/customview-poolingcontainer-1.0.0/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-viewmodel-savedstate-2.8.3-31 /Users/luis/.gradle/caches/9.3.1/transforms/a1fd6c057dde152e2de57320e3a44487/transformed/lifecycle-viewmodel-savedstate-2.8.3/res
+expo.modules.videothumbnail.video-thumbnail-foundation-layout-release-32 /Users/luis/.gradle/caches/9.3.1/transforms/a5181c9f08a873520c1caaefa073a7b1/transformed/foundation-layout-release/res
+expo.modules.videothumbnail.video-thumbnail-fragment-1.5.4-33 /Users/luis/.gradle/caches/9.3.1/transforms/ad23188c1dd2072d46066dd7ccf0c3a5/transformed/fragment-1.5.4/res
+expo.modules.videothumbnail.video-thumbnail-foundation-release-34 /Users/luis/.gradle/caches/9.3.1/transforms/b209efda1986d77926894f004a7f6265/transformed/foundation-release/res
+expo.modules.videothumbnail.video-thumbnail-window-1.5.1-35 /Users/luis/.gradle/caches/9.3.1/transforms/b54621d9fa64c62e5368ae6843ae6cc1/transformed/window-1.5.1/res
+expo.modules.videothumbnail.video-thumbnail-core-ktx-1.17.0-36 /Users/luis/.gradle/caches/9.3.1/transforms/c1bf067d6967eb8df2b54282ee550fcc/transformed/core-ktx-1.17.0/res
+expo.modules.videothumbnail.video-thumbnail-savedstate-1.2.1-37 /Users/luis/.gradle/caches/9.3.1/transforms/c448ef77c5be917c57f7791e539994b7/transformed/savedstate-1.2.1/res
+expo.modules.videothumbnail.video-thumbnail-core-1.17.0-38 /Users/luis/.gradle/caches/9.3.1/transforms/dd9f2a1467ccd0221c2ca76ee840eec4/transformed/core-1.17.0/res
+expo.modules.videothumbnail.video-thumbnail-transition-1.6.0-39 /Users/luis/.gradle/caches/9.3.1/transforms/df1f1bac11c88be6855ff4d0f1f6a51c/transformed/transition-1.6.0/res
+expo.modules.videothumbnail.video-thumbnail-drawee-3.6.0-40 /Users/luis/.gradle/caches/9.3.1/transforms/e33b2972410533e12f5a0e081d616a1e/transformed/drawee-3.6.0/res
+expo.modules.videothumbnail.video-thumbnail-core-viewtree-1.0.0-41 /Users/luis/.gradle/caches/9.3.1/transforms/eb2099f71844b3c8140beabc14a18eee/transformed/core-viewtree-1.0.0/res
+expo.modules.videothumbnail.video-thumbnail-annotation-experimental-1.4.1-42 /Users/luis/.gradle/caches/9.3.1/transforms/ebfd829dcdc53853fbc2cedd786b93fd/transformed/annotation-experimental-1.4.1/res
+expo.modules.videothumbnail.video-thumbnail-activity-ktx-1.7.0-43 /Users/luis/.gradle/caches/9.3.1/transforms/eca26f06a19b7467f2c589117bcada83/transformed/activity-ktx-1.7.0/res
+expo.modules.videothumbnail.video-thumbnail-tracing-ktx-1.2.0-44 /Users/luis/.gradle/caches/9.3.1/transforms/ecf01b8d4827318d2eda0b85a07d82a6/transformed/tracing-ktx-1.2.0/res
+expo.modules.videothumbnail.video-thumbnail-lifecycle-runtime-compose-release-45 /Users/luis/.gradle/caches/9.3.1/transforms/f4a03ccf860fad36e6c602ab461955ed/transformed/lifecycle-runtime-compose-release/res
+expo.modules.videothumbnail.video-thumbnail-ui-graphics-release-46 /Users/luis/.gradle/caches/9.3.1/transforms/f5124cdc62de7008e9f0185eaa2cee25/transformed/ui-graphics-release/res
+expo.modules.videothumbnail.video-thumbnail-tracing-1.2.0-47 /Users/luis/.gradle/caches/9.3.1/transforms/fd8d096bf8f6d756f02d30d703136ecc/transformed/tracing-1.2.0/res
+expo.modules.videothumbnail.video-thumbnail-pngs-48 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/build/generated/res/pngs/release
+expo.modules.videothumbnail.video-thumbnail-resValues-49 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/build/generated/res/resValues/release
+expo.modules.videothumbnail.video-thumbnail-mergeReleaseResources-50 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+expo.modules.videothumbnail.video-thumbnail-mergeReleaseResources-51 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+expo.modules.videothumbnail.video-thumbnail-release-52 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/build/intermediates/merged_res/release/mergeReleaseResources
+expo.modules.videothumbnail.video-thumbnail-main-53 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/res
+expo.modules.videothumbnail.video-thumbnail-release-54 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/release/res
+expo.modules.videothumbnail.video-thumbnail-release-55 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/node_modules/expo-modules-core/android/build/intermediates/packaged_res/release/packageReleaseResources
+expo.modules.videothumbnail.video-thumbnail-release-56 /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/node_modules/react-native-worklets/android/build/intermediates/packaged_res/release/packageReleaseResources

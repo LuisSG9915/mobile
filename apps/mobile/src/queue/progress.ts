@@ -131,6 +131,8 @@ const sentByAsset = new Map<string, number>();
  * sin saturar el hilo JS.
  */
 const PROGRESS_THROTTLE_MS = 400;
+/** Solo para medición Phase 0: desactiva el throttle de progreso estructural. */
+export const DEBUG_DISABLE_PROGRESS_THROTTLE = false;
 let progressTimer: ReturnType<typeof setTimeout> | null = null;
 let lastProgressAt = 0;
 let pendingRunning: boolean | null = null;
@@ -156,7 +158,9 @@ function flushSyncProgress(): void {
 export function publishSyncProgress(running: boolean): void {
   lastRunning = running;
   pendingRunning = running;
-  const wait = PROGRESS_THROTTLE_MS - (Date.now() - lastProgressAt);
+  const wait = DEBUG_DISABLE_PROGRESS_THROTTLE
+    ? 0
+    : PROGRESS_THROTTLE_MS - (Date.now() - lastProgressAt);
   if (wait <= 0) flushSyncProgress();
   else if (progressTimer === null) progressTimer = setTimeout(flushSyncProgress, wait);
 }

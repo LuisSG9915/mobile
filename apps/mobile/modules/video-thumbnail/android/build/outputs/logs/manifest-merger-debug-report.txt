@@ -1,0 +1,16 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml:1:1-72
+INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml:1:1-72
+	package
+		INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml:1:11-69
+uses-sdk
+INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml
+INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /Users/luis/Documents/desarrollo2026/NEW BLACK/mobile/apps/mobile/modules/video-thumbnail/android/src/main/AndroidManifest.xml

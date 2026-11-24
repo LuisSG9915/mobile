@@ -32,6 +32,8 @@ export type QueueItem = {
   updated_at: number;
   upload_id?: string | null;
   parts?: string | null;
+  upload_lease?: string | null;
+  last_request_id?: string | null;
 };
 
 export type QueueStats = { total: number; done: number; pending: number; failed: number };

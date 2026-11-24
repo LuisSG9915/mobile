@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS queue_sync_meta (
+  key TEXT PRIMARY KEY NOT NULL,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
@@ -94,6 +100,16 @@ function migrateMultipartColumns(db: SQLite.SQLiteDatabase): void {
   }
 }
 
+function migrateLeaseColumns(db: SQLite.SQLiteDatabase): void {
+  const cols = db.getAllSync<{ name: string }>("PRAGMA table_info(queue)");
+  if (!cols.some((c) => c.name === "upload_lease")) {
+    db.execSync("ALTER TABLE queue ADD COLUMN upload_lease TEXT;");
+  }
+  if (!cols.some((c) => c.name === "last_request_id")) {
+    db.execSync("ALTER TABLE queue ADD COLUMN last_request_id TEXT;");
+  }
+}
+
 function migratePerformanceIndices(db: SQLite.SQLiteDatabase): void {
   db.execSync(`
     CREATE INDEX IF NOT EXISTS queue_user_remote ON queue(user_id, remote_id);
@@ -107,6 +123,7 @@ export function getQueueDb(): SQLite.SQLiteDatabase {
     dbInstance.execSync(DDL);
     migrateToUserScope(dbInstance);
     migrateMultipartColumns(dbInstance);
+    migrateLeaseColumns(dbInstance);
     migratePerformanceIndices(dbInstance);
   }
   return dbInstance;
@@ -291,7 +308,15 @@ export async function setState(
   extra: Partial<
     Pick<
       QueueItem,
-      "sha256" | "remote_id" | "last_error" | "bytes_total" | "bytes_sent" | "upload_id" | "parts"
+      | "sha256"
+      | "remote_id"
+      | "last_error"
+      | "bytes_total"
+      | "bytes_sent"
+      | "upload_id"
+      | "parts"
+      | "upload_lease"
+      | "last_request_id"
     >
   > = {},
 ): Promise<void> {
@@ -299,7 +324,9 @@ export async function setState(
   db.runSync(
     `UPDATE queue SET state = ?, sha256 = coalesce(?, sha256), remote_id = coalesce(?, remote_id),
        last_error = ?, bytes_total = coalesce(?, bytes_total), bytes_sent = coalesce(?, bytes_sent),
-       upload_id = coalesce(?, upload_id), parts = coalesce(?, parts), updated_at = ?
+       upload_id = coalesce(?, upload_id), parts = coalesce(?, parts),
+       upload_lease = coalesce(?, upload_lease), last_request_id = coalesce(?, last_request_id),
+       updated_at = ?
      WHERE asset_id = ? AND user_id IS ?`,
     [
       state,
@@ -310,6 +337,8 @@ export async function setState(
       extra.bytes_sent ?? null,
       extra.upload_id ?? null,
       extra.parts ?? null,
+      extra.upload_lease ?? null,
+      extra.last_request_id ?? null,
       Date.now(),
       assetId,
       activeUserId,
@@ -608,4 +637,36 @@ export async function pruneQueueExcept(allowedAssetIds: Set<string>): Promise<vo
  */
 export async function clearQueue(): Promise<void> {
   getQueueDb().runSync("DELETE FROM queue WHERE user_id IS ?", [activeUserId]);
+}
+
+const LAST_SCANNED_KEY = "last_scanned_creation_time";
+
+export async function getLastScannedCreationTime(): Promise<number> {
+  const db = getQueueDb();
+  const row = db.getFirstSync<{ value: string }>(
+    `SELECT value FROM queue_sync_meta WHERE key = ?`,
+    [LAST_SCANNED_KEY],
+  );
+  const parsed = row ? Number(row.value) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export async function setLastScannedCreationTime(timestampMs: number): Promise<void> {
+  const db = getQueueDb();
+  db.runSync(
+    `INSERT INTO queue_sync_meta (key, value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET
+       value = CASE
+         WHEN CAST(excluded.value AS INTEGER) > CAST(queue_sync_meta.value AS INTEGER)
+         THEN excluded.value
+         ELSE queue_sync_meta.value
+       END,
+       updated_at = excluded.updated_at`,
+    [LAST_SCANNED_KEY, String(Math.floor(timestampMs)), Date.now()],
+  );
+}
+
+export async function clearQueueDatabase(): Promise<void> {
+  // noop de compatibilidad; la BD se cierra con closeQueue
 }
