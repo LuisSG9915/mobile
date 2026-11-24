@@ -50,6 +50,8 @@ function worldToLatLng(x: number, y: number, zoom: number): { lat: number; lng: 
 const TILE_SIZE = 256;
 /** Lado de la celda de agrupación (px): un poco mayor que el pin de 44 px. */
 const CLUSTER_CELL_PX = 56;
+/** La política de teselas de OSM bloquea (403) los clientes anónimos con el UA por defecto. */
+const TILE_HEADERS = { "User-Agent": "PhotosApp/1.1 (personal photo backup; Android)" };
 
 export default function MapScreen() {
   const { lat: initLat, lng: initLng } = useLocalSearchParams<{ lat?: string; lng?: string }>();
@@ -143,15 +145,13 @@ export default function MapScreen() {
         // Envolver longitud (X) y acotar latitud (Y)
         const wrappedTx = ((tx % maxCoord) + maxCoord) % maxCoord;
         if (ty >= 0 && ty < maxCoord) {
-          const subdomains = ["a", "b", "c", "d"];
-          const s = subdomains[Math.abs(wrappedTx + ty) % 4];
           result.push({
             key: `${zoom}-${tx}-${ty}`,
             tx: wrappedTx,
             ty,
             left: tx * TILE_SIZE - (centerPx.x - width / 2),
             top: ty * TILE_SIZE - (centerPx.y - height / 2),
-            url: `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${wrappedTx}/${ty}.png`,
+            url: `https://tile.openstreetmap.org/${zoom}/${wrappedTx}/${ty}.png`,
           });
         }
       }
@@ -193,7 +193,7 @@ export default function MapScreen() {
         const nx = w.x + (cluster.screenX - width / 2) / TILE_SIZE;
         const ny = w.y + (cluster.screenY - height / 2) / TILE_SIZE;
         setCenter(worldToLatLng(nx, ny, zoom));
-        setZoom((z) => Math.min(18, z + 2));
+        setZoom((z) => Math.min(19, z + 2));
         return;
       }
       setSelectedPin(cluster.item);
@@ -217,7 +217,7 @@ export default function MapScreen() {
       setCenter(newLatLng);
     });
 
-  const zoomIn = () => setZoom((z) => Math.min(18, z + 1));
+  const zoomIn = () => setZoom((z) => Math.min(19, z + 1));
   const zoomOut = () => setZoom((z) => Math.max(2, z - 1));
 
   const openInExternalMaps = useCallback((lat: number, lng: number) => {
@@ -303,7 +303,7 @@ export default function MapScreen() {
           {tiles.map((tile) => (
             <Image
               key={tile.key}
-              source={{ uri: tile.url }}
+              source={{ uri: tile.url, headers: TILE_HEADERS }}
               style={{
                 position: "absolute",
                 left: tile.left,
@@ -389,7 +389,7 @@ export default function MapScreen() {
           {/* Atribución de mapas */}
           <View className="absolute bottom-2 left-3 bg-white/70 dark:bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm pointer-events-none">
             <Text className="text-[9px] text-neutral-600 dark:text-neutral-400">
-              © CARTO · © OpenStreetMap
+              © OpenStreetMap contributors
             </Text>
           </View>
         </View>

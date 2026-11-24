@@ -301,8 +301,8 @@ test("la web declara cabeceras de seguridad (_headers) para CSP/HSTS", () => {
   assert.match(src, /Content-Security-Policy:/);
   assert.match(src, /Strict-Transport-Security:/);
   assert.match(src, /frame-ancestors 'none'/);
-  assert.match(src, /img-src[^;]*basemaps\.cartocdn\.com/);
-  assert.ok(src.includes("basemaps.cartocdn.com"));
+  assert.match(src, /img-src[^;]*tile\.openstreetmap\.org/);
+  assert.ok(src.includes("tile.openstreetmap.org"));
 });
 
 test("el servidor no expone la ruta ambigua multipart/complete", () => {

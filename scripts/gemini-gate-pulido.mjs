@@ -107,8 +107,8 @@ check("P-03 papelera pasa cursor a la API", /api\.trash\(\{\s*cursor/.test(trash
 // ---------- P-04: CSP del mapa ----------
 const headers = read("apps/mobile/public/_headers");
 const pipelineTests = read("scripts/test-pipeline.test.mjs");
-check("P-04 CSP permite teselas CARTO", /img-src[^;]*basemaps\.cartocdn\.com/.test(headers));
-check("P-04 el test de pipeline cubre CARTO", pipelineTests.includes("basemaps.cartocdn.com"));
+check("P-04 CSP permite teselas OSM", /img-src[^;]*tile\.openstreetmap\.org/.test(headers));
+check("P-04 el test de pipeline cubre OSM", pipelineTests.includes("tile.openstreetmap.org"));
 
 // ---------- P-09: textos visibles a i18n ----------
 const settings = read("apps/mobile/src/app/(tabs)/settings.tsx");
