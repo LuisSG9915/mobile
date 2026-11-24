@@ -55,3 +55,9 @@ Recomendación: **F3 primero** (cierra P-07: hoy `verifyRemoteIntegrity` no toca
 8. `feat(mobile)` processor (descarga, sha, `createAssetAsync`, fila `duplicate`).
 9. `feat(mobile)` wizard `restore.tsx` + Card + textos en `es.ts`.
 10. Drill manual y entrada en `docs/testing/PLAN_PRUEBAS.md`.
+
+## Estado y límites conocidos (2026-11-24)
+- F3 desplegada y verificada en producción ("Todo en orden"). F2 probada en el LMR-L29: descarga, verificación de hash y guardado en `DCIM/` funcionan; pausa/reanuda también.
+- **Fecha de captura:** los archivos se guardan como `restore-<sha16>.<ext>`. Las fotos sin EXIF quedan con `datetaken` vacío y la galería puede mostrarlas con la fecha de hoy; los videos y fotos con EXIF conservan la suya.
+- `setDateTaken` (Kotlin, `upload-foreground`) existe pero `ContentResolver.update` devuelve 0 filas en Android 12 incluso para filas propias; **no tiene efecto**. Causa sin investigar. Alternativas: capturar la excepción y probar solo `DATE_TAKEN`, o fijar el mtime del archivo antes de `createAssetAsync` (ambas exigen recompilar el dev-client).
+- Restauración solo en primer plano. Sin filtro por álbum en la pantalla (la API sí lo admite).
