@@ -446,6 +446,24 @@ export const t = {
     emptySuccess: "Papelera vaciada correctamente.",
     daysLeft: (days: number) => (days <= 1 ? "Se borra mañana" : `Se borra en ${days} días`),
   },
+  integrity: {
+    title: "Verificar mi biblioteca",
+    body: "Comprueba que cada original respaldado sigue guardado en la nube con su tamaño correcto.",
+    start: "Verificar ahora",
+    running: (n: number) => `Revisando… ${n} elementos`,
+    allGood: "Todo en orden",
+    allGoodBody: (n: number) => `${n} originales comprobados, ninguno falta.`,
+    missing: (n: number) =>
+      n === 1 ? "1 original falta en la nube" : `${n} originales faltan en la nube`,
+    mismatch: (n: number) =>
+      n === 1 ? "1 original con tamaño distinto" : `${n} originales con tamaño distinto`,
+    expected: (a: string, b: string) => `Esperado ${a} · en la nube ${b}`,
+    expectedOnly: (a: string) => `Tamaño esperado ${a}`,
+    lastCheck: (when: string) => `Última verificación: ${when}`,
+    never: "Aún no verificada",
+    failed: "No se pudo completar la verificación.",
+    listCapped: "Se muestran los primeros 200.",
+  },
   settings: {
     title: "Ajustes",
     account: "Cuenta",
@@ -454,6 +472,8 @@ export const t = {
     photosBackedUp: (n: number) => `${n} elementos respaldados`,
     cleaner: "Limpiar fotos similares",
     cleanerHint: "Detecta ráfagas y fotos repetidas",
+    integrity: "Verificar mi biblioteca",
+    integrityHint: "Detecta originales que faltan en la nube",
     trash: "Papelera",
     freeSpace: "Liberar espacio del teléfono",
     freeSpaceHint: (b: string) =>

@@ -13,6 +13,9 @@ import type {
   DownloadResponse,
   EmptyTrashResponse,
   FavoriteResponse,
+  IntegrityLastResponse,
+  IntegrityScanInput,
+  IntegrityScanResponse,
   LocationsQuery,
   LocationsResponse,
   MediaDetail,
@@ -376,6 +379,13 @@ export const api = {
     apiFetch("/v1/cleaner/cleanup", { method: "POST", body: JSON.stringify(body) }).then((r) =>
       r.json(),
     ),
+
+  integrityScan: (body: IntegrityScanInput): Promise<IntegrityScanResponse> =>
+    apiFetch("/v1/user/integrity/scan", { method: "POST", body: JSON.stringify(body) }).then((r) =>
+      r.json(),
+    ),
+  integrityLast: (): Promise<IntegrityLastResponse> =>
+    apiFetch("/v1/user/integrity").then((r) => r.json()),
 
   // Sesiones, exportación y borrado de cuenta
   userSessions: (): Promise<UserSessionsResponse> =>

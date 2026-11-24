@@ -9,6 +9,7 @@ import {
   Download,
   HardDrive,
   Laptop,
+  ShieldCheck,
   Smartphone,
   Sparkles,
   Trash2,
@@ -292,6 +293,21 @@ export default function SettingsScreen() {
                   {t.settings.cleaner}
                 </Text>
                 <Text className="text-xs text-neutral-500">{t.settings.cleanerHint}</Text>
+              </View>
+            </View>
+            <ChevronRight size={18} color="#a3a3a3" />
+          </Card>
+        </Pressable>
+
+        <Pressable onPress={() => router.push("/integrity")} accessibilityRole="button">
+          <Card className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-3">
+              <ShieldCheck size={18} color="#10b981" />
+              <View>
+                <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                  {t.settings.integrity}
+                </Text>
+                <Text className="text-xs text-neutral-500">{t.settings.integrityHint}</Text>
               </View>
             </View>
             <ChevronRight size={18} color="#a3a3a3" />
