@@ -9,6 +9,7 @@ import { requireUser } from "./middleware/session";
 import { adminApp } from "./routes/admin";
 import { albumsApp } from "./routes/albums";
 import { cleanerApp } from "./routes/cleaner";
+import { integrityApp } from "./routes/integrity";
 import { locationsApp } from "./routes/locations";
 import { mediaApp } from "./routes/media";
 import { searchApp } from "./routes/search";
@@ -144,6 +145,7 @@ const v1 = app
   .route("/v1", cleanerApp)
   .route("/v1", sharedApp)
   .route("/v1", userApp)
+  .route("/v1", integrityApp)
   .route("/v1", adminApp);
 
 app.doc("/openapi.json", {

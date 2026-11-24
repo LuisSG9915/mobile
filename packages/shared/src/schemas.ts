@@ -724,3 +724,49 @@ export type UserExportAlbumItem = z.infer<typeof userExportAlbumItemSchema>;
 export type UserExportResponse = z.infer<typeof userExportResponseSchema>;
 export type UserAccountDeleteInput = z.infer<typeof userAccountDeleteSchema>;
 export type UserAccountDeleteResponse = z.infer<typeof userAccountDeleteResponseSchema>;
+
+// ---------- Verificación de integridad (R2 vs D1) ----------
+
+export const integrityScanSchema = z.object({
+  /** Última clave R2 de la página anterior; se omite en la primera llamada (reinicia el informe). */
+  startAfter: z.string().max(1024).optional(),
+});
+
+export const integrityIssueSchema = z.object({
+  id: z.string(),
+  mediaType: z.enum(["photo", "video"]),
+  takenAt: z.number(),
+  expectedSize: z.number(),
+  /** Tamaño real en R2; ausente cuando el objeto falta. */
+  actualSize: z.number().optional(),
+});
+
+export const integrityReportSchema = z.object({
+  /** Epoch ms del inicio del último escaneo. */
+  startedAt: z.number(),
+  /** Epoch ms en que terminó; null mientras sigue en curso. */
+  checkedAt: z.number().nullable(),
+  /** Originales de D1 revisados hasta ahora. */
+  checked: z.number(),
+  missing: z.array(integrityIssueSchema),
+  sizeMismatch: z.array(integrityIssueSchema),
+  /** Cantidad real de incidencias (las listas se recortan a 200). */
+  missingCount: z.number(),
+  sizeMismatchCount: z.number(),
+});
+
+export const integrityScanResponseSchema = z.object({
+  /** Clave desde la que continuar; null cuando el escaneo terminó. */
+  next: z.string().nullable(),
+  report: integrityReportSchema,
+});
+
+export const integrityLastResponseSchema = z.object({
+  report: integrityReportSchema.nullable(),
+});
+
+export type IntegrityScanInput = z.infer<typeof integrityScanSchema>;
+export type IntegrityIssue = z.infer<typeof integrityIssueSchema>;
+export type IntegrityReport = z.infer<typeof integrityReportSchema>;
+export type IntegrityScanResponse = z.infer<typeof integrityScanResponseSchema>;
+export type IntegrityLastResponse = z.infer<typeof integrityLastResponseSchema>;
