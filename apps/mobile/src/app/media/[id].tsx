@@ -54,6 +54,7 @@ import { invalidateMediaLifecycleQueries } from "../../lib/query-client";
 import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
+import { toUserMessage } from "../../lib/user-message";
 import { Button, PhotoEditorModal, ShareMediaModal } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { DockButton } from "../../ui/DockButton";
@@ -402,7 +403,7 @@ export default function MediaViewer() {
       void qc.invalidateQueries({ queryKey: ["search"] });
       toast.success("Información actualizada");
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const autoTagMutation = useMutation({
@@ -417,7 +418,7 @@ export default function MediaViewer() {
         toast.info(t.viewer.autoTagFailed);
       }
     },
-    onError: (err: Error) => toast.error(err.message || t.viewer.autoTagFailed),
+    onError: (err: Error) => toast.error(toUserMessage(err, t.viewer.autoTagFailed)),
   });
 
   const isFav =

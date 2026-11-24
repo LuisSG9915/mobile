@@ -7,6 +7,7 @@ import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native"
 import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
+import { toUserMessage } from "../lib/user-message";
 import { Button } from "./index";
 
 export function AddToAlbumModal({
@@ -38,7 +39,7 @@ export function AddToAlbumModal({
       onClose();
       onSuccess?.();
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const createMut = useMutation({
@@ -51,7 +52,7 @@ export function AddToAlbumModal({
       onClose();
       onSuccess?.();
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const albums = query.data?.albums ?? [];

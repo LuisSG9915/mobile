@@ -36,6 +36,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { downloadMany } from "../../lib/download-many";
 import { formatDuration } from "../../lib/format";
+import { toUserMessage } from "../../lib/user-message";
 import { Button, EmptyState, ErrorState } from "../../ui";
 
 export default function AlbumDetailScreen() {
@@ -77,7 +78,7 @@ export default function AlbumDetailScreen() {
       void qc.invalidateQueries({ queryKey: ["albums"] });
       toast.success("Título actualizado");
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   // Mutación: eliminar álbum
@@ -88,7 +89,7 @@ export default function AlbumDetailScreen() {
       toast.success("Álbum eliminado");
       router.back();
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   // Mutación: compartir álbum
@@ -119,7 +120,7 @@ export default function AlbumDetailScreen() {
         });
       }
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const handleShareAlbum = () => {
@@ -144,7 +145,7 @@ export default function AlbumDetailScreen() {
       void qc.invalidateQueries({ queryKey: ["albums"] });
       toast.success("Enlace revocado");
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   // Mutación: añadir fotos al álbum
@@ -157,7 +158,7 @@ export default function AlbumDetailScreen() {
       void qc.invalidateQueries({ queryKey: ["albums"] });
       toast.success(t.albums.photosAdded(vars.length));
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const handleDeleteAlbum = () => {
@@ -206,7 +207,7 @@ export default function AlbumDetailScreen() {
       );
       toast.success(t.albums.downloadZipDone);
     } catch (err: any) {
-      toast.error(err.message || t.auth.genericError);
+      toast.error(toUserMessage(err));
     } finally {
       setDownloadingZip(false);
     }

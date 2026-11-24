@@ -21,6 +21,7 @@ import { t } from "../i18n/es";
 import { formatBytes } from "../lib/format";
 import { deleteLocalAssets, freeSyncedSpace, getSyncedLocal } from "../lib/free-space";
 import { invalidateMediaLifecycleQueries } from "../lib/query-client";
+import { toUserMessage } from "../lib/user-message";
 import { getLocalAssetIdsByRemoteIds } from "../queue/db";
 import { Button, EmptyState, ErrorState } from "../ui";
 
@@ -78,7 +79,7 @@ export default function CleanerScreen() {
       void invalidateMediaLifecycleQueries(qc);
       offerLocalCleanup(deleteIds);
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const toggleItem = (id: string) => {

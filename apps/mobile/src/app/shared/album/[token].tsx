@@ -28,12 +28,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
-import { api } from "../../../api/client";
+import { ApiError, api } from "../../../api/client";
 import { t } from "../../../i18n/es";
 import { formatDuration } from "../../../lib/format";
 import { downloadPublicAlbum } from "../../../lib/public-download";
 import { saveDownload } from "../../../lib/save-download";
-import { EmptyState } from "../../../ui";
+import { EmptyState, ErrorState } from "../../../ui";
 
 function NativePublicVideo({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
@@ -205,12 +205,23 @@ export default function SharedAlbumScreen() {
   }
 
   if (query.isError || !album) {
+    const status = query.error instanceof ApiError ? query.error.status : null;
+    // Sin respuesta del servidor o 5xx: es un fallo transitorio, no un enlace muerto.
+    const transient = query.isError && (status === null || status >= 500);
     return (
       <SafeAreaView className="flex-1 bg-neutral-900 items-center justify-center px-6">
-        <EmptyState
-          title="Álbum no disponible"
-          body="Este enlace ha expirado, ha sido revocado o la dirección no es válida."
-        />
+        {transient ? (
+          <ErrorState onRetry={() => void query.refetch()} />
+        ) : (
+          <EmptyState
+            title={status === 413 ? "Álbum demasiado grande" : "Álbum no disponible"}
+            body={
+              status === 413
+                ? "Este álbum supera el límite de elementos que se pueden mostrar en un enlace."
+                : "Este enlace ha expirado, ha sido revocado o la dirección no es válida."
+            }
+          />
+        )}
       </SafeAreaView>
     );
   }

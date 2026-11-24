@@ -26,6 +26,7 @@ import { formatBytes, formatRelative } from "../../lib/format";
 import { freeSyncedSpace, getSyncedLocal } from "../../lib/free-space";
 import { invalidateMediaLifecycleQueries } from "../../lib/query-client";
 import { appBuild, appVersion } from "../../lib/telemetry";
+import { toUserMessage } from "../../lib/user-message";
 import { performLogout } from "../../queue/logout";
 import { Button, Card, Field } from "../../ui";
 
@@ -48,7 +49,7 @@ export default function SettingsScreen() {
       void qc.invalidateQueries({ queryKey: ["user-sessions"] });
       toast.success(t.settings.sessionRevoked);
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const [exporting, setExporting] = useState(false);

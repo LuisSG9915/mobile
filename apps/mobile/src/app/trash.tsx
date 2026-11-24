@@ -8,6 +8,7 @@ import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
 import { invalidateMediaLifecycleQueries } from "../lib/query-client";
+import { toUserMessage } from "../lib/user-message";
 import { Button, EmptyState, ErrorState } from "../ui";
 
 export default function TrashScreen() {
@@ -42,7 +43,7 @@ export default function TrashScreen() {
       toast.success(t.trash.emptySuccess);
       void invalidateMediaLifecycleQueries(qc);
     },
-    onError: (err: Error) => toast.error(err.message || t.auth.genericError),
+    onError: (err: Error) => toast.error(toUserMessage(err)),
   });
 
   const handleEmptyTrash = () => {

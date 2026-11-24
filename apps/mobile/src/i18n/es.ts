@@ -2,6 +2,7 @@ export const t = {
   common: {
     loadError: "No se pudo cargar",
     loadErrorBody: "Revisa tu conexión e inténtalo de nuevo.",
+    networkError: "Sin conexión. Revisa tu red e inténtalo de nuevo.",
   },
   appName: "Photos",
   auth: {

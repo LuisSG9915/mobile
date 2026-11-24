@@ -27,6 +27,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
 import { formatDateTime } from "../lib/format";
+import { type Cluster, clusterMarkers } from "../lib/map-cluster";
 import { EmptyState } from "../ui";
 
 // Conversión Web Mercator para proyección de OpenStreetMap
@@ -47,6 +48,8 @@ function worldToLatLng(x: number, y: number, zoom: number): { lat: number; lng: 
 }
 
 const TILE_SIZE = 256;
+/** Lado de la celda de agrupación (px): un poco mayor que el pin de 44 px. */
+const CLUSTER_CELL_PX = 56;
 
 export default function MapScreen() {
   const { lat: initLat, lng: initLng } = useLocalSearchParams<{ lat?: string; lng?: string }>();
@@ -176,6 +179,28 @@ export default function MapScreen() {
       );
   }, [items, zoom, width, height, centerPx.x, centerPx.y]);
 
+  // Agrupa pines cercanos: un expo-image por foto no escala con miles de puntos.
+  const clusters = useMemo(
+    () => clusterMarkers(markers, CLUSTER_CELL_PX, selectedPin?.id),
+    [markers, selectedPin?.id],
+  );
+
+  const onClusterPress = useCallback(
+    (cluster: Cluster<LocationItem>) => {
+      if (cluster.count > 1 && zoom < 18) {
+        // Acercar centrando el grupo: lo que estaba en su centroide pasa al centro.
+        const w = latLngToWorld(center.lat, center.lng, zoom);
+        const nx = w.x + (cluster.screenX - width / 2) / TILE_SIZE;
+        const ny = w.y + (cluster.screenY - height / 2) / TILE_SIZE;
+        setCenter(worldToLatLng(nx, ny, zoom));
+        setZoom((z) => Math.min(18, z + 2));
+        return;
+      }
+      setSelectedPin(cluster.item);
+    },
+    [center.lat, center.lng, zoom, width, height],
+  );
+
   // Gesto de Arrastre (Pan)
   const panStartRef = useRef<{ lat: number; lng: number }>(center);
   const panGesture = Gesture.Pan()
@@ -292,12 +317,15 @@ export default function MapScreen() {
           ))}
 
           {/* Marcadores / Pines con miniatura */}
-          {markers.map(({ item, screenX, screenY }) => {
+          {clusters.map((cluster) => {
+            const { item, screenX, screenY, count } = cluster;
             const isSelected = selectedPin?.id === item.id;
             return (
               <Pressable
                 key={item.id}
-                onPress={() => setSelectedPin(item)}
+                onPress={() => onClusterPress(cluster)}
+                accessibilityRole="button"
+                accessibilityLabel={count > 1 ? `Grupo de ${count} fotos` : "Foto en el mapa"}
                 style={{
                   position: "absolute",
                   left: screenX - 22,
@@ -318,7 +346,13 @@ export default function MapScreen() {
                     style={{ width: "100%", height: "100%" }}
                     contentFit="cover"
                   />
-                  {item.mediaType === "video" ? (
+                  {count > 1 ? (
+                    <View className="absolute inset-0 bg-black/45 items-center justify-center">
+                      <Text className="text-white text-sm font-bold">
+                        {count > 99 ? "99+" : count}
+                      </Text>
+                    </View>
+                  ) : item.mediaType === "video" ? (
                     <View className="absolute inset-0 bg-black/40 items-center justify-center">
                       <Play size={10} color="#fff" fill="#fff" />
                     </View>

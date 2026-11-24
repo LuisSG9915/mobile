@@ -30,6 +30,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { type DeviceAlbum, listLocalAlbums } from "../../lib/local-assets";
 import { useSettings } from "../../lib/store";
+import { toUserMessage } from "../../lib/user-message";
 import {
   isBackupConfigured,
   isBackupPaused,
@@ -84,7 +85,7 @@ export default function AlbumsScreen() {
       router.push({ pathname: "/albums/[id]", params: { id: newAlbum.id } });
     },
     onError: (err: Error) => {
-      toast.error(err.message || t.auth.genericError);
+      toast.error(toUserMessage(err));
     },
   });
 
