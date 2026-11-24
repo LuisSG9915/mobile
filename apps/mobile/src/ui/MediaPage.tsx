@@ -35,7 +35,8 @@ export function MediaPage({
     enabled: Boolean(near && remoteId),
     staleTime: 60_000,
   });
-  const previewUrl = item.previewUrl || detail.data?.previewUrl;
+  // La URL del detalle es reciente; la del listado puede haber caducado (403).
+  const previewUrl = detail.data?.previewUrl || item.previewUrl;
   const originalUrl =
     item.localUri || detail.data?.originalUrl || item.originalUrl || item.thumbUrl;
 

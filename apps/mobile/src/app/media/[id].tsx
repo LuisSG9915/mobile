@@ -55,6 +55,7 @@ import { saveDownload } from "../../lib/save-download";
 import { useSettings } from "../../lib/store";
 import { type AlbumFilter, useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { toUserMessage } from "../../lib/user-message";
+import { playableVideoUri } from "../../lib/video-source";
 import { Button, PhotoEditorModal, ShareMediaModal } from "../../ui";
 import { AddToAlbumModal } from "../../ui/AddToAlbumModal";
 import { DockButton } from "../../ui/DockButton";
@@ -322,7 +323,11 @@ export default function MediaViewer() {
     (activeItem
       ? {
           id: activeItem.id,
-          originalUrl: activeItem.localUri || activeItem.originalUrl || activeItem.thumbUrl,
+          // Un video nunca debe caer a la miniatura (WebP): ExoPlayer no la reproduce.
+          originalUrl:
+            activeItem.localUri ||
+            activeItem.originalUrl ||
+            (activeItem.mediaType === "video" ? "" : activeItem.thumbUrl),
           thumbUrl: activeItem.thumbUrl,
           previewUrl: (activeItem as any).previewUrl || null,
           thumbhash: activeItem.thumbhash,
@@ -868,7 +873,11 @@ export default function MediaViewer() {
             <Text className="text-neutral-400">No encontrado</Text>
           </View>
         ) : d.mediaType === "video" ? (
-          <VideoPage uri={d.originalUrl} previewUri={d.previewUrl} onDownload={onDownload} />
+          <VideoPage
+            uri={playableVideoUri(d.originalUrl, d.previewUrl)}
+            previewUri={d.previewUrl}
+            onDownload={onDownload}
+          />
         ) : (
           <ZoomableImage
             uri={d.previewUrl || d.originalUrl}

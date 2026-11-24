@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { videoSources } from "../lib/video-source";
 import { NativeVideoPlayer } from "./NativeVideoPlayer";
 import { WebVideoPlayer } from "./WebVideoPlayer";
 
@@ -13,8 +14,7 @@ export function VideoPage({
   onDownload?: () => void;
   isActive?: boolean;
 }) {
-  const primaryUri = previewUri || uri;
-  const fallbackUri = previewUri ? uri : null;
+  const { primary: primaryUri, fallback: fallbackUri } = videoSources(uri, previewUri);
 
   if (Platform.OS === "web") {
     return <WebVideoPlayer uri={primaryUri} fallbackUri={fallbackUri} onDownload={onDownload} />;
