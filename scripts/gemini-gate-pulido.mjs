@@ -74,7 +74,11 @@ function writeReport() {
 
 // ---------- P-01: el visor no promete un enlace público falso ----------
 const shareModal = read("apps/mobile/src/ui/ShareMediaModal.tsx");
-check("P-01 ShareMediaModal existe", shareModal.length > 0, "apps/mobile/src/ui/ShareMediaModal.tsx");
+check(
+  "P-01 ShareMediaModal existe",
+  shareModal.length > 0,
+  "apps/mobile/src/ui/ShareMediaModal.tsx",
+);
 check("P-01 sin handleCopyLink", !shareModal.includes("handleCopyLink"));
 check("P-01 sin estado expiresIn", !shareModal.includes("expiresIn"));
 check("P-01 sin clipboard sobre media.uri", !shareModal.includes("navigator.clipboard"));
@@ -103,14 +107,8 @@ check("P-03 papelera pasa cursor a la API", /api\.trash\(\{\s*cursor/.test(trash
 // ---------- P-04: CSP del mapa ----------
 const headers = read("apps/mobile/public/_headers");
 const pipelineTests = read("scripts/test-pipeline.test.mjs");
-check(
-  "P-04 CSP permite teselas CARTO",
-  /img-src[^;]*basemaps\.cartocdn\.com/.test(headers),
-);
-check(
-  "P-04 el test de pipeline cubre CARTO",
-  pipelineTests.includes("basemaps.cartocdn.com"),
-);
+check("P-04 CSP permite teselas CARTO", /img-src[^;]*basemaps\.cartocdn\.com/.test(headers));
+check("P-04 el test de pipeline cubre CARTO", pipelineTests.includes("basemaps.cartocdn.com"));
 
 // ---------- P-09: textos visibles a i18n ----------
 const settings = read("apps/mobile/src/app/(tabs)/settings.tsx");
@@ -134,10 +132,7 @@ check("P-10 celda de galería expone accessibilityState", gallery.includes("acce
 // ---------- P-11: versión y permiso huérfano ----------
 const appJson = read("apps/mobile/app.json");
 check("P-11 app.json declara 1.1.0", /"version"\s*:\s*"1\.1\.0"/.test(appJson));
-check(
-  "P-11 sin FOREGROUND_SERVICE_DATA_SYNC",
-  !appJson.includes("FOREGROUND_SERVICE_DATA_SYNC"),
-);
+check("P-11 sin FOREGROUND_SERVICE_DATA_SYNC", !appJson.includes("FOREGROUND_SERVICE_DATA_SYNC"));
 
 // ---------- Comandos ----------
 if (!staticOnly) {

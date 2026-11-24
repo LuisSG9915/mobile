@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 /**
  * Preparación del APK sin EAS (H1.4): el plan gratuito de EAS se agotó, así que
  * el binario sale de `expo prebuild` + Gradle. `android/` está en `.gitignore`
@@ -100,3 +103,33 @@ export function looksLikeKeystore(bytes) {
 
 /** Ruta del APK que produce `assembleRelease`. */
 export const RELEASE_APK_PATH = "apps/mobile/android/app/build/outputs/apk/release/app-release.apk";
+
+export const REQUIRED_NATIVE_MODULE_FILES = [
+  "apps/mobile/modules/upload-foreground/expo-module.config.json",
+  "apps/mobile/modules/upload-foreground/android/build.gradle",
+  "apps/mobile/modules/upload-foreground/android/src/main/AndroidManifest.xml",
+  "apps/mobile/modules/upload-foreground/android/src/main/java/expo/modules/uploadforeground/UploadForegroundModule.kt",
+  "apps/mobile/modules/upload-foreground/android/src/main/java/expo/modules/uploadforeground/UploadForegroundService.kt",
+  "apps/mobile/modules/video-thumbnail/expo-module.config.json",
+  "apps/mobile/modules/video-thumbnail/android/build.gradle",
+  "apps/mobile/modules/video-thumbnail/android/src/main/java/expo/modules/videothumbnail/VideoThumbnailModule.kt",
+];
+
+export function verifyNativeModulesPresent(repoRoot = process.cwd()) {
+  const missing = [];
+  for (const relPath of REQUIRED_NATIVE_MODULE_FILES) {
+    const fullPath = path.join(repoRoot, relPath);
+    if (!fs.existsSync(fullPath)) {
+      missing.push(relPath);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Faltan archivos de módulos nativos de Expo requeridos para el APK:\n` +
+        missing.map((m) => `  - ${m}`).join("\n"),
+    );
+  }
+
+  return { ok: true, checkedCount: REQUIRED_NATIVE_MODULE_FILES.length };
+}

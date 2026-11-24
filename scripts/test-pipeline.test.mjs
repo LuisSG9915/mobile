@@ -404,7 +404,11 @@ test("check-sentry: con --optional y sin DSN sale con 0", () => {
   const env = { ...process.env };
   delete env.EXPO_PUBLIC_SENTRY_DSN;
   delete env.SENTRY_DSN;
-  const res = spawnSync(process.execPath, [CHECK_SENTRY, "--optional"], { cwd: tmp(), env, encoding: "utf8" });
+  const res = spawnSync(process.execPath, [CHECK_SENTRY, "--optional"], {
+    cwd: tmp(),
+    env,
+    encoding: "utf8",
+  });
   assert.equal(res.status, 0);
   assert.match(res.stdout, /opcional/);
 });

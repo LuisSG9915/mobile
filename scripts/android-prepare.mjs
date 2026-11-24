@@ -23,10 +23,16 @@ import {
   parseTagVersion,
   SIGNING_SECRETS,
   setVersion,
+  verifyNativeModulesPresent,
 } from "./lib/android-release.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
+
+const nativeCheck = verifyNativeModulesPresent(process.cwd());
+console.log(
+  `[android-prepare] ${nativeCheck.checkedCount} archivos de módulos nativos verificados correctamente.`,
+);
 const value = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const dryRun = args.includes("--dry-run");
 const tag = value("--tag");

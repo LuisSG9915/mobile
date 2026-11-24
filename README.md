@@ -10,17 +10,19 @@ Respaldo y galería personal de fotos y videos.
 
 ## Setup
 
-1. `corepack enable && pnpm install`
-2. Crear recursos: `wrangler d1 create photos-db`, `wrangler r2 bucket create photos-media` (+ `photos-media-dev`), token de API de R2 (Object Read & Write sobre esos buckets).
-3. `cp apps/api/.dev.vars.example apps/api/.dev.vars` y rellenar.
-4. `pnpm --filter @photos/api db:migrate:local`
-5. `pnpm --filter @photos/api dev` y `pnpm --filter @photos/mobile start`
+1. Node 20/22 LTS (corepack). `corepack enable && pnpm install`
+2. `wrangler login` (o token de API) y luego crear recursos: `wrangler d1 create photos-db`, `wrangler r2 bucket create photos-media` (+ `photos-media-dev`), token de API de R2 (Object Read & Write sobre esos buckets).
+3. Copiar `apps/api/.dev.vars.example` a `apps/api/.dev.vars` y rellenar: `R2_ACCOUNT_ID`, claves R2, `BETTER_AUTH_SECRET` (`openssl rand -base64 32`), Resend opcional.
+4. Crear `apps/mobile/.env` desde `apps/mobile/.env.example` y definir `EXPO_PUBLIC_API_URL` (local: IP LAN o `adb reverse tcp:8787 tcp:8787`; prod: URL https).
+5. `pnpm --filter @photos/api db:migrate:local`
+6. Requisito previo para móvil: tener un development build instalado en el emulador/dispositivo (`npx expo run:android` o EAS profile `development`). `expo start --dev-client` no compila la app.
+7. `pnpm --filter @photos/api dev` y `pnpm --filter @photos/mobile start`
 
-Ver `AGENTS.md` para comandos y convenciones.
+Ver [AGENTS.md](AGENTS.md) para comandos y convenciones.
 
 ## Flujo de subida
 
-```
+```text
 App → POST /v1/uploads/init (sha256 + metadatos)
     ← URLs prefirmadas (thumb + original)  o  "duplicate"
 App → PUT directo a R2 (thumb .webp, original)
@@ -34,7 +36,9 @@ App → POST /v1/uploads/:id/complete  (verifica head() en R2)
 - **Descargas**: `GET /v1/media/:id/download` devuelve URL prefirmada con `Content-Disposition: attachment`; las lecturas prefirmadas llevan `Cache-Control: immutable`. En nativo se guarda al carrete; en web, `<a download>` o ZIP en lote (`fotos-exportadas.zip`, concurrencia 3).
 - **Progreso de sync reactivo**: proyección byte-a-byte de la cola en store Zustand (`SyncProgressState`), anillo de progreso SVG en el avatar del header y barra en la pestaña Respaldo.
 - **Liberar espacio**: borra del dispositivo solo lo confirmado en la nube (`done`/`duplicate` + `remote_id` + `sha256`); la galería sigue mostrando esos items como `REMOTE_ONLY` vía miniaturas remotas.
-- **Gestos Google Photos**: fast-scrubber lateral con burbuja mes/año, pinch-to-zoom con densidades 1/3/5 columnas, drag-to-select con barra contextual (descargar / mover a papelera) y selección por día.
+- **Gestos Google Photos**: fast-scrubber lateral con burbuja mes/año, pinch-to-zoom con densidades 1/3/5 columnas, drag-to-select con barra contextual (descargar / añadir a álbum / mover a papelera) y selección por día.
+- **Respaldo en segundo plano (Android)**: foreground service `dataSync` mantiene la cola al minimizar, con notificación de progreso y pausa por límite de 6 h (Android 15).
+- **Salto temporal**: chip «Desde <mes> · N elementos» con Ver todas y carrusel con alcance `before`.
 
 ## Pruebas
 
@@ -46,32 +50,44 @@ pnpm typecheck    # tsc --noEmit en todos los paquetes
 pnpm test         # API (Miniflare) + mobile (happy-dom) vía turbo
 ```
 
-Estado actual: 144 tests API (19 suites) + 232 tests mobile (22 suites) = 376 tests unitarios/integración + 31 tests de pipeline (`pnpm test:pipeline`), todos verdes sin llamadas externas a Cloudflare. El plan vigente (v2, H1 en curso) y su evidencia viven en [`docs/PLAN_MEJORAS.md`](docs/PLAN_MEJORAS.md); [`docs/PLAN_GENERAL.md`](docs/PLAN_GENERAL.md) es histórico.
+Estado actual: suites de tests API + mobile + pipeline, todos verdes sin llamadas externas a Cloudflare. Ver CI para conteos actualizados. El plan vigente (v2, H1 en curso) y su evidencia viven en [docs/PLAN_MEJORAS.md](docs/PLAN_MEJORAS.md); [docs/PLAN_GENERAL.md](docs/PLAN_GENERAL.md) es histórico.
+
+## Web
+
+La app también corre en navegador. Comandos:
+
+```bash
+pnpm --filter @photos/mobile web        # dev
+pnpm --filter @photos/mobile build:web  # export estático
+pnpm --filter @photos/mobile deploy:web # build + deploy (worker photos-web)
+```
+
+Requisitos: `EXPO_PUBLIC_API_URL` https/no-localhost (ver `apps/mobile/scripts/check-web-env.mjs`); CORS de R2 aplicado a `photos-media`/`photos-media-dev` con `wrangler r2 bucket cors set <bucket> --file apps/api/r2-cors.json` incluyendo el origen de producción.
+
+Notas web (ver [AGENTS.md](AGENTS.md)): la cola persiste en IndexedDB `photos.queue` (metadatos + ArrayBuffer), exclusividad por pestaña vía Web Locks, refresco entre pestañas por BroadcastChannel, suspensión si la sesión expira y borrado al cerrar sesión confirmado. Codecs: Safari no codifica WebP; Chrome no decodifica HEIC/HEVC. Auth web = Bearer (`set-auth-token`, localStorage; cookies de terceros bloqueadas) y variantes `.web.ts` (misma API que el nativo). Ver [AGENTS.md](AGENTS.md#soporte-web) (Soporte web).
 
 ## Distribución
 
-El APK se publica en **GitHub Releases** (ver [releases](../../releases)). Dos formas de instalarlo:
+El APK se publica en **GitHub Releases** (ver [releases](https://github.com/LuisSG9915/mobile/releases)). Dos formas de instalarlo:
 
 - **Directo**: descargar `photos-*.apk` del último release e instalarlo.
 - **Obtainium** (recomendado, FOSS): instalar [Obtainium](https://github.com/ImranR98/Obtainium) y añadir la URL `https://github.com/LuisSG9915/mobile` — detecta y auto-actualiza desde los releases.
 
 ### Publicar un release
 
-Automático vía workflow (`.github/workflows/release-apk.yml`): compila en EAS, descarga el APK y crea el release. Requiere el secret `EXPO_TOKEN` en el repo (expo.dev → Account Settings → Access Tokens).
+El binario lo produce **Gradle**, no EAS (plan gratuito agotado). El flujo canónico está en [docs/ops/RELEASE.md](docs/ops/RELEASE.md).
+
+Automático vía workflow (`.github/workflows/release-apk.yml`), disparado por push de tag `v*`:
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0   # o Actions → "Release APK" → Run
+pnpm release:check --tag v1.2.0
+git tag -a v1.2.0 -m "Release v1.2.0"
+git push origin main --tags
 ```
 
-Manual:
+Requiere los secrets `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` (keystore propia `photos-release.keystore`) y la variable `vars.EXPO_PUBLIC_API_URL`. La firma debe ser siempre la misma para que Android permita actualizar in-place y Obtainium funcione.
 
-```bash
-cd apps/mobile
-npx eas-cli build -p android --profile release-apk   # descargar el APK al terminar
-gh release create v1.0.0 photos-*.apk --title "Photos v1.0.0"
-```
-
-El profile `release-apk` firma con el keystore gestionado por EAS (misma firma entre releases → actualizaciones sin reinstalar) y hornea `EXPO_PUBLIC_API_URL` apuntando al API de producción.
+Manual / local: ver §2 de [docs/ops/RELEASE.md](docs/ops/RELEASE.md) (`expo prebuild` + `scripts/android-prepare.mjs` + `gradlew assembleRelease`).
 
 ## Licencia
 

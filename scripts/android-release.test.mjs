@@ -123,3 +123,29 @@ test("cadena completa: inyectar firma y versión sobre la plantilla real", () =>
   assert.match(patched, /versionName "1\.3\.0"/);
   assert.match(patched, /signingConfig signingConfigs\.release/);
 });
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  REQUIRED_NATIVE_MODULE_FILES,
+  verifyNativeModulesPresent,
+} from "./lib/android-release.mjs";
+
+test("verifyNativeModulesPresent falla si falta algún archivo", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "native-check-"));
+  assert.throws(() => verifyNativeModulesPresent(tmpDir), /Faltan archivos de módulos nativos/);
+});
+
+test("verifyNativeModulesPresent pasa cuando todos existen", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "native-check-ok-"));
+  for (const rel of REQUIRED_NATIVE_MODULE_FILES) {
+    const full = path.join(tmpDir, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, "// ok");
+  }
+  assert.deepEqual(verifyNativeModulesPresent(tmpDir), {
+    ok: true,
+    checkedCount: REQUIRED_NATIVE_MODULE_FILES.length,
+  });
+});

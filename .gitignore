@@ -16,9 +16,12 @@ coverage/
 .wrangler/
 .dev.vars
 
-# Android/iOS builds
-android/
-ios/
+# Android/iOS builds (anchored to repo root; keep local module native code)
+/apps/mobile/android/
+/apps/mobile/ios/
+!apps/mobile/modules/**/android/**
+!apps/mobile/modules/**/ios/**
+!apps/mobile/modules/**/src/**
 *.apk
 *.aab
 *.ipa
