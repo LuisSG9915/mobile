@@ -15,7 +15,11 @@ Si D1 se pierde, las fotos siguen existiendo en R2 pero la app no puede mostrarl
 | Validación | Dry-run en SQLite efímero (`sqlite3 :memory: < backup.sql`), `PRAGMA integrity_check;` y conteo de tablas; falla si está vacío o no contiene `CREATE TABLE` |
 | Retención | 90 días vía lifecycle rule (ver abajo) |
 
-El respaldo incluye esquema y datos (`wrangler d1 export` por defecto). No incluye
+El respaldo incluye esquema y datos de las tablas normales, exportadas **tabla por tabla**:
+D1 no puede exportar bases con tablas virtuales (FTS5; error `cannot export databases with
+virtual tables`), así que quedan fuera `media_fts*`, `session` y `verification`, además de las
+internas (`sqlite_*`, `_cf_*`). El índice de búsqueda se reconstruye al restaurar (ver paso 2).
+No incluye
 objetos de R2: esos los cubre `scripts/backup-r2.mjs` / `rclone` según
 [`docs/backup-321.md`](../backup-321.md).
 
@@ -106,6 +110,12 @@ node node_modules/wrangler/bin/wrangler.js d1 execute photos-db-restore \
 node node_modules/wrangler/bin/wrangler.js d1 execute photos-db-restore \
   --remote --command "SELECT count(*) AS users FROM user; SELECT count(*) AS media FROM media;"
 ```
+
+El export no trae el índice FTS5. Recréalo ejecutando de
+`apps/api/migrations/0015_fts5_and_geohash.sql` las sentencias desde `DROP TRIGGER` (línea 17)
+hasta el final: crean `media_fts`, sus triggers y reindexan con un `INSERT … SELECT`
+(procedimiento **no probado** en una restauración real; compruébalo en la base nueva antes de
+cambiar producción). Los usuarios tendrán que iniciar sesión de nuevo (no se respalda `session`).
 
 Si los números cuadran, actualiza `database_id` en `apps/api/wrangler.jsonc`
 al id de `photos-db-restore`, despliega y ejecuta el smoke test:

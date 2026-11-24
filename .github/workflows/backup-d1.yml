@@ -77,8 +77,16 @@ jobs:
           mkdir -p backups
           STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
           OUT="backups/d1-${STAMP}.sql"
+          # D1 no puede exportar bases con tablas virtuales (FTS5): se exportan solo las
+          # tablas de datos. El índice media_fts se reconstruye con la migración 0015.
+          # Se excluyen también session/verification (tokens efímeros, no hace falta restaurarlos).
+          TABLES_JSON="$(node node_modules/wrangler/bin/wrangler.js d1 execute photos-db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'media_fts%' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ('session','verification') ORDER BY name")"
+          TABLE_ARGS=()
+          while IFS= read -r t; do TABLE_ARGS+=(--table "$t"); done < <(echo "$TABLES_JSON" | jq -r '.[0].results[].name')
+          test "${#TABLE_ARGS[@]}" -gt 0
           node node_modules/wrangler/bin/wrangler.js d1 export photos-db \
-            --remote --skip-confirmation --output "$OUT"
+            --remote --skip-confirmation --output "$OUT" "${TABLE_ARGS[@]}"
           # Un export vacío o truncado no debe llegar a R2 como "respaldo".
           test -s "$OUT"
           grep -qi "CREATE TABLE" "$OUT"
