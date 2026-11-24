@@ -1,6 +1,6 @@
 import { useQueueEvents } from "../lib/events";
 import * as store from "../web/queue-store";
-import type { QueueItem, QueueState, QueueStats } from "./types";
+import { QUOTA_ERROR_MARKER, type QueueItem, type QueueState, type QueueStats } from "./types";
 
 export type { QueueItem, QueueState, QueueStats } from "./types";
 
@@ -519,6 +519,13 @@ export function getFailed(limit = 50): QueueItem[] {
     .filter((r) => r.state === "failed")
     .sort((a, b) => b.updated_at - a.updated_at)
     .slice(0, limit);
+}
+
+export function hasQuotaFailure(): boolean {
+  for (const r of queue.values()) {
+    if (r.state === "failed" && r.last_error?.includes(QUOTA_ERROR_MARKER)) return true;
+  }
+  return false;
 }
 
 export function retryFailed(): Promise<void> {

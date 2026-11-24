@@ -64,3 +64,6 @@ export type SyncProgressState = {
   etaSeconds: number | null;
   status: SyncProgressStatus;
 };
+
+/** Fragmento del mensaje del API (413) cuando se agota la cuota; identifica ítems fallidos por cuota. */
+export const QUOTA_ERROR_MARKER = "cuota de almacenamiento";

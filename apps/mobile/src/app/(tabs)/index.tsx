@@ -61,7 +61,7 @@ import { queryClient } from "../../lib/query-client";
 import { useSettings, useSyncProgress } from "../../lib/store";
 import { useHybridGallery } from "../../lib/use-hybrid-gallery";
 import { useSystemVideoThumbnail } from "../../lib/video-thumbnail";
-import { isBackupPaused, retryFailed, setBackupPaused } from "../../queue/db";
+import { hasQuotaFailure, isBackupPaused, retryFailed, setBackupPaused } from "../../queue/db";
 import { allowUploadOnCellularOnce, isRunning } from "../../queue/processor";
 import { runBackupPass } from "../../queue/runner";
 import { mapWithConcurrency } from "../../queue/shared";
@@ -258,6 +258,15 @@ const SmartSyncBanner = memo(function SmartSyncBanner() {
   const [dismissed, setDismissed] = useState(false);
 
   const banner = useMemo(() => {
+    if (status === "error" && hasQuotaFailure()) {
+      // Reintentar solo volvería a topar con la cuota: llevar a liberar espacio.
+      return {
+        kind: "error" as const,
+        text: t.gallery.bannerQuota,
+        action: t.gallery.bannerQuotaAction,
+        onPress: () => router.push("/trash"),
+      };
+    }
     if (status === "error") {
       return {
         kind: "error" as const,

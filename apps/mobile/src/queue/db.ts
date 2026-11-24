@@ -1,5 +1,5 @@
 import * as SQLite from "expo-sqlite";
-import type { QueueItem, QueueState, QueueStats } from "./types";
+import { QUOTA_ERROR_MARKER, type QueueItem, type QueueState, type QueueStats } from "./types";
 
 export type { QueueItem, QueueState, QueueStats } from "./types";
 
@@ -494,6 +494,15 @@ export function getFailed(limit = 50): QueueItem[] {
     "SELECT * FROM queue WHERE user_id IS ? AND state = 'failed' ORDER BY updated_at DESC LIMIT ?",
     [activeUserId, limit],
   );
+}
+
+/** ¿Hay ítems fallidos porque el almacenamiento está lleno? */
+export function hasQuotaFailure(): boolean {
+  const row = getQueueDb().getFirstSync<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM queue WHERE user_id IS ? AND state = 'failed' AND last_error LIKE ?",
+    [activeUserId, `%${QUOTA_ERROR_MARKER}%`],
+  );
+  return (row?.n ?? 0) > 0;
 }
 
 export async function retryFailed(): Promise<void> {

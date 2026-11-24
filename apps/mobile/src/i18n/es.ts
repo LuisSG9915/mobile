@@ -156,6 +156,8 @@ export const t = {
     bannerPaused: (n: number) => `Respaldo en pausa (${n} pendientes)`,
     bannerWifi: (n: number) => `Esperando Wi-Fi para respaldar ${n} elementos`,
     bannerRetry: "Reintentar",
+    bannerQuota: "Almacenamiento lleno: libera espacio para seguir respaldando",
+    bannerQuotaAction: "Papelera",
     bannerResume: "Reanudar",
     bannerUploadNow: "Subir ahora",
     bannerDismiss: "Ocultar aviso",
