@@ -266,6 +266,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
   const lon = info.location?.longitude ?? null;
   const width = info.width || 1;
   const height = info.height || 1;
+  const dims = info.width && info.height ? { width: info.width, height: info.height } : undefined;
   const durationMs = item.media_type === "video" ? Math.round((info.duration ?? 0) * 1000) : null;
 
   await setState(item.asset_id, "hashing", { bytes_total: fileSize });
@@ -307,7 +308,11 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
   const cachedThumb = thumbCache.get(item.asset_id);
   const thumb =
     cachedThumb ??
-    (await withDeadline(makeThumbAndHash(mediaType, localUri), THUMB_DEADLINE_MS, "miniatura"));
+    (await withDeadline(
+      makeThumbAndHash(mediaType, localUri, dims),
+      THUMB_DEADLINE_MS,
+      "miniatura",
+    ));
   if (cachedThumb) thumbCache.delete(item.asset_id);
 
   let preview: { uri: string; bytes: number } | null = null;
@@ -330,7 +335,11 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
     // Sin fallback a makePreview en video: el API firma el preview como
     // video/mp4 y un WebP subido ahí queda como objeto ilegible.
   } else {
-    preview = await withDeadline(makePreview(mediaType, localUri), THUMB_DEADLINE_MS, "preview");
+    preview = await withDeadline(
+      makePreview(mediaType, localUri, dims),
+      THUMB_DEADLINE_MS,
+      "preview",
+    );
   }
 
   await setState(item.asset_id, "init", { sha256 });
@@ -635,7 +644,11 @@ async function prepareNextThumb(currentAssetId: string): Promise<void> {
     const info = await MediaLibrary.getAssetInfoAsync(next.asset_id, {
       shouldDownloadFromNetwork: true,
     });
-    const thumb = await makeThumbAndHash("photo", info.localUri ?? next.uri);
+    const thumb = await makeThumbAndHash(
+      "photo",
+      info.localUri ?? next.uri,
+      info.width && info.height ? { width: info.width, height: info.height } : undefined,
+    );
     if (thumbCache.size >= THUMB_CACHE_MAX) {
       safeDelete(thumb.uri);
       return;

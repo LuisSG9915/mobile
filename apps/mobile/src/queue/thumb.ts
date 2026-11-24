@@ -5,6 +5,9 @@ import * as VideoThumbnails from "expo-video-thumbnails";
 import jpeg from "jpeg-js";
 import { fromByteArray, toByteArray } from "react-native-quick-base64";
 import { rgbaToThumbHash } from "thumbhash";
+import { fitResize } from "./thumb-fit";
+
+type Dims = { width: number; height: number };
 
 export type ThumbResult = {
   uri: string;
@@ -18,10 +21,17 @@ async function frameUriFor(mediaType: "photo" | "video", uri: string): Promise<s
   return frame;
 }
 
-async function resizeTo(uri: string, maxDim: number, format: SaveFormat, compress: number) {
+async function resizeTo(
+  uri: string,
+  maxDim: number,
+  format: SaveFormat,
+  compress: number,
+  dims?: Dims,
+) {
   const ctx = ImageManipulator.manipulate(uri);
-  // sin dimensiones del asset no podemos preservar aspecto exacto: resize con maxSide
-  ctx.resize({ width: maxDim });
+  // El lado mayor no pasa de maxDim y nunca se amplía; sin dimensiones, ancho = maxDim.
+  const spec = fitResize(dims, maxDim);
+  if (spec) ctx.resize(spec);
   const rendered = await ctx.renderAsync();
   return rendered.saveAsync({ format, compress, base64: format === SaveFormat.JPEG });
 }
@@ -32,11 +42,12 @@ async function resizeTo(uri: string, maxDim: number, format: SaveFormat, compres
 export async function makeThumbAndHash(
   mediaType: "photo" | "video",
   uri: string,
+  dims?: Dims,
 ): Promise<ThumbResult> {
   const frame = await frameUriFor(mediaType, uri);
 
   // ThumbHash: decodificar una versión pequeña a RGBA via JPEG + jpeg-js
-  const tiny = await resizeTo(frame, 100, SaveFormat.JPEG, 0.9);
+  const tiny = await resizeTo(frame, 100, SaveFormat.JPEG, 0.9, dims);
   const hashB64 = await (async () => {
     try {
       if (!tiny.base64) return "";
@@ -62,7 +73,7 @@ export async function makeThumbAndHash(
   ];
   let last: { uri: string; bytes: number } | null = null;
   for (const [dim, q] of attempts) {
-    const saved = await resizeTo(frame, dim, SaveFormat.WEBP, q);
+    const saved = await resizeTo(frame, dim, SaveFormat.WEBP, q, dims);
     const bytes = new File(saved.uri).size ?? 0;
     last = { uri: saved.uri, bytes };
     if (bytes <= MAX_THUMB_BYTES) break;
@@ -90,10 +101,11 @@ export type PreviewResult = {
 export async function makePreview(
   mediaType: "photo" | "video",
   uri: string,
+  dims?: Dims,
 ): Promise<PreviewResult | null> {
   try {
     const frame = await frameUriFor(mediaType, uri);
-    const saved = await resizeTo(frame, PREVIEW_MAX_DIMENSION, SaveFormat.WEBP, 0.75);
+    const saved = await resizeTo(frame, PREVIEW_MAX_DIMENSION, SaveFormat.WEBP, 0.75, dims);
     const bytes = new File(saved.uri).size ?? 0;
     if (bytes <= 0) return null;
 

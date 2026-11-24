@@ -56,6 +56,7 @@ import { deleteLocalAssets } from "../../lib/free-space";
 import type { GalleryRow, HybridPhoto } from "../../lib/gallery";
 import { buildGridGeometry, GRID_GAP, HEADER_HEIGHT, hitTestPhoto } from "../../lib/grid-geometry";
 import { hapticMedium, hapticSelection } from "../../lib/haptics";
+import { canDecodeWithoutAlpha } from "../../lib/image-alpha";
 import { monthJumpView } from "../../lib/month-jump";
 import { queryClient } from "../../lib/query-client";
 import { useSettings, useSyncProgress } from "../../lib/store";
@@ -188,12 +189,18 @@ const PhotoCell = memo(
             transition={200}
             recyclingKey={photo.key}
             priority={highPriority ? "high" : "normal"}
-            // RGB_565: la mitad de memoria por bitmap en la cuadrícula.
-            decodeFormat="rgb"
+            // RGB_565: la mitad de memoria por bitmap en la cuadrícula, pero sin alfa:
+            // solo para JPEG y miniaturas remotas (PNG/WebP/GIF salían negros).
+            decodeFormat={canDecodeWithoutAlpha(displayUri) ? "rgb" : "argb"}
             // Fotos: memory-disk (reciclado instantáneo, evita celdas revueltas).
             // Vídeos: disk (los frames decodificados pesan MB y se reciclan menos).
             cachePolicy={photo.mediaType === "video" ? "disk" : "memory-disk"}
-            style={{ width: "100%", height: "100%" }}
+            style={{
+              width: "100%",
+              height: "100%",
+              // Fondo claro bajo imágenes con transparencia (capturas/PNG).
+              backgroundColor: canDecodeWithoutAlpha(displayUri) ? undefined : "#d4d4d4",
+            }}
           />
         ) : null}
         {selected ? <View className="absolute inset-0 bg-accent/40" /> : null}
