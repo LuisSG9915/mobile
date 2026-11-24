@@ -11,6 +11,7 @@ import { albumsApp } from "./routes/albums";
 import { cleanerApp } from "./routes/cleaner";
 import { integrityApp } from "./routes/integrity";
 import { locationsApp } from "./routes/locations";
+import { manifestApp } from "./routes/manifest";
 import { mediaApp } from "./routes/media";
 import { searchApp } from "./routes/search";
 import { sharedApp } from "./routes/shared";
@@ -138,6 +139,7 @@ app.all("/api/auth/*", (c) => createAuth(c.env).handler(c.req.raw));
 const v1 = app
   .route("/v1", uploadsApp)
   .route("/v1", timelineApp)
+  .route("/v1", manifestApp)
   .route("/v1", mediaApp)
   .route("/v1", albumsApp)
   .route("/v1", locationsApp)

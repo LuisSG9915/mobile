@@ -770,3 +770,34 @@ export type IntegrityIssue = z.infer<typeof integrityIssueSchema>;
 export type IntegrityReport = z.infer<typeof integrityReportSchema>;
 export type IntegrityScanResponse = z.infer<typeof integrityScanResponseSchema>;
 export type IntegrityLastResponse = z.infer<typeof integrityLastResponseSchema>;
+
+// ---------- Manifiesto de restauración ----------
+
+export const mediaManifestQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(200).default(100),
+  /** Año de captura (YYYY). */
+  year: z
+    .string()
+    .regex(/^\d{4}$/)
+    .optional(),
+  albumId: z.string().max(64).optional(),
+});
+
+export const mediaManifestItemSchema = z.object({
+  id: z.string(),
+  sha256: z.string(),
+  fileSize: z.number(),
+  ext: z.string(),
+  mediaType: z.enum(["photo", "video"]),
+  takenAt: z.number(),
+});
+
+export const mediaManifestResponseSchema = z.object({
+  items: z.array(mediaManifestItemSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export type MediaManifestQuery = z.infer<typeof mediaManifestQuerySchema>;
+export type MediaManifestItem = z.infer<typeof mediaManifestItemSchema>;
+export type MediaManifestResponse = z.infer<typeof mediaManifestResponseSchema>;
