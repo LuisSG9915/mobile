@@ -419,7 +419,8 @@ export const t = {
   map: {
     title: "Mapa de fotos",
     emptyTitle: "Sin fotos con ubicación",
-    emptyBody: "Las fotos y videos que tomes con GPS activado aparecerán ubicados en este mapa.",
+    emptyBody:
+      "Las fotos y videos que tomes con GPS activado aparecerán ubicados en este mapa. Si no ves ninguno, activa la etiqueta de ubicación en los ajustes de la cámara.",
     openInMaps: "Abrir en Google Maps",
     photosCount: (n: number) =>
       n === 1 ? "1 elemento en esta zona" : `${n} elementos en esta zona`,

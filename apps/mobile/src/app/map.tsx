@@ -28,7 +28,7 @@ import { api } from "../api/client";
 import { t } from "../i18n/es";
 import { formatDateTime } from "../lib/format";
 import { type Cluster, clusterMarkers } from "../lib/map-cluster";
-import { EmptyState } from "../ui";
+import { EmptyState, ErrorState } from "../ui";
 
 // Conversión Web Mercator para proyección de OpenStreetMap
 function latLngToWorld(lat: number, lng: number, zoom: number): { x: number; y: number } {
@@ -378,12 +378,16 @@ export default function MapScreen() {
           {/* Estado vacío si no hay fotos con GPS */}
           {items.length === 0 && !locationsQuery.isPending ? (
             <View className="absolute inset-x-6 top-1/3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md p-6 rounded-3xl shadow-2xl border border-neutral-200 dark:border-neutral-800">
-              <EmptyState
-                title={t.map.emptyTitle}
-                body={t.map.emptyBody}
-                actionLabel="Volver a la galería"
-                action={() => router.back()}
-              />
+              {locationsQuery.isError ? (
+                <ErrorState onRetry={() => void locationsQuery.refetch()} />
+              ) : (
+                <EmptyState
+                  title={t.map.emptyTitle}
+                  body={t.map.emptyBody}
+                  actionLabel="Volver a la galería"
+                  action={() => router.back()}
+                />
+              )}
             </View>
           ) : null}
           {/* Atribución de mapas */}
