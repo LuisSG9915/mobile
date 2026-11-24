@@ -3,6 +3,7 @@ import * as MediaLibrary from "expo-media-library/legacy";
 import * as Network from "expo-network";
 import { api } from "../api/client";
 import { sha256File } from "../queue/hash";
+import { setAssetDateTaken } from "./native-date";
 import type { RestoreDeps } from "./processor";
 
 /** Dependencias reales (Android/iOS). `wifiOnly` exige Wi-Fi o Ethernet. */
@@ -19,12 +20,13 @@ export function createRestoreDeps(opts: { wifiOnly: () => boolean }): RestoreDep
       return uri;
     },
     sha256: sha256File,
-    async saveToLibrary(uri) {
+    async saveToLibrary(uri, item) {
       const perm = await MediaLibrary.getPermissionsAsync();
       if (!perm.granted && !(await MediaLibrary.requestPermissionsAsync()).granted) {
         throw new Error("Permiso denegado para guardar en la galería");
       }
-      await MediaLibrary.createAssetAsync(uri);
+      const asset = await MediaLibrary.createAssetAsync(uri);
+      await setAssetDateTaken(asset.id, item.mediaType, item.takenAt);
     },
     deleteFile: (uri) => FileSystem.deleteAsync(uri, { idempotent: true }),
     freeBytes: () => FileSystem.getFreeDiskStorageAsync(),

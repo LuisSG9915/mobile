@@ -1,7 +1,10 @@
 package expo.modules.uploadforeground
 
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -79,6 +82,25 @@ class UploadForegroundModule : Module() {
 
     AsyncFunction("isRunning") {
       started
+    }
+
+    // Fija la fecha de captura en MediaStore de un asset creado por esta app (restauración).
+    // `assetId` es el id numérico de MediaStore (Asset.id de expo-media-library en Android).
+    AsyncFunction("setDateTaken") { assetId: String, mediaType: String, takenAtMs: Double ->
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("React context no disponible")
+      val base = if (mediaType == "video") {
+        MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+      } else {
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+      }
+      val uri = ContentUris.withAppendedId(base, assetId.toLong())
+      val millis = takenAtMs.toLong()
+      val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DATE_TAKEN, millis)
+        put(MediaStore.MediaColumns.DATE_MODIFIED, millis / 1000)
+      }
+      context.contentResolver.update(uri, values, null, null) > 0
     }
 
     AsyncFunction("sha256File") { fileUri: String ->

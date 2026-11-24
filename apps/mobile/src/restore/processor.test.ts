@@ -72,7 +72,7 @@ describe("runRestore", () => {
   it("descarga, verifica y guarda; borra el temporal", async () => {
     const store = memStore();
     store.enqueue([m("aaaaaaaaaaaaaaaa1")]);
-    const save = vi.fn(async () => {});
+    const save = vi.fn(async (_uri: string, _item: unknown) => {});
     const del = vi.fn(async () => {});
     const out = await runRestore(
       store,
@@ -82,6 +82,7 @@ describe("runRestore", () => {
     expect(store.counts().done).toBe(1);
     expect(save).toHaveBeenCalledTimes(1);
     expect(del).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][1]).toEqual({ mediaType: "photo", takenAt: 1 });
   });
 
   it("hash distinto: un reintento y luego corrupt, sin guardar", async () => {
