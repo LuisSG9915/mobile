@@ -663,6 +663,7 @@ export default function GalleryScreen() {
           pathname: "/media/[id]",
           params: {
             id: photo.remoteId ?? photo.key,
+            photoKey: photo.key,
             albumId: albumFilter?.type === "remote" ? albumFilter.albumId : undefined,
             // Mantiene el carrusel dentro del mismo alcance de mes de la cuadrícula.
             before: timelineBefore,

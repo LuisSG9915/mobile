@@ -47,6 +47,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { toast } from "sonner-native";
 import { api } from "../../api/client";
 import { t } from "../../i18n/es";
+import { resolveActiveIndex } from "../../lib/carousel-anchor";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import { deleteLocalAsset, hasLocalCopy } from "../../lib/free-space";
 import { hapticLight } from "../../lib/haptics";
@@ -70,6 +71,8 @@ import { ZoomableImage } from "../../ui/ZoomableImage";
 export default function MediaViewer() {
   const params = useLocalSearchParams<{
     id: string;
+    /** `key` exacta de la celda tocada (única; el id puede repetirse entre copias). */
+    photoKey?: string;
     albumId?: string;
     /** Alcance de salto temporal de la galería (`before` del timeline). */
     before?: string;
@@ -183,9 +186,12 @@ export default function MediaViewer() {
   }, [photos, params.albumId, albumDetailQuery.data, timeline.data]);
 
   // Carrusel solo cuando el timeline/galería ya resolvió y contiene el id pedido
-  const foundIndex = items.findIndex(
-    (i) => i.id === id || i.key === id || (i.remoteId && i.remoteId === id),
-  );
+  // Primero la `key` exacta de la celda tocada (única); el id/remoteId puede repetirse entre copias.
+  const keyIndex = params.photoKey ? items.findIndex((i) => i.key === params.photoKey) : -1;
+  const foundIndex =
+    keyIndex >= 0
+      ? keyIndex
+      : items.findIndex((i) => i.id === id || i.key === id || (i.remoteId && i.remoteId === id));
   const carousel = foundIndex >= 0;
 
   // Índice web cuando se visualiza en navegador
@@ -200,10 +206,25 @@ export default function MediaViewer() {
   const currentWebIndex = webIndex ?? (foundIndex >= 0 ? foundIndex : 0);
 
   // activeIndex = última página a la que se deslizó; antes de deslizar es la del id.
-  const [scrolledIndex, setScrolledIndex] = useState<number | null>(null);
-  const activeIndex = isWeb
-    ? currentWebIndex
-    : (scrolledIndex ?? (foundIndex >= 0 ? foundIndex : 0));
+  // Anclado a la `key` del elemento (no a una posición): si la lista cambia mientras el visor está
+  // abierto, el usuario sigue viendo el mismo elemento en vez de otro.
+  const [anchorKey, setAnchorKey] = useState<string | null>(null);
+  const itemKeys = useMemo(() => items.map((i) => i.key), [items]);
+  const activeIndex = isWeb ? currentWebIndex : resolveActiveIndex(itemKeys, anchorKey, foundIndex);
+  const carouselRef = useRef<FlatList<CarouselItem>>(null);
+  const shownIndexRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (isWeb || !carousel) return;
+    if (shownIndexRef.current === null) {
+      shownIndexRef.current = activeIndex;
+      return;
+    }
+    if (shownIndexRef.current !== activeIndex) {
+      // La lista se reordenó bajo el elemento activo: reubicar el carrusel sin animar.
+      shownIndexRef.current = activeIndex;
+      carouselRef.current?.scrollToOffset({ offset: width * activeIndex, animated: false });
+    }
+  }, [activeIndex, carousel, width]);
 
   const activeItem =
     carousel && items.length > 0 && activeIndex >= 0 && activeIndex < items.length
@@ -839,8 +860,10 @@ export default function MediaViewer() {
           </View>
         ) : carousel ? (
           <FlatList
+            ref={carouselRef}
             data={items}
-            keyExtractor={(i) => i.id}
+            // `key` es único; `id` (remoteId) se repite si dos copias locales apuntan al mismo remoto.
+            keyExtractor={(i) => i.key}
             testID="carousel"
             horizontal
             pagingEnabled
@@ -860,7 +883,9 @@ export default function MediaViewer() {
             extraData={activeIndex}
             onMomentumScrollEnd={(e) => {
               setZoomed(false);
-              setScrolledIndex(Math.round(e.nativeEvent.contentOffset.x / width));
+              const idx = Math.round(e.nativeEvent.contentOffset.x / width);
+              shownIndexRef.current = idx;
+              setAnchorKey(items[idx]?.key ?? null);
             }}
             renderItem={renderCarouselItem}
           />
