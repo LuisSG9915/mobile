@@ -1,6 +1,7 @@
 import type { SyncStatus, TimelineItem } from "@photos/shared";
 import type { QueueItem, QueueState } from "../queue/types";
 import { sectionLabel } from "./format";
+import { toWallClockUtc } from "./wall-clock";
 
 /**
  * Núcleo de la galería híbrida: fusión pura (sin I/O) de tres fuentes —
@@ -342,7 +343,10 @@ export function filterToBefore(photos: HybridPhoto[], before?: string): HybridPh
 }
 
 /** Intercala encabezados de día (Hoy / Ayer / mes) sobre la lista ordenada desc. */
-export function buildGalleryRows(photos: HybridPhoto[], now = Date.now()): GalleryRow[] {
+export function buildGalleryRows(
+  photos: HybridPhoto[],
+  now = toWallClockUtc(Date.now()),
+): GalleryRow[] {
   const groups: { label: string; photos: HybridPhoto[] }[] = [];
   for (const photo of photos) {
     const label = sectionLabel(photo.takenAt, now);

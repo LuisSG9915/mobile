@@ -2,6 +2,7 @@ import { ALLOWED_EXTENSIONS } from "@photos/shared";
 import * as MediaLibrary from "expo-media-library/legacy";
 import { useLibraryEvents } from "../lib/events";
 import { useSettings } from "../lib/store";
+import { toWallClockUtc } from "../lib/wall-clock";
 import {
   clearQueue,
   type EnqueueInput,
@@ -105,7 +106,7 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
           stableFallback += hash % 86400000;
         }
         const creationTime =
-          rawTime > 0 ? (rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableFallback;
+          rawTime > 0 ? toWallClockUtc(rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableFallback;
         batch.push({
           id: a.id,
           uri: a.uri,

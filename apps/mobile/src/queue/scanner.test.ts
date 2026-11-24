@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toWallClockUtc } from "../lib/wall-clock";
 
 const mockGetPermissionsAsync = vi.fn();
 const mockGetAssetsAsync = vi.fn();
@@ -139,7 +140,8 @@ describe("scanLibrary (nativo incremental / delta)", () => {
         uri: "file:///test1.jpg",
         filename: "test1.jpg",
         mediaType: "photo",
-        creationTime: 1700000000 * 1000,
+        // Epoch del sistema → hora de pared (convención de takenAt, ver lib/wall-clock.ts).
+        creationTime: toWallClockUtc(1700000000 * 1000),
       },
     ]);
   });

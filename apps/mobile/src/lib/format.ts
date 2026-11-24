@@ -1,4 +1,5 @@
 import { t } from "../i18n/es";
+import { toWallClockUtc } from "./wall-clock";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -72,7 +73,7 @@ function sameDay(a: Date, b: Date): boolean {
 }
 
 /** Sección de la galería: Hoy / Ayer / mes (estilo Google Fotos). */
-export function sectionLabel(ts: number, now = Date.now()): string {
+export function sectionLabel(ts: number, now = toWallClockUtc(Date.now())): string {
   const d = new Date(ts);
   const n = new Date(now);
   if (sameDay(d, n)) return t.time.today;
