@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import * as Sharing from "expo-sharing";
 import {
   ChevronRight,
+  CloudDownload,
   Database,
   Download,
   HardDrive,
@@ -298,6 +299,23 @@ export default function SettingsScreen() {
             <ChevronRight size={18} color="#a3a3a3" />
           </Card>
         </Pressable>
+
+        {Platform.OS !== "web" ? (
+          <Pressable onPress={() => router.push("/restore")} accessibilityRole="button">
+            <Card className="flex-row items-center justify-between">
+              <View className="flex-row items-center gap-3">
+                <CloudDownload size={18} color="#6366f1" />
+                <View>
+                  <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                    {t.settings.restore}
+                  </Text>
+                  <Text className="text-xs text-neutral-500">{t.settings.restoreHint}</Text>
+                </View>
+              </View>
+              <ChevronRight size={18} color="#a3a3a3" />
+            </Card>
+          </Pressable>
+        ) : null}
 
         <Pressable onPress={() => router.push("/integrity")} accessibilityRole="button">
           <Card className="flex-row items-center justify-between">

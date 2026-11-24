@@ -19,6 +19,8 @@ import type {
   LocationsQuery,
   LocationsResponse,
   MediaDetail,
+  MediaManifestQuery,
+  MediaManifestResponse,
   MemoriesResponse,
   MultipartAbortInput,
   MultipartCompleteInput,
@@ -380,6 +382,15 @@ export const api = {
       r.json(),
     ),
 
+  mediaManifest: (q: Partial<MediaManifestQuery> = {}): Promise<MediaManifestResponse> => {
+    const params = new URLSearchParams();
+    if (q.cursor) params.set("cursor", q.cursor);
+    if (q.limit) params.set("limit", String(q.limit));
+    if (q.year) params.set("year", q.year);
+    if (q.albumId) params.set("albumId", q.albumId);
+    const qs = params.toString();
+    return apiFetch(`/v1/media/manifest${qs ? `?${qs}` : ""}`).then((r) => r.json());
+  },
   integrityScan: (body: IntegrityScanInput): Promise<IntegrityScanResponse> =>
     apiFetch("/v1/user/integrity/scan", { method: "POST", body: JSON.stringify(body) }).then((r) =>
       r.json(),

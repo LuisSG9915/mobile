@@ -57,6 +57,7 @@ function RootNavigator() {
         />
         <Stack.Screen name="trash" options={{ presentation: "modal" }} />
         <Stack.Screen name="integrity" options={{ presentation: "modal" }} />
+        <Stack.Screen name="restore" options={{ presentation: "modal" }} />
         <Stack.Screen name="cleaner" />
         <Stack.Screen name="map" />
         <Stack.Screen name="search" />
