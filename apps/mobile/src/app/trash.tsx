@@ -8,7 +8,7 @@ import { toast } from "sonner-native";
 import { api } from "../api/client";
 import { t } from "../i18n/es";
 import { invalidateMediaLifecycleQueries } from "../lib/query-client";
-import { Button, EmptyState } from "../ui";
+import { Button, EmptyState, ErrorState } from "../ui";
 
 export default function TrashScreen() {
   const qc = useQueryClient();
@@ -86,7 +86,9 @@ export default function TrashScreen() {
           />
         ) : null}
       </View>
-      {items.length === 0 && !query.isLoading ? (
+      {items.length === 0 && query.isError ? (
+        <ErrorState onRetry={() => void query.refetch()} />
+      ) : items.length === 0 && !query.isLoading ? (
         <EmptyState title={t.trash.empty} />
       ) : (
         <FlashList

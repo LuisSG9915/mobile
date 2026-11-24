@@ -22,7 +22,7 @@ import { formatBytes } from "../lib/format";
 import { deleteLocalAssets, freeSyncedSpace, getSyncedLocal } from "../lib/free-space";
 import { invalidateMediaLifecycleQueries } from "../lib/query-client";
 import { getLocalAssetIdsByRemoteIds } from "../queue/db";
-import { Button, EmptyState } from "../ui";
+import { Button, EmptyState, ErrorState } from "../ui";
 
 export default function CleanerScreen() {
   const qc = useQueryClient();
@@ -141,7 +141,9 @@ export default function CleanerScreen() {
         </View>
       </View>
 
-      {clusters.length === 0 && !query.isLoading ? (
+      {clusters.length === 0 && query.isError ? (
+        <ErrorState onRetry={() => void query.refetch()} />
+      ) : clusters.length === 0 && !query.isLoading ? (
         <EmptyState
           title={t.cleaner.emptyTitle}
           body={t.cleaner.emptyBody}

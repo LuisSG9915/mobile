@@ -72,6 +72,12 @@ export default function MapScreen() {
     [locationsQuery.data],
   );
 
+  // Trae el resto de páginas para no dejar fuera fotos con GPS más allá de las primeras 500.
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = locationsQuery;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   // Al cargar los datos, si no venimos con una foto fija, centrar en el promedio de las fotos del usuario
   const hasInitializedCenter = useRef(Boolean(initLat && initLng));
   useEffect(() => {

@@ -1,7 +1,7 @@
 import type { SyncStatus } from "@photos/shared";
 import { AlertCircle, CloudCheck, CloudDownload, CloudOff, CloudUpload } from "lucide-react-native";
 import type { ReactNode } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, useColorScheme, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { t } from "../i18n/es";
 import { useItemProgress } from "../lib/store";
@@ -31,12 +31,12 @@ export function Button({
         : variant === "secondary"
           ? "bg-neutral-800 border border-neutral-700"
           : "bg-transparent border border-neutral-300 dark:border-neutral-700";
-  const text =
-    variant === "primary" || variant === "danger" || variant === "secondary"
-      ? "text-white"
-      : "text-neutral-900 dark:text-white";
+  const scheme = useColorScheme();
+  const isFilled = variant === "primary" || variant === "danger" || variant === "secondary";
+  const text = isFilled ? "text-white" : "text-neutral-900 dark:text-white";
+  // 48dp: mínimo táctil recomendado en Android.
   const sizeClasses =
-    size === "sm" ? "px-3 py-2 min-h-[38px] rounded-xl" : "px-5 py-4 min-h-[52px] rounded-2xl";
+    size === "sm" ? "px-3 py-2 min-h-[48px] rounded-xl" : "px-5 py-4 min-h-[52px] rounded-2xl";
   const textSize = size === "sm" ? "text-sm" : "text-base";
   return (
     <Pressable
@@ -47,7 +47,7 @@ export function Button({
       className={`${bg} ${sizeClasses} items-center justify-center ${disabled || loading ? "opacity-50" : ""} ${className ?? ""}`}
     >
       {loading ? (
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={isFilled ? "#fff" : scheme === "dark" ? "#fff" : "#171717"} />
       ) : (
         <Text className={`${text} font-semibold ${textSize}`} numberOfLines={1}>
           {label}
@@ -110,6 +110,19 @@ export function EmptyState({
       ) : null}
     </View>
   );
+}
+
+/** Error de carga con reintento: evita que un fallo de red se lea como "vacío". */
+export function ErrorState({
+  onRetry,
+  title = t.common.loadError,
+  body = t.common.loadErrorBody,
+}: {
+  onRetry: () => void;
+  title?: string;
+  body?: string;
+}) {
+  return <EmptyState title={title} body={body} action={onRetry} actionLabel={t.backup.retry} />;
 }
 
 const BADGE_A11Y: Record<SyncStatus, string> = {

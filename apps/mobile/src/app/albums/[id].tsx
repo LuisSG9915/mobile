@@ -36,7 +36,7 @@ import { api } from "../../api/client";
 import { t } from "../../i18n/es";
 import { downloadMany } from "../../lib/download-many";
 import { formatDuration } from "../../lib/format";
-import { Button, EmptyState } from "../../ui";
+import { Button, EmptyState, ErrorState } from "../../ui";
 
 export default function AlbumDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -287,7 +287,9 @@ export default function AlbumDetailScreen() {
       </View>
 
       {/* Grid de fotos del álbum */}
-      {items.length === 0 && !query.isPending ? (
+      {items.length === 0 && query.isError ? (
+        <ErrorState onRetry={() => void query.refetch()} />
+      ) : items.length === 0 && !query.isPending ? (
         <View className="flex-1 justify-center px-6">
           <EmptyState
             title="Álbum vacío"
@@ -309,6 +311,9 @@ export default function AlbumDetailScreen() {
             if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
           }}
           onEndReachedThreshold={0.5}
+          removeClippedSubviews
+          windowSize={7}
+          initialNumToRender={24}
           refreshControl={
             <RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} />
           }
@@ -331,6 +336,7 @@ export default function AlbumDetailScreen() {
               }
               className="bg-neutral-200 dark:bg-neutral-900 overflow-hidden"
               accessibilityRole="button"
+              accessibilityLabel={item.mediaType === "video" ? "Abrir video" : "Abrir foto"}
             >
               <Image
                 source={{ uri: item.thumbUrl }}
@@ -338,6 +344,8 @@ export default function AlbumDetailScreen() {
                 style={{ width: "100%", height: "100%" }}
                 contentFit="cover"
                 transition={200}
+                recyclingKey={item.id}
+                cachePolicy="memory-disk"
               />
               {item.mediaType === "video" ? (
                 <View className="absolute bottom-1 right-1 bg-black/60 backdrop-blur-md rounded-md px-1.5 py-0.5 flex-row items-center gap-1">
