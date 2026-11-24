@@ -2,13 +2,14 @@ import { Image } from "expo-image";
 import { Tabs } from "expo-router";
 import { CloudUpload, Folder, Images, Settings } from "lucide-react-native";
 import { useEffect } from "react";
-import { ActivityIndicator, AppState, Platform, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, Text, useColorScheme, View } from "react-native";
 import { t } from "../../i18n/es";
 import { useSyncProgressAuto } from "../../queue/progress";
 import { useBackupRunner } from "../../queue/runner";
 import { useQueueSession } from "../../queue/session";
 
 export default function TabsLayout() {
+  const scheme = useColorScheme();
   // En web abre IndexedDB por usuario y suspende la cola si la sesión cae;
   // en nativo fija el dueño (user_id) de la cola SQLite.
   const { ready, error } = useQueueSession();
@@ -50,6 +51,11 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: "#4f46e5",
         tabBarInactiveTintColor: "#a3a3a3",
+        // Sin esto la barra queda blanca sobre el tema oscuro.
+        tabBarStyle: {
+          backgroundColor: scheme === "dark" ? "#0a0a0a" : "#ffffff",
+          borderTopColor: scheme === "dark" ? "#262626" : "#e5e5e5",
+        },
       }}
     >
       <Tabs.Screen
