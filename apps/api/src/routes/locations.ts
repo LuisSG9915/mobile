@@ -271,18 +271,15 @@ export const locationsApp = new OpenAPIHono<AppEnv>()
       )
       .limit(15);
 
-    const CONCURRENCY = 5;
+    // Secuencial con pausa: el fallback Nominatim exige como máximo ~1 petición/s.
+    const PAUSE_MS = 1000;
     let geocoded = 0;
-    for (let i = 0; i < rows.length; i += CONCURRENCY) {
-      const chunk = rows.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(
-        chunk.map(async (row) => {
-          if (row.latitude == null || row.longitude == null) return false;
-          const res = await geocodeMediaItem(c.env, row.id, user.id, row.latitude, row.longitude);
-          return Boolean(res.locationName);
-        }),
-      );
-      geocoded += results.filter(Boolean).length;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.latitude == null || row.longitude == null) continue;
+      if (i > 0) await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
+      const res = await geocodeMediaItem(c.env, row.id, user.id, row.latitude, row.longitude);
+      if (res.locationName) geocoded++;
     }
 
     return c.json({ geocoded }, 200);
