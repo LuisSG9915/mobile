@@ -1,48 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { computeSwipeDismissFrame, shouldTriggerSwipeDismiss } from "./viewer-physics";
+import {
+  clampPanTranslation,
+  computeBackdropOpacity,
+  computeDoubleTapZoomTarget,
+  shouldDismissOnVerticalSwipe,
+  shouldLoadFullResolution,
+} from "./viewer-physics";
 
-describe("computeSwipeDismissFrame", () => {
-  it("amortigua el arrastre hacia arriba y no despega la tarjeta", () => {
-    const frame = computeSwipeDismissFrame(100, -80, 800);
-    expect(frame.tx).toBe(25);
-    expect(frame.ty).toBe(-20);
-    expect(frame.scale).toBe(1);
-    expect(frame.borderRadius).toBe(0);
-    expect(frame.backdropOpacity).toBe(1);
+const sampleDims = {
+  viewportWidth: 400,
+  viewportHeight: 800,
+  imageWidth: 4000,
+  imageHeight: 3000,
+};
+
+describe("viewer-physics", () => {
+  it("restringe el paneo a (0,0) cuando la escala es 1x", () => {
+    expect(clampPanTranslation(120, -80, 1, sampleDims)).toEqual({ x: 0, y: 0 });
   });
 
-  it("aplica física 2D al arrastrar hacia abajo", () => {
-    const frame = computeSwipeDismissFrame(100, 180, 800);
-    expect(frame.tx).toBe(65);
-    expect(frame.ty).toBe(180);
-    expect(frame.scale).toBeCloseTo(0.875);
-    expect(frame.scale).toBeGreaterThanOrEqual(0.72);
-    expect(frame.scale).toBeLessThan(1);
-    expect(frame.borderRadius).toBeCloseTo(12);
-    expect(frame.borderRadius).toBeGreaterThan(0);
-    expect(frame.borderRadius).toBeLessThanOrEqual(24);
-    expect(frame.backdropOpacity).toBeCloseTo(0.575);
-    expect(frame.backdropOpacity).toBeLessThan(1);
+  it("limita translateX y translateY según el borde real de la imagen ampliada", () => {
+    const clamped = clampPanTranslation(350, 100, 2, sampleDims);
+    expect(clamped.x).toBe(200);
+    expect(clamped.y).toBe(0);
   });
 
-  it("limita la escala y el redondeo al llegar al fondo", () => {
-    const frame = computeSwipeDismissFrame(0, 1000, 800);
-    expect(frame.scale).toBe(0.75);
-    expect(frame.borderRadius).toBe(24);
-    expect(frame.backdropOpacity).toBeCloseTo(0.15);
-  });
-});
+  it("hace zoom focal hacia la esquina tocada en el primer doble toque y vuelve a 1x en el segundo", () => {
+    const zoomIn = computeDoubleTapZoomTarget(50, 400, 1, sampleDims, 2.5);
+    expect(zoomIn.scale).toBe(2.5);
+    expect(zoomIn.x).toBeGreaterThan(0);
 
-describe("shouldTriggerSwipeDismiss", () => {
-  it("cierra por distancia aunque la velocidad sea baja", () => {
-    expect(shouldTriggerSwipeDismiss(120, 50)).toBe(true);
+    const zoomOut = computeDoubleTapZoomTarget(50, 400, zoomIn.scale, sampleDims, 2.5);
+    expect(zoomOut).toEqual({ scale: 1, x: 0, y: 0 });
   });
 
-  it("cierra por un flick rápido con recorrido corto", () => {
-    expect(shouldTriggerSwipeDismiss(60, 750)).toBe(true);
+  it("solo permite swipe-to-dismiss cuando la imagen no tiene zoom activo", () => {
+    expect(shouldDismissOnVerticalSwipe(140, 200, 1)).toBe(true);
+    expect(shouldDismissOnVerticalSwipe(50, 1000, 1)).toBe(true);
+    expect(shouldDismissOnVerticalSwipe(200, 1200, 2.2)).toBe(false);
   });
 
-  it("no cierra en un movimiento corto y lento", () => {
-    expect(shouldTriggerSwipeDismiss(40, 100)).toBe(false);
+  it("activa la carga de resolución original únicamente a partir de 1.5x", () => {
+    expect(shouldLoadFullResolution(1.2)).toBe(false);
+    expect(shouldLoadFullResolution(1.5)).toBe(true);
+    expect(shouldLoadFullResolution(2.5)).toBe(true);
+    expect(computeBackdropOpacity(200, 800)).toBeLessThan(1);
   });
 });

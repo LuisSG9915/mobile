@@ -39,6 +39,14 @@ export function captureException(error: unknown): void {
   Sentry.captureException(error);
 }
 
+export function captureMessage(
+  message: string,
+  level: "info" | "warning" | "error" = "info",
+): void {
+  if (!DSN) return;
+  Sentry.captureMessage(message, level);
+}
+
 /** Solo el id: nunca email ni rutas de fotos. */
 export function setTelemetryUser(userId: string | null): void {
   if (!DSN) return;

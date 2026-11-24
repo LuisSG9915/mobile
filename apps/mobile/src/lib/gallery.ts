@@ -365,3 +365,139 @@ export function buildGalleryRows(photos: HybridPhoto[], now = Date.now()): Galle
   }
   return rows;
 }
+
+// ---------- Bloque 2: HybridGalleryItem + mergeHybridGallery ----------
+
+export type SyncState = "local_only" | "queued" | "uploading" | "synced" | "error";
+
+export interface LocalGalleryAsset {
+  localAssetId: string;
+  uri: string;
+  filename: string;
+  mediaType: "photo" | "video";
+  width: number;
+  height: number;
+  durationMs: number;
+  creationTime: number;
+  sha256?: string;
+  queueStatus?: "pending" | "uploading" | "completed" | "failed";
+  uploadProgress?: number;
+}
+
+export interface RemoteGalleryMedia {
+  id: string;
+  localAssetId?: string | null;
+  sha256: string;
+  filename: string;
+  mediaType: "photo" | "video";
+  width: number;
+  height: number;
+  durationMs?: number | null;
+  takenAt: number;
+  thumbUrl: string;
+  previewUrl?: string | null;
+  originalUrl?: string | null;
+  thumbHash?: string | null;
+  isFavorite?: boolean;
+}
+
+export interface HybridGalleryItem {
+  id: string;
+  stableKey: string;
+  localAssetId?: string;
+  remoteId?: string;
+  sha256?: string;
+  filename: string;
+  mediaType: "photo" | "video";
+  width: number;
+  height: number;
+  durationMs: number;
+  timestamp: number;
+  displayThumbUri: string;
+  fallbackRemoteThumbUri?: string;
+  thumbHash?: string | null;
+  syncState: SyncState;
+  uploadProgress?: number;
+  isFavorite: boolean;
+}
+
+export function mergeHybridGallery(
+  localAssets: LocalGalleryAsset[],
+  remoteMedia: RemoteGalleryMedia[],
+  sha256ByLocalId?: ReadonlyMap<string, string>,
+): HybridGalleryItem[] {
+  const remoteByLocalId = new Map<string, RemoteGalleryMedia>();
+  const remoteBySha256 = new Map<string, RemoteGalleryMedia>();
+  const matchedRemoteIds = new Set<string>();
+
+  for (const remote of remoteMedia) {
+    if (remote.localAssetId) remoteByLocalId.set(remote.localAssetId, remote);
+    if (remote.sha256) remoteBySha256.set(remote.sha256.toLowerCase(), remote);
+  }
+
+  const merged: HybridGalleryItem[] = [];
+
+  for (const local of localAssets) {
+    const knownSha = (local.sha256 ?? sha256ByLocalId?.get(local.localAssetId))?.toLowerCase();
+    const matchedRemote =
+      remoteByLocalId.get(local.localAssetId) ??
+      (knownSha ? remoteBySha256.get(knownSha) : undefined);
+
+    if (matchedRemote) matchedRemoteIds.add(matchedRemote.id);
+
+    let syncState: SyncState = "local_only";
+    if (matchedRemote || local.queueStatus === "completed") syncState = "synced";
+    else if (local.queueStatus === "uploading") syncState = "uploading";
+    else if (local.queueStatus === "pending") syncState = "queued";
+    else if (local.queueStatus === "failed") syncState = "error";
+
+    merged.push({
+      id: matchedRemote ? matchedRemote.id : `local:${local.localAssetId}`,
+      stableKey: `asset:${local.localAssetId}`,
+      localAssetId: local.localAssetId,
+      remoteId: matchedRemote?.id,
+      sha256: matchedRemote?.sha256 ?? knownSha,
+      filename: local.filename,
+      mediaType: local.mediaType,
+      width: local.width || matchedRemote?.width || 1,
+      height: local.height || matchedRemote?.height || 1,
+      durationMs: local.durationMs || matchedRemote?.durationMs || 0,
+      timestamp: matchedRemote?.takenAt ?? local.creationTime,
+      displayThumbUri: local.uri,
+      fallbackRemoteThumbUri: matchedRemote?.thumbUrl,
+      thumbHash: matchedRemote?.thumbHash ?? null,
+      syncState,
+      uploadProgress: local.uploadProgress,
+      isFavorite: matchedRemote?.isFavorite ?? false,
+    });
+  }
+
+  for (const remote of remoteMedia) {
+    if (matchedRemoteIds.has(remote.id)) continue;
+    merged.push({
+      id: remote.id,
+      stableKey: remote.localAssetId ? `asset:${remote.localAssetId}` : `remote:${remote.id}`,
+      localAssetId: remote.localAssetId ?? undefined,
+      remoteId: remote.id,
+      sha256: remote.sha256,
+      filename: remote.filename,
+      mediaType: remote.mediaType,
+      width: remote.width,
+      height: remote.height,
+      durationMs: remote.durationMs ?? 0,
+      timestamp: remote.takenAt,
+      displayThumbUri: remote.thumbUrl,
+      fallbackRemoteThumbUri: remote.thumbUrl,
+      thumbHash: remote.thumbHash ?? null,
+      syncState: "synced",
+      isFavorite: remote.isFavorite ?? false,
+    });
+  }
+
+  merged.sort((a, b) => {
+    if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+    return a.stableKey.localeCompare(b.stableKey);
+  });
+
+  return merged;
+}

@@ -32,7 +32,8 @@ export default function Login() {
       } else {
         router.replace("/(tabs)");
       }
-    } catch {
+    } catch (e) {
+      console.error("[login] error", e);
       setError(t.auth.genericError);
     } finally {
       setLoading(false);

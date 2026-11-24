@@ -109,6 +109,7 @@ export default function RootLayout() {
  */
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   useEffect(() => {
+    console.error("[error-boundary]", JSON.stringify(error, Object.getOwnPropertyNames(error)));
     captureException(error);
   }, [error]);
 

@@ -62,7 +62,8 @@
           "savePhotosPermission": "Permite guardar fotos en tu biblioteca."
         }
       ],
-      "@sentry/react-native"
+      "@sentry/react-native",
+      "expo-sharing"
     ],
     "extra": {
       "router": {},

@@ -14,6 +14,7 @@ export const API_URL =
   (Constants.expoConfig?.hostUri
     ? `http://${Constants.expoConfig.hostUri.split(":")[0]}:8787`
     : "http://localhost:8787");
+console.log("[auth] API_URL =", API_URL);
 
 export const authClient = createAuthClient({
   baseURL: API_URL,

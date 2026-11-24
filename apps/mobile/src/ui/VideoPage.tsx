@@ -6,10 +6,12 @@ export function VideoPage({
   uri,
   previewUri,
   onDownload,
+  isActive = true,
 }: {
   uri: string;
   previewUri?: string | null;
   onDownload?: () => void;
+  isActive?: boolean;
 }) {
   const primaryUri = previewUri || uri;
   const fallbackUri = previewUri ? uri : null;
@@ -17,5 +19,6 @@ export function VideoPage({
   if (Platform.OS === "web") {
     return <WebVideoPlayer uri={primaryUri} fallbackUri={fallbackUri} onDownload={onDownload} />;
   }
+  if (!isActive) return null;
   return <NativeVideoPlayer uri={primaryUri} fallbackUri={fallbackUri} />;
 }

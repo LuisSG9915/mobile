@@ -1,24 +1,63 @@
 import { requireOptionalNativeModule } from "expo-modules-core";
 import { useEffect, useState } from "react";
+import { Platform } from "react-native";
 
-/**
- * Puente con el módulo nativo `VideoThumbnail` (Android), que obtiene una
- * miniatura de vídeo vía ContentResolver.loadThumbnail (rápido, cacheado por
- * el SO) con fallback a MediaMetadataRetriever.
- *
- * En web/iOS o si el módulo no está compilado (dev-client viejo) devuelve
- * null y el caller usa la ruta lenta existente (expo-video-thumbnails).
- */
-type VideoThumbnailNativeModule = {
+export interface VideoThumbnailOptions {
+  maxWidth?: number;
+  maxHeight?: number;
+  quality?: number;
+  timeMs?: number;
+}
+
+export interface VideoThumbnailResult {
+  uri: string;
+  width: number;
+  height: number;
+  durationMs: number;
+  rotation: number;
+}
+
+interface NativeVideoThumbnailModule {
+  generate(videoUri: string, options?: VideoThumbnailOptions): Promise<VideoThumbnailResult>;
   getThumbnail(uri: string, maxSize: number): Promise<string>;
-};
+}
 
-let native: VideoThumbnailNativeModule | null | undefined;
+const nativeVideoThumbnail =
+  Platform.OS === "android"
+    ? requireOptionalNativeModule<NativeVideoThumbnailModule>("VideoThumbnail")
+    : null;
 
-function getNative(): VideoThumbnailNativeModule | null {
+export async function generateVideoThumbnail(
+  videoUri: string,
+  options: VideoThumbnailOptions = {},
+): Promise<VideoThumbnailResult | null> {
+  const normalizedOptions: VideoThumbnailOptions = {
+    maxWidth: options.maxWidth ?? 512,
+    maxHeight: options.maxHeight ?? 512,
+    quality: options.quality ?? 80,
+    timeMs: options.timeMs,
+  };
+
+  if (nativeVideoThumbnail) {
+    try {
+      return await nativeVideoThumbnail.generate(videoUri, normalizedOptions);
+    } catch (err) {
+      console.warn("[video-thumbnail] Falló el módulo nativo, intentando fallback:", err);
+    }
+  }
+
+  return null;
+}
+
+// ---------- Compatibilidad con la API previa ----------
+type LegacyNativeModule = { getThumbnail(uri: string, maxSize: number): Promise<string> };
+
+let native: LegacyNativeModule | null | undefined;
+
+function getNative(): LegacyNativeModule | null {
   if (native !== undefined) return native;
   try {
-    native = requireOptionalNativeModule<VideoThumbnailNativeModule>("VideoThumbnail");
+    native = requireOptionalNativeModule<LegacyNativeModule>("VideoThumbnail");
   } catch {
     native = null;
   }
@@ -56,11 +95,6 @@ export function hasSystemVideoThumbnail(): boolean {
   return getNative() !== null;
 }
 
-/**
- * Hook para obtener (de forma asíncrona y cacheada) la miniatura del sistema
- * de un vídeo local. Devuelve null mientras carga o si no está disponible;
- * el caller debe caer al URI original.
- */
 export function useSystemVideoThumbnail(uri: string | null | undefined): string | null {
   const [thumb, setThumb] = useState<string | null>(null);
   useEffect(() => {

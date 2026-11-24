@@ -36,6 +36,11 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# generated native folders (anchored to apps/mobile root)
 /ios
 /android
+
+# Keep local Expo module native code versioned
+!modules/**/android/**
+!modules/**/ios/**
+!modules/**/src/**

@@ -8,7 +8,7 @@ vi.mock("expo-modules-core", () => ({
   requireOptionalNativeModule: () => h.native,
 }));
 
-vi.mock("react-native", () => ({}));
+vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
 
 import { getSystemVideoThumbnail, hasSystemVideoThumbnail } from "./video-thumbnail";
 

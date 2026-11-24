@@ -135,3 +135,152 @@ export function scrubLabel(line: GridLine | null, rows: GalleryRow[]): string {
   if (!row) return "";
   return row.type === "photo" ? monthLabel(row.photo.takenAt) : row.label;
 }
+
+// ---------- Bloque 2: TimelineLayoutIndex + pinch + binary search ----------
+
+import type { HybridGalleryItem } from "./gallery";
+
+export interface GridMetrics {
+  columns: number;
+  gap: number;
+  cellSize: number;
+  headerHeight: number;
+}
+
+export type TimelineListRow =
+  | {
+      type: "header";
+      key: string;
+      title: string;
+      monthKey: string;
+      timestamp: number;
+      count: number;
+    }
+  | { type: "media_row"; key: string; monthKey: string; items: HybridGalleryItem[] };
+
+export interface TimelineLayoutIndex {
+  rows: TimelineListRow[];
+  rowOffsets: Float64Array;
+  rowHeights: Float32Array;
+  totalHeight: number;
+  monthOffsetMap: Map<string, number>;
+}
+
+export function computeGridMetrics(
+  screenWidth: number,
+  columns: number = 3,
+  gap = 2,
+  headerHeight = 44,
+): GridMetrics {
+  const safeWidth = Math.max(screenWidth, 1);
+  const totalGaps = Math.max(0, columns - 1) * gap;
+  const cellSize = Math.floor((safeWidth - totalGaps) / columns);
+  return { columns, gap, cellSize: Math.max(1, cellSize), headerHeight };
+}
+
+const MONTH_NAMES_ES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+];
+
+function formatSectionHeader(timestamp: number) {
+  const d = new Date(timestamp);
+  const year = d.getUTCFullYear();
+  const monthIdx = d.getUTCMonth();
+  const monthKey = `${year}-${String(monthIdx + 1).padStart(2, "0")}`;
+  const title = `${MONTH_NAMES_ES[monthIdx]} ${year}`;
+  return { monthKey, title };
+}
+
+export function buildTimelineLayoutIndex(
+  items: HybridGalleryItem[],
+  metrics: GridMetrics,
+): TimelineLayoutIndex {
+  const rows: TimelineListRow[] = [];
+  const monthOffsetMap = new Map<string, number>();
+
+  let currentMonthKey = "";
+  let currentBucket: HybridGalleryItem[] = [];
+  let currentHeaderTitle = "";
+  let currentHeaderTimestamp = 0;
+
+  const flushBucket = () => {
+    if (currentBucket.length === 0) return;
+    rows.push({
+      type: "header",
+      key: `hdr:${currentMonthKey}`,
+      title: currentHeaderTitle,
+      monthKey: currentMonthKey,
+      timestamp: currentHeaderTimestamp,
+      count: currentBucket.length,
+    });
+    const cols = metrics.columns;
+    for (let i = 0; i < currentBucket.length; i += cols) {
+      const slice = currentBucket.slice(i, i + cols);
+      rows.push({
+        type: "media_row",
+        key: `row:${currentMonthKey}:${slice[0]!.stableKey}`,
+        monthKey: currentMonthKey,
+        items: slice,
+      });
+    }
+    currentBucket = [];
+  };
+
+  for (const item of items) {
+    const { monthKey, title } = formatSectionHeader(item.timestamp);
+    if (monthKey !== currentMonthKey) {
+      flushBucket();
+      currentMonthKey = monthKey;
+      currentHeaderTitle = title;
+      currentHeaderTimestamp = item.timestamp;
+    }
+    currentBucket.push(item);
+  }
+  flushBucket();
+
+  const rowOffsets = new Float64Array(rows.length);
+  const rowHeights = new Float32Array(rows.length);
+  const mediaRowHeight = metrics.cellSize + metrics.gap;
+  let runningOffset = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    rowOffsets[i] = runningOffset;
+    if (!monthOffsetMap.has(row.monthKey)) monthOffsetMap.set(row.monthKey, runningOffset);
+    const h = row.type === "header" ? metrics.headerHeight : mediaRowHeight;
+    rowHeights[i] = h;
+    runningOffset += h;
+  }
+
+  return { rows, rowOffsets, rowHeights, totalHeight: runningOffset, monthOffsetMap };
+}
+
+export function findRowIndexAtOffset(layout: TimelineLayoutIndex, scrollOffsetPx: number): number {
+  const { rowOffsets, rows } = layout;
+  if (rows.length === 0) return -1;
+  if (scrollOffsetPx <= 0) return 0;
+  if (scrollOffsetPx >= layout.totalHeight) return rows.length - 1;
+
+  let low = 0;
+  let high = rows.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    const start = rowOffsets[mid]!;
+    const end = start + layout.rowHeights[mid]!;
+    if (scrollOffsetPx >= start && scrollOffsetPx < end) return mid;
+    if (scrollOffsetPx < start) high = mid - 1;
+    else low = mid + 1;
+  }
+  return Math.max(0, Math.min(low, rows.length - 1));
+}

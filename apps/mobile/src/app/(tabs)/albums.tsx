@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
-import { router } from "expo-router";
+import { useRouter } from "expo-router";
 import {
   Cloud,
   CloudOff,
@@ -45,6 +45,7 @@ const isWeb = Platform.OS === "web";
 type TabMode = "all" | "cloud" | "device";
 
 export default function AlbumsScreen() {
+  const router = useRouter();
   const qc = useQueryClient();
   const { width } = useWindowDimensions();
   const [modalVisible, setModalVisible] = useState(false);

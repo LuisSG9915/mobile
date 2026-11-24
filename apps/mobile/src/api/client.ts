@@ -108,6 +108,7 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
       code = body.code ?? body.error ?? code;
       message = body.message ?? message;
     } catch {}
+    console.warn("[api] request failed", { path, status: res.status, code, message });
     const err = new ApiError(res.status, code, message);
     if (res.status === 401) {
       emitAuthError(err);

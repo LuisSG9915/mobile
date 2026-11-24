@@ -102,3 +102,59 @@ export async function processAndSaveEditedPhoto(
     img.src = options.uri;
   });
 }
+
+import type { CommitPhotoEditInput, CommitPhotoEditResult } from "./image-editor";
+// ---------- Bloque 5: pipeline web ----------
+import {
+  buildCssFilterString,
+  type PhotoEditRecipe,
+  resolvePixelCropRect,
+} from "./image-editor-calc";
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("No se pudo cargar la imagen para editar"));
+    img.src = src;
+  });
+}
+
+export async function renderEditedPhotoWeb(
+  input: CommitPhotoEditInput,
+): Promise<CommitPhotoEditResult> {
+  const { sourceUri, sourceWidth, sourceHeight, recipe } = input;
+  const img = await loadImageElement(sourceUri);
+  const w = sourceWidth || img.naturalWidth || 1;
+  const h = sourceHeight || img.naturalHeight || 1;
+  const crop = resolvePixelCropRect(w, h, recipe.rotation, recipe.crop, recipe.straightenDeg);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = crop.width;
+  canvas.height = crop.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Contexto Canvas 2D no disponible");
+
+  ctx.filter = buildCssFilterString(recipe);
+  ctx.save();
+  ctx.translate(
+    -crop.originX + (recipe.rotation === 90 || recipe.rotation === 270 ? h : w) / 2,
+    -crop.originY + (recipe.rotation === 90 || recipe.rotation === 270 ? w : h) / 2,
+  );
+  const totalRad = ((recipe.rotation + recipe.straightenDeg) * Math.PI) / 180;
+  ctx.rotate(totalRad);
+  ctx.scale(recipe.flipHorizontal ? -1 : 1, recipe.flipVertical ? -1 : 1);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  ctx.restore();
+
+  const blob: Blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Error exportando WebP"))),
+      "image/webp",
+      input.quality ?? 0.92,
+    );
+  });
+  const objectUrl = URL.createObjectURL(blob);
+  return { uri: objectUrl, width: crop.width, height: crop.height };
+}
