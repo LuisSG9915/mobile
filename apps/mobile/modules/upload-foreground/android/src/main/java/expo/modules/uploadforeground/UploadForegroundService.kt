@@ -46,6 +46,20 @@ class UploadForegroundService : Service() {
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
+    // startForegroundService() obliga a llamar startForeground() en ~5 s. Si un stopService() llega
+    // antes de que onStartCommand lo haga (pase de respaldo que termina enseguida), Android lanza
+    // ForegroundServiceDidNotStartInTimeException y cierra la app. Se cumple ya aquí; onStartCommand
+    // reemplaza la notificación con el texto y progreso reales.
+    runCatching {
+      val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+      } else {
+        0
+      }
+      val placeholder = buildNotification("Sincronizando fotos", "Subiendo elementos a la nube…", -1, -1)
+      ServiceCompat.startForeground(this, NOTIFICATION_ID, placeholder, fgsType)
+      isStartedInForeground = true
+    }
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
