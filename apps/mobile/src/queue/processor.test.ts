@@ -44,13 +44,27 @@ vi.mock("expo-file-system", () => ({
     constructor(uri: string) {
       this.uri = uri;
     }
-    // Lo único que usa upload-part.ts: un Blob perezoso que se materializa a
-    // ArrayBuffer. Se devuelve un buffer diminuto: el test no mide memoria.
-    slice(_start?: number, _end?: number) {
-      return { arrayBuffer: async () => new ArrayBuffer(4) };
+    // upload-part.ts lee cada parte con un handle (offset + readBytes). Se devuelven bytes
+    // diminutos de relleno: el test no mide memoria ni contenido.
+    open() {
+      let offset = 0;
+      return {
+        get offset() {
+          return offset;
+        },
+        set offset(v: number | null) {
+          offset = v ?? 0;
+        },
+        readBytes(n: number) {
+          offset += n;
+          return new Uint8Array(n);
+        },
+        close() {},
+      };
     }
     delete() {}
   },
+  FileMode: { ReadOnly: "r" },
 }));
 
 vi.mock("expo-file-system/legacy", () => ({

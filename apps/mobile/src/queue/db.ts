@@ -148,6 +148,10 @@ const OWNER_KEY = "queue.owner";
  * práctica — asset_id era PK única antes del scoping), la conflictiva queda
  * NULL en vez de abortar la inicialización.
  */
+export function getActiveUserId(): string | null {
+  return activeUserId;
+}
+
 export async function initializeQueue(userId: string): Promise<void> {
   activeUserId = userId;
   const db = getQueueDb();

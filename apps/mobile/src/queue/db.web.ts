@@ -146,6 +146,11 @@ function openChannel(): void {
 /** Misma convención que db.ts: último usuario con sesión, en kv. */
 const OWNER_KEY = "queue.owner";
 
+/** La restauración solo existe en nativo: en web no hay enlace que reparar. */
+export function getActiveUserId(): string | null {
+  return null;
+}
+
 export function initializeQueue(userId: string): Promise<void> {
   if (store.getActiveContext()?.userId === userId) return Promise.resolve();
   if (initFor?.userId === userId) return initFor.promise;

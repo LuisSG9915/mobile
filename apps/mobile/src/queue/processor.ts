@@ -41,7 +41,7 @@ import {
   withDeadline,
 } from "./shared";
 import { makePreview, makeThumbAndHash, type ThumbResult } from "./thumb";
-import { PartUploadError, uploadPartBlob } from "./upload-part";
+import { PartUploadError, readFileRange, uploadPartBlob } from "./upload-part";
 
 let running = false;
 let cancelled = false;
@@ -470,7 +470,7 @@ async function processItem(item: QueueItem, allowLookahead = true): Promise<void
           try {
             const { etag } = await uploadPartBlob({
               url: part.url,
-              blob: new File(localUri).slice(start, end),
+              blob: readFileRange(localUri, start, end),
               signal: partController.signal,
               onProgress: (sent) => {
                 inflightLoaded.set(part.partNumber, sent);

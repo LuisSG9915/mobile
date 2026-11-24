@@ -1,6 +1,36 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { installFakeXhr } from "../test-support/fake-xhr";
-import { PartUploadError, uploadPartBlob } from "./upload-part";
+import { PartUploadError, readFileRange, uploadPartBlob } from "./upload-part";
+
+/** Archivo simulado de 20 bytes con valores 0..19; el handle respeta offset y reparte en trozos. */
+const fileMock = vi.hoisted(() => ({
+  data: Uint8Array.from({ length: 20 }, (_, i) => i),
+  closed: 0,
+}));
+vi.mock("expo-file-system", () => ({
+  FileMode: { ReadOnly: "r" },
+  File: class {
+    open() {
+      let offset = 0;
+      return {
+        get offset() {
+          return offset;
+        },
+        set offset(v: number | null) {
+          offset = v ?? 0;
+        },
+        readBytes(n: number) {
+          const out = fileMock.data.slice(offset, offset + Math.min(n, 4));
+          offset += out.byteLength;
+          return out;
+        },
+        close() {
+          fileMock.closed++;
+        },
+      };
+    }
+  },
+}));
 
 /** Blob mínimo: `uploadPartBlob` solo usa `arrayBuffer()`. */
 function makeBlob(bytes: number): Blob {
@@ -89,5 +119,17 @@ describe("uploadPartBlob (nativo)", () => {
     await expect(pending).rejects.toThrow(/cancelada/);
     expect(fake.requests).toHaveLength(1);
     expect(fake.requests[0].aborted).toBe(true);
+  });
+});
+
+describe("readFileRange", () => {
+  it("lee exactamente [start, end) aunque el handle devuelva trozos pequeños", () => {
+    const out = readFileRange("file:///x", 5, 15);
+    expect(Array.from(out)).toEqual([5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+  });
+  it("cierra el handle y falla si el archivo es más corto que el rango", () => {
+    fileMock.closed = 0;
+    expect(() => readFileRange("file:///x", 15, 30)).toThrow(/Lectura incompleta/);
+    expect(fileMock.closed).toBe(1);
   });
 });

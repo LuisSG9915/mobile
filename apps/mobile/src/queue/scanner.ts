@@ -4,10 +4,12 @@ import { useLibraryEvents } from "../lib/events";
 import { dateFromFilename } from "../lib/filename-date";
 import { useSettings } from "../lib/store";
 import { toWallClockUtc } from "../lib/wall-clock";
+import { repairRestoredLinks } from "../restore/link";
 import {
   clearQueue,
   type EnqueueInput,
   enqueueAssetsBatch,
+  getActiveUserId,
   getLastScannedCreationTime,
   getLastScanTs,
   pruneQueueExcept,
@@ -141,6 +143,10 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
     }
   }
 
+  // Los archivos restaurados desde la nube que acaban de entrar a la cola se enlazan con su remoto
+  // (si no, salen como "pendientes" con la fecha de hoy).
+  const scanUserId = getActiveUserId();
+  if (scanUserId) repairRestoredLinks(scanUserId);
   setLastScanTs(Date.now());
   // La biblioteca se re-listó: la galería híbrida refresca sus assets locales.
   useLibraryEvents.getState().emit();

@@ -1,3 +1,5 @@
+import { File, FileMode } from "expo-file-system";
+
 /**
  * PUT de UNA parte multipart en nativo, sin base64.
  *
@@ -12,7 +14,10 @@
  * de red.
  */
 
-// withDeadline no se usa: enviamos el Blob directamente a XHR.
+// withDeadline no se usa: los bytes van directamente a XHR.
+
+/** Trozo de lectura: acota el pico de memoria al copiar cada parte. */
+const READ_CHUNK_BYTES = 4 * 1024 * 1024;
 
 const CANCELLED_MSG = "Subida cancelada.";
 const STALLED_MSG = "La subida de la parte se estancó por falta de red.";
@@ -30,10 +35,31 @@ export class PartUploadError extends Error {
   }
 }
 
+/** Lee [start, end) del archivo como bytes. Sin Blob: en RN `File.slice()` crea un Blob desde ArrayBuffer y falla. */
+export function readFileRange(uri: string, start: number, end: number): Uint8Array {
+  const length = end - start;
+  const handle = new File(uri).open(FileMode.ReadOnly);
+  try {
+    handle.offset = start;
+    const out = new Uint8Array(length);
+    let pos = 0;
+    while (pos < length) {
+      const chunk = handle.readBytes(Math.min(length - pos, READ_CHUNK_BYTES));
+      if (!chunk.byteLength) break;
+      out.set(chunk, pos);
+      pos += chunk.byteLength;
+    }
+    if (pos !== length) throw new Error(`Lectura incompleta del archivo (${pos} de ${length} B).`);
+    return out;
+  } finally {
+    handle.close();
+  }
+}
+
 export type UploadPartInput = {
   url: string;
-  /** Rango del archivo original: `new File(uri).slice(start, end)`. */
-  blob: Blob;
+  /** Cuerpo de la parte: bytes del rango (nativo) o un Blob (web). */
+  blob: Blob | Uint8Array;
   headers?: Record<string, string>;
   onProgress?: (sent: number, total: number) => void;
   signal?: AbortSignal;
@@ -54,6 +80,7 @@ export async function uploadPartBlob({
   if (signal?.aborted) throw new Error(CANCELLED_MSG);
 
   return new Promise<{ etag: string }>((resolve, reject) => {
+    const bodySize = blob instanceof Uint8Array ? blob.byteLength : blob.size;
     const xhr = new XMLHttpRequest();
     let settled = false;
     let lastProgressAt = Date.now();
@@ -93,7 +120,7 @@ export async function uploadPartBlob({
 
     xhr.upload.onprogress = (event: ProgressEvent) => {
       lastProgressAt = Date.now();
-      onProgress?.(event.loaded, event.total || blob.size);
+      onProgress?.(event.loaded, event.total || bodySize);
     };
 
     xhr.onload = () => {

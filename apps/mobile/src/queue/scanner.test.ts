@@ -22,12 +22,15 @@ const mockPruneQueueExcept = vi.fn();
 const mockCancelQueue = vi.fn();
 
 vi.mock("./db", () => ({
+  getActiveUserId: () => null,
   getLastScanTs: () => mockLastScanTs,
   setLastScanTs: (ts: number) => mockSetLastScanTs(ts),
   enqueueAssetsBatch: (batch: unknown[]) => mockEnqueueAssetsBatch(batch),
   clearQueue: () => mockClearQueue(),
   pruneQueueExcept: (set: Set<string>) => mockPruneQueueExcept(set),
 }));
+
+vi.mock("../restore/link", () => ({ repairRestoredLinks: () => 0 }));
 
 vi.mock("./processor", () => ({
   cancelQueue: () => mockCancelQueue(),
