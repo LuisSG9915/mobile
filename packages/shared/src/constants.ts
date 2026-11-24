@@ -78,8 +78,11 @@ export const TIMELINE_MAX_LIMIT = 200;
 export const PRESIGN_BATCH_MAX_KEYS = 100;
 /** Días que un elemento permanece en la papelera */
 export const TRASH_RETENTION_DAYS = 30;
-/** Cuota de almacenamiento por usuario (10 GB) */
-export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
+/**
+ * Cuota de almacenamiento por usuario (20 GB). Se aplica en `user_storage_stats.max_bytes`:
+ * al cambiarla hay que actualizar también las filas existentes (el upsert no toca max_bytes).
+ */
+export const STORAGE_QUOTA_BYTES = 20 * 1024 * 1024 * 1024;
 
 /** Email del administrador del panel de almacenamiento R2 (configurable vía EXPO_PUBLIC_ADMIN_EMAIL). */
 export const ADMIN_EMAIL =

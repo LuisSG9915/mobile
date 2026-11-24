@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { STORAGE_QUOTA_BYTES } from "@photos/shared";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb } from "../src/db/client";
@@ -308,7 +309,7 @@ describe("user/storage", () => {
     const json = await j(res);
     expect(json.usedBytes).toBe(0);
     expect(json.mediaCount).toBe(0);
-    expect(json.maxBytes).toBe(10 * 1024 * 1024 * 1024);
+    expect(json.maxBytes).toBe(STORAGE_QUOTA_BYTES);
     expect(json.usedPercent).toBe(0);
   });
 
