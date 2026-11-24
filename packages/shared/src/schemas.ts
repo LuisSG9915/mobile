@@ -474,7 +474,7 @@ export const cleanerBurstsResponseSchema = z.object({
 
 export const cleanerCleanupSchema = z.object({
   keepId: z.string().optional(),
-  deleteIds: z.array(z.string()).min(1),
+  deleteIds: z.array(z.string()).min(1).max(500),
 });
 
 export const cleanerCleanupResponseSchema = z.object({
@@ -488,9 +488,9 @@ export type CleanerCleanupInput = z.infer<typeof cleanerCleanupSchema>;
 export type CleanerCleanupResponse = z.infer<typeof cleanerCleanupResponseSchema>;
 
 export const searchQuerySchema = z.object({
-  q: z.string().trim().optional(),
-  tag: z.string().trim().optional(),
-  city: z.string().trim().optional(),
+  q: z.string().trim().max(200).optional(),
+  tag: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(100).optional(),
   filter: searchFilterSchema.optional().default("all"),
   dateFrom: z
     .string()

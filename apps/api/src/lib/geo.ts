@@ -139,3 +139,77 @@ export async function geocodeMediaItem(
 
   return geo;
 }
+
+// ---------- Bloque 7: geohash ----------
+
+const BASE32_ALPHABET = "0123456789bcdefghjkmnpqrstuvwxyz";
+
+export interface GeoBounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
+export function isValidCoordinate(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(Math.abs(lat) < 0.00001 && Math.abs(lng) < 0.00001)
+  );
+}
+
+export function encodeGeohash(lat: number, lng: number, precision = 9): string | null {
+  if (!isValidCoordinate(lat, lng)) return null;
+  const safePrecision = Math.max(1, Math.min(12, Math.floor(precision)));
+  let minLat = -90.0,
+    maxLat = 90.0,
+    minLng = -180.0,
+    maxLng = 180.0;
+  let hash = "",
+    isEvenBit = true,
+    bit = 0,
+    ch = 0;
+  while (hash.length < safePrecision) {
+    if (isEvenBit) {
+      const mid = (minLng + maxLng) / 2;
+      if (lng >= mid) {
+        ch = (ch << 1) | 1;
+        minLng = mid;
+      } else {
+        ch = ch << 1;
+        maxLng = mid;
+      }
+    } else {
+      const mid = (minLat + maxLat) / 2;
+      if (lat >= mid) {
+        ch = (ch << 1) | 1;
+        minLat = mid;
+      } else {
+        ch = ch << 1;
+        maxLat = mid;
+      }
+    }
+    isEvenBit = !isEvenBit;
+    bit += 1;
+    if (bit === 5) {
+      hash += BASE32_ALPHABET[ch]!;
+      bit = 0;
+      ch = 0;
+    }
+  }
+  return hash;
+}
+
+export function zoomToGeohashPrecision(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 4) return 2;
+  if (zoom <= 7) return 3;
+  if (zoom <= 10) return 4;
+  if (zoom <= 13) return 5;
+  if (zoom <= 15) return 6;
+  return 7;
+}

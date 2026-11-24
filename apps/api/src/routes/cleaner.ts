@@ -141,10 +141,22 @@ export const cleanerApp = new OpenAPIHono<AppEnv>()
     const db = getDb(c.env.DB);
     const now = Date.now();
 
-    await db
-      .update(media)
-      .set({ deletedAt: now })
-      .where(and(eq(media.userId, user.id), inArray(media.id, toDelete), isNull(media.deletedAt)));
+    // D1 limita los parámetros por consulta: se trocea y se cuentan las filas reales.
+    let trashedCount = 0;
+    for (let i = 0; i < toDelete.length; i += 50) {
+      const rows = await db
+        .update(media)
+        .set({ deletedAt: now })
+        .where(
+          and(
+            eq(media.userId, user.id),
+            inArray(media.id, toDelete.slice(i, i + 50)),
+            isNull(media.deletedAt),
+          ),
+        )
+        .returning({ id: media.id });
+      trashedCount += rows.length;
+    }
 
-    return c.json({ ok: true as const, trashedCount: toDelete.length }, 200);
+    return c.json({ ok: true as const, trashedCount }, 200);
   });

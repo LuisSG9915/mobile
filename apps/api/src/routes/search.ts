@@ -141,11 +141,12 @@ export const searchApp = new OpenAPIHono<AppEnv>()
         .trim()
         .split(/\s+/)
         .map((t) => t.replace(/[^\p{L}\p{N}]/gu, ""))
-        .filter(Boolean);
+        .filter(Boolean)
+        .slice(0, 8);
       if (tokens.length > 0) {
         const ftsMatch = tokens.map((t) => `"${t}"*`).join(" AND ");
         baseConditions.push(
-          sql`${media.id} IN (SELECT media_id FROM media_fts WHERE media_fts MATCH ${ftsMatch} AND user_id = ${user.id})`,
+          sql`${media.id} IN (SELECT media_id FROM media_fts WHERE media_fts MATCH ${ftsMatch} AND user_id = ${user.id} ORDER BY bm25(media_fts))`,
         );
       }
     }
@@ -209,3 +210,19 @@ export const searchApp = new OpenAPIHono<AppEnv>()
 
     return c.json({ items, nextCursor, totalMatches }, 200);
   });
+
+export function buildFts5PrefixQuery(rawInput: string): string | null {
+  const normalized = rawInput
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
+    .trim();
+  if (!normalized) return null;
+  const tokens = normalized
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .slice(0, 8);
+  if (tokens.length === 0) return null;
+  return tokens.map((token) => `"${token.replace(/"/g, "")}"*`).join(" AND ");
+}
