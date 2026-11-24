@@ -259,9 +259,13 @@ export type EnqueueInput = {
   creationTime: number;
 };
 
-const INSERT_ASSET = `INSERT OR IGNORE INTO queue
+// Si el asset ya está encolado y aún sin subir, se actualiza su fecha: así un re-escaneo corrige
+// fechas calculadas con reglas anteriores (p. ej. mtime → hoy) sin tocar lo ya respaldado.
+const INSERT_ASSET = `INSERT INTO queue
    (user_id, asset_id, uri, filename, media_type, created_at, state, updated_at)
-   VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)`;
+   VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)
+   ON CONFLICT(user_id, asset_id) DO UPDATE SET created_at = excluded.created_at
+   WHERE queue.state IN ('queued', 'failed') AND queue.created_at != excluded.created_at`;
 
 export async function enqueueAsset(
   asset: EnqueueInput,
@@ -300,6 +304,69 @@ export async function enqueueAssetsBatch(assets: EnqueueInput[]): Promise<void> 
       ]);
     }
   });
+}
+
+/**
+ * Registra como ya respaldado ('duplicate') un archivo restaurado desde la nube: así el escáner
+ * no lo trata como foto nueva ni lo sube de nuevo, y la galería lo muestra con su fecha original
+ * (`createdAt` = takenAt del manifiesto) en vez de la fecha de modificación (hoy).
+ */
+export function registerRestoredAsset(a: {
+  assetId: string;
+  uri: string;
+  filename: string | null;
+  mediaType: "photo" | "video";
+  takenAt: number;
+  sha256: string;
+  remoteId: string;
+}): void {
+  getQueueDb().runSync(
+    `INSERT OR REPLACE INTO queue
+       (user_id, asset_id, uri, filename, media_type, created_at, state, sha256, remote_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'duplicate', ?, ?, ?)`,
+    [
+      activeUserId,
+      a.assetId,
+      a.uri,
+      a.filename,
+      a.mediaType,
+      a.takenAt,
+      a.sha256,
+      a.remoteId,
+      Date.now(),
+    ],
+  );
+}
+
+/**
+ * Repara archivos restaurados que el escáner ya había encolado como nuevos: los enlaza por nombre
+ * (`restore-<sha16>.*`) con su remoto. Devuelve cuántas filas cambió.
+ */
+export function linkRestoredByFilename(
+  items: { sha256: string; remoteId: string; takenAt: number; filenameLike: string }[],
+): number {
+  const db = getQueueDb();
+  let changed = 0;
+  db.withTransactionSync(() => {
+    for (const i of items) {
+      const r = db.runSync(
+        `UPDATE queue SET state = 'duplicate', sha256 = ?, remote_id = ?, created_at = ?, updated_at = ?
+         WHERE user_id IS ? AND filename LIKE ? AND (state != 'duplicate' OR remote_id IS NOT ? OR created_at != ?)`,
+        [
+          i.sha256,
+          i.remoteId,
+          i.takenAt,
+          Date.now(),
+          activeUserId,
+          i.filenameLike,
+          i.remoteId,
+          i.takenAt,
+        ],
+      );
+      changed += r.changes;
+    }
+  });
+  return changed;
 }
 
 export async function setState(

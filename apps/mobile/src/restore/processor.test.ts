@@ -82,7 +82,12 @@ describe("runRestore", () => {
     expect(store.counts().done).toBe(1);
     expect(save).toHaveBeenCalledTimes(1);
     expect(del).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][1]).toEqual({ mediaType: "photo", takenAt: 1 });
+    expect(save.mock.calls[0][1]).toEqual({
+      mediaType: "photo",
+      takenAt: 1,
+      sha256: "aaaaaaaaaaaaaaaa1",
+      remoteId: "aaaaaaaaaaaaaaaa1",
+    });
   });
 
   it("hash distinto: un reintento y luego corrupt, sin guardar", async () => {

@@ -3,10 +3,14 @@ import { Tabs } from "expo-router";
 import { CloudUpload, Folder, Images, Settings } from "lucide-react-native";
 import { useEffect } from "react";
 import { ActivityIndicator, AppState, Platform, Text, useColorScheme, View } from "react-native";
+import { useSession } from "../../auth/client";
 import { t } from "../../i18n/es";
+import { useQueueEvents } from "../../lib/events";
+import { kvGet, kvSet, setLastScanTs } from "../../queue/db";
 import { useSyncProgressAuto } from "../../queue/progress";
 import { useBackupRunner } from "../../queue/runner";
 import { useQueueSession } from "../../queue/session";
+import { repairRestoredLinks } from "../../restore/link";
 
 export default function TabsLayout() {
   const scheme = useColorScheme();
@@ -14,6 +18,20 @@ export default function TabsLayout() {
   // en nativo fija el dueño (user_id) de la cola SQLite.
   const { ready, error } = useQueueSession();
   useBackupRunner(ready);
+  const { data: session } = useSession();
+  const sessionUserId = session?.user?.id;
+  // Enlaza con su remoto los archivos restaurados que se encolaron como nuevos (fecha de hoy).
+  useEffect(() => {
+    if (!ready || !sessionUserId) return;
+    if (repairRestoredLinks(sessionUserId) > 0) useQueueEvents.getState().emit();
+    // Una sola vez: forzar un escaneo completo para recalcular las fechas de lo ya encolado
+    // (reglas de fecha nuevas: hora de pared y fecha del nombre de archivo).
+    const flag = `dates_v2:${sessionUserId}`;
+    if (kvGet(flag) !== "1") {
+      setLastScanTs(0);
+      kvSet(flag, "1");
+    }
+  }, [ready, sessionUserId]);
   // Proyección reactiva de la cola para el anillo del avatar y la barra de Respaldo.
   useSyncProgressAuto();
 

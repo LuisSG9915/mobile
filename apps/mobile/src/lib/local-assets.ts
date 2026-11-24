@@ -1,4 +1,5 @@
 import * as MediaLibrary from "expo-media-library/legacy";
+import { dateFromFilename } from "./filename-date";
 import type { LocalAsset } from "./gallery";
 import { toWallClockUtc } from "./wall-clock";
 
@@ -138,9 +139,10 @@ export async function listLocalAssets(
               ? a.modificationTime
               : 0;
         const creationTime =
-          rawTime > 0
+          (a.creationTime > 0 ? null : dateFromFilename(a.filename)) ??
+          (rawTime > 0
             ? toWallClockUtc(rawTime < 1e12 ? rawTime * 1000 : rawTime)
-            : stableTimestampFromId(a.id);
+            : stableTimestampFromId(a.id));
         const isVideo = a.mediaType === MediaLibrary.MediaType.video;
         out.push({
           id: a.id,
@@ -205,9 +207,10 @@ export async function getLocalAssetById(assetId: string): Promise<LocalAsset | n
           ? info.modificationTime
           : 0;
     const creationTime =
-      rawTime > 0
+      (info.creationTime > 0 ? null : dateFromFilename(info.filename)) ??
+      (rawTime > 0
         ? toWallClockUtc(rawTime < 1e12 ? rawTime * 1000 : rawTime)
-        : stableTimestampFromId(info.id);
+        : stableTimestampFromId(info.id));
     const isVideo = info.mediaType === MediaLibrary.MediaType.video;
     return {
       id: info.id,
@@ -253,9 +256,10 @@ export async function listLocalAssetsPage(
     const rawTime =
       a.creationTime > 0 ? a.creationTime : (a.modificationTime ?? 0) > 0 ? a.modificationTime : 0;
     const creationTime =
-      rawTime > 0
+      (a.creationTime > 0 ? null : dateFromFilename(a.filename)) ??
+      (rawTime > 0
         ? toWallClockUtc(rawTime < 1e12 ? rawTime * 1000 : rawTime)
-        : stableTimestampFromId(a.id);
+        : stableTimestampFromId(a.id));
     const isVideo = a.mediaType === MediaLibrary.MediaType.video;
     return {
       id: a.id,

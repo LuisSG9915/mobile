@@ -144,3 +144,15 @@ export function localKnownShas(queueDb: SQLite.SQLiteDatabase, userId: string): 
   );
   return new Set(rows.map((r) => r.sha256.toLowerCase()));
 }
+
+/** Ítems ya restaurados de este usuario (para enlazarlos con la cola de subida). */
+export function listRestoredItems(
+  userId: string,
+): { remoteId: string; sha256: string; ext: string; takenAt: number }[] {
+  return getDb()
+    .getAllSync<{ remote_id: string; sha256: string; ext: string; taken_at: number }>(
+      "SELECT remote_id, sha256, ext, taken_at FROM restore_queue WHERE user_id = ? AND state = 'done'",
+      [userId],
+    )
+    .map((r) => ({ remoteId: r.remote_id, sha256: r.sha256, ext: r.ext, takenAt: r.taken_at }));
+}

@@ -521,6 +521,23 @@ export function getFailed(limit = 50): QueueItem[] {
     .slice(0, limit);
 }
 
+/** La restauración solo existe en nativo; en web no hay nada que registrar. */
+export function registerRestoredAsset(_a: {
+  assetId: string;
+  uri: string;
+  filename: string | null;
+  mediaType: "photo" | "video";
+  takenAt: number;
+  sha256: string;
+  remoteId: string;
+}): void {}
+
+export function linkRestoredByFilename(
+  _items: { sha256: string; remoteId: string; takenAt: number; filenameLike: string }[],
+): number {
+  return 0;
+}
+
 export function hasQuotaFailure(): boolean {
   for (const r of queue.values()) {
     if (r.state === "failed" && r.last_error?.includes(QUOTA_ERROR_MARKER)) return true;

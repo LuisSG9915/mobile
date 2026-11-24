@@ -101,10 +101,15 @@ describe("mutadores async sobre SQLite", () => {
     expect(p).toBeInstanceOf(Promise);
     await p;
 
-    expect(sqliteDb.runSync).toHaveBeenCalledWith(
-      expect.stringContaining("INSERT OR IGNORE INTO queue"),
-      ["u1", "a", "content://a", "a.jpg", "photo", 100, expect.any(Number)],
-    );
+    expect(sqliteDb.runSync).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO queue"), [
+      "u1",
+      "a",
+      "content://a",
+      "a.jpg",
+      "photo",
+      100,
+      expect.any(Number),
+    ]);
   });
 
   it("el mismo asset_id puede encolarse para dos usuarios distintos", async () => {
@@ -115,7 +120,7 @@ describe("mutadores async sobre SQLite", () => {
     await db.enqueueAsset({ id: "a", uri: "u", mediaType: "photo", creationTime: 1 });
 
     const inserts = sqliteDb.runSync.mock.calls.filter((c) =>
-      String(c[0]).includes("INSERT OR IGNORE INTO queue"),
+      String(c[0]).includes("INSERT INTO queue"),
     );
     expect(inserts).toHaveLength(2);
     expect(inserts[0][1]?.[0]).toBe("u1");
@@ -133,7 +138,7 @@ describe("mutadores async sobre SQLite", () => {
 
     expect(sqliteDb.withTransactionSync).toHaveBeenCalledTimes(1);
     const inserts = sqliteDb.runSync.mock.calls.filter((c) =>
-      String(c[0]).includes("INSERT OR IGNORE INTO queue"),
+      String(c[0]).includes("INSERT INTO queue"),
     );
     expect(inserts).toHaveLength(2);
     expect(inserts[0][1]?.[0]).toBe("u1");

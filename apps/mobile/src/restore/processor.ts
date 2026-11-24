@@ -31,7 +31,10 @@ export interface RestoreDeps {
   download(url: string, localName: string): Promise<string>;
   sha256(uri: string): Promise<string>;
   /** Guarda en la galería; `item` aporta la fecha original de captura. */
-  saveToLibrary(uri: string, item: Pick<RestoreItem, "mediaType" | "takenAt">): Promise<void>;
+  saveToLibrary(
+    uri: string,
+    item: Pick<RestoreItem, "mediaType" | "takenAt" | "sha256" | "remoteId">,
+  ): Promise<void>;
   deleteFile(uri: string): Promise<void>;
   freeBytes(): Promise<number>;
   networkOk(): Promise<boolean>;
@@ -71,7 +74,12 @@ export async function runRestore(
         });
         continue;
       }
-      await deps.saveToLibrary(tmp, { mediaType: item.mediaType, takenAt: item.takenAt });
+      await deps.saveToLibrary(tmp, {
+        mediaType: item.mediaType,
+        takenAt: item.takenAt,
+        sha256: item.sha256,
+        remoteId: item.remoteId,
+      });
       store.update(item.remoteId, { state: "done", lastError: null });
     } catch (e) {
       const next = stateAfterError(item.attempts);

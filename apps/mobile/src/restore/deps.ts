@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library/legacy";
 import * as Network from "expo-network";
 import { api } from "../api/client";
+import { registerRestoredAsset } from "../queue/db";
 import { sha256File } from "../queue/hash";
 import { setAssetDateTaken } from "./native-date";
 import type { RestoreDeps } from "./processor";
@@ -27,6 +28,15 @@ export function createRestoreDeps(opts: { wifiOnly: () => boolean }): RestoreDep
       }
       const asset = await MediaLibrary.createAssetAsync(uri);
       await setAssetDateTaken(asset.id, item.mediaType, item.takenAt);
+      registerRestoredAsset({
+        assetId: asset.id,
+        uri: asset.uri,
+        filename: asset.filename ?? null,
+        mediaType: item.mediaType,
+        takenAt: item.takenAt,
+        sha256: item.sha256,
+        remoteId: item.remoteId,
+      });
     },
     deleteFile: (uri) => FileSystem.deleteAsync(uri, { idempotent: true }),
     freeBytes: () => FileSystem.getFreeDiskStorageAsync(),

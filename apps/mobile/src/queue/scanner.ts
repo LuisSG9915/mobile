@@ -1,6 +1,7 @@
 import { ALLOWED_EXTENSIONS } from "@photos/shared";
 import * as MediaLibrary from "expo-media-library/legacy";
 import { useLibraryEvents } from "../lib/events";
+import { dateFromFilename } from "../lib/filename-date";
 import { useSettings } from "../lib/store";
 import { toWallClockUtc } from "../lib/wall-clock";
 import {
@@ -105,8 +106,13 @@ export async function scanLibrary(opts: ScanOptions = {}): Promise<ScanResult> {
           for (let i = 0; i < a.id.length; i++) hash = (hash * 31 + a.id.charCodeAt(i)) >>> 0;
           stableFallback += hash % 86400000;
         }
+        // Sin DATE_TAKEN: primero la fecha del nombre (no cambia al copiar), luego la de modificación.
+        const fromName = a.creationTime > 0 ? null : dateFromFilename(a.filename);
         const creationTime =
-          rawTime > 0 ? toWallClockUtc(rawTime < 1e12 ? rawTime * 1000 : rawTime) : stableFallback;
+          fromName ??
+          (rawTime > 0
+            ? toWallClockUtc(rawTime < 1e12 ? rawTime * 1000 : rawTime)
+            : stableFallback);
         batch.push({
           id: a.id,
           uri: a.uri,
